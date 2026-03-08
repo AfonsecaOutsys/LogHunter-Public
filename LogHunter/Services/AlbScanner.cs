@@ -95,6 +95,66 @@ public static class AlbScanner
         return ExtractUriNoQueryFromRequest(req);
     }
 
+    public static bool TryExtractAlbClientIpAndUriNoQuery(string line, out string? ip, out string? uri)
+    {
+        ip = null;
+        uri = null;
+
+        ReadOnlySpan<char> span = line.AsSpan();
+        int idx = 0;
+        int current = 0;
+
+        while (idx < span.Length)
+        {
+            while (idx < span.Length && span[idx] == ' ')
+                idx++;
+
+            if (idx >= span.Length)
+                break;
+
+            bool quoted = span[idx] == '"';
+            int start = idx;
+
+            if (quoted)
+            {
+                start++;
+                idx = start;
+
+                while (idx < span.Length && span[idx] != '"')
+                    idx++;
+
+                int end = idx;
+                idx = Math.Min(idx + 1, span.Length);
+
+                if (current == 12)
+                    uri = ExtractUriNoQueryFromRequest(span.Slice(start, end - start));
+
+                current++;
+            }
+            else
+            {
+                while (idx < span.Length && span[idx] != ' ')
+                    idx++;
+
+                int end = idx;
+
+                if (current == 3)
+                {
+                    var client = span.Slice(start, end - start);
+                    int colon = client.IndexOf(':');
+                    ip = (colon <= 0 ? client : client[..colon]).ToString();
+                }
+
+                current++;
+            }
+
+            if (ip is not null && uri is not null)
+                break;
+        }
+
+        return !string.IsNullOrEmpty(ip) && !string.IsNullOrEmpty(uri);
+    }
+
     // request example:
     // POST https://host:443/Enrollment/CheckStatus.aspx HTTP/1.1
     private static string ExtractUriNoQueryFromRequest(ReadOnlySpan<char> request)
@@ -338,11 +398,8 @@ public static class AlbScanner
             if (line is null) break;
             if (line.Length == 0) continue;
 
-            var ip = ExtractAlbClientIp(line);
-            if (ip is null) continue;
-
-            var uri = ExtractAlbUriNoQuery(line);
-            if (string.IsNullOrEmpty(uri)) continue;
+            if (!TryExtractAlbClientIpAndUriNoQuery(line, out var ip, out var uri))
+                continue;
 
             // Key format: "IP\tURI" (avoids heavier composite keys)
             var key = $"{ip}\t{uri}";
@@ -388,12 +445,7 @@ public static class AlbScanner
             if (line.IndexOf(endpointFragment, StringComparison.OrdinalIgnoreCase) < 0)
                 continue;
 
-            var ip = ExtractAlbClientIp(line);
-            if (string.IsNullOrEmpty(ip) || !selectedIps.Contains(ip))
-                continue;
-
-            var uri = ExtractAlbUriNoQuery(line);
-            if (string.IsNullOrEmpty(uri))
+            if (!TryExtractAlbClientIpAndUriNoQuery(line, out var ip, out var uri) || !selectedIps.Contains(ip))
                 continue;
 
             if (!uriCountsByIp.TryGetValue(ip, out var uriCounts))
