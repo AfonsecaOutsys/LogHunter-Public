@@ -304,6 +304,7 @@ public sealed class AbuseIpMenu : IMenu
                 filePath: picked.FullPath,
                 out var ipColumnName,
                 out var counts,
+                out var orderedChoices,
                 out var error))
         {
             AnsiConsole.MarkupLine($"[red]Failed[/]: {Markup.Escape(error)}");
@@ -317,12 +318,11 @@ public sealed class AbuseIpMenu : IMenu
 
         RenderTopIpTable(counts, top: 50);
 
-        var topChoices = counts
-            .OrderByDescending(kvp => kvp.Value)
-            .ThenBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+        var topChoices = orderedChoices
             .Take(400)
-            .Select(kvp => new IpChoice(kvp.Key, kvp.Value))
             .ToList();
+
+        topChoices.Insert(0, new IpChoice(SelectAllSentinel, counts.Values.Sum()));
 
         var selectedIps = AnsiConsole.Prompt(
             new MultiSelectionPrompt<IpChoice>()
@@ -332,7 +332,9 @@ public sealed class AbuseIpMenu : IMenu
                 .NotRequired()
                 .InstructionsText("[grey](Space: toggle, Enter: run. List is capped to top 400 by hits.)[/]")
                 .AddChoices(topChoices)
-                .UseConverter(x => $"{x.Ip} [grey]({x.Hits})[/]"));
+                .UseConverter(x => x.Ip == SelectAllSentinel
+                    ? $"[bold]Select all[/] [grey]({counts.Count} IPs)[/]"
+                    : $"{x.Ip} [grey]({x.Hits})[/]"));
 
         if (selectedIps.Count == 0)
         {
@@ -341,7 +343,11 @@ public sealed class AbuseIpMenu : IMenu
             return;
         }
 
-        var ipsToCheck = selectedIps.Select(x => x.Ip).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        List<string> ipsToCheck;
+        if (selectedIps.Any(x => x.Ip == SelectAllSentinel))
+            ipsToCheck = topChoices.Where(x => x.Ip != SelectAllSentinel).Select(x => x.Ip).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        else
+            ipsToCheck = selectedIps.Select(x => x.Ip).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         await CheckIpsAsync(ipsToCheck, sourceLabel: $"File: {Path.GetFileName(picked.FullPath)}", ct).ConfigureAwait(false);
     }
 
@@ -613,24 +619,27 @@ public sealed class AbuseIpMenu : IMenu
         string filePath,
         out string ipColumnName,
         out Dictionary<string, int> counts,
+        out List<IpChoice> orderedChoices,
         out string error)
     {
         var ext = Path.GetExtension(filePath);
 
         if (ext.Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
-            return TryExtractIpCountsFromXlsxFirstTable(filePath, out ipColumnName, out counts, out error);
+            return TryExtractIpCountsFromXlsxFirstTable(filePath, out ipColumnName, out counts, out orderedChoices, out error);
 
-        return TryExtractIpCountsFromCsv(filePath, out ipColumnName, out counts, out error);
+        return TryExtractIpCountsFromCsv(filePath, out ipColumnName, out counts, out orderedChoices, out error);
     }
 
     private static bool TryExtractIpCountsFromCsv(
         string csvPath,
         out string ipColumnName,
         out Dictionary<string, int> counts,
+        out List<IpChoice> orderedChoices,
         out string error)
     {
         ipColumnName = "";
         counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        orderedChoices = new List<IpChoice>();
         error = "";
 
         try
@@ -682,6 +691,12 @@ public sealed class AbuseIpMenu : IMenu
                 return false;
             }
 
+            orderedChoices = counts
+                .OrderByDescending(kvp => kvp.Value)
+                .ThenBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(kvp => new IpChoice(kvp.Key, kvp.Value))
+                .ToList();
+
             return true;
         }
         catch (Exception ex)
@@ -695,10 +710,12 @@ public sealed class AbuseIpMenu : IMenu
         string xlsxPath,
         out string ipColumnName,
         out Dictionary<string, int> counts,
+        out List<IpChoice> orderedChoices,
         out string error)
     {
         ipColumnName = "";
         counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        orderedChoices = new List<IpChoice>();
         error = "";
 
         try
@@ -747,6 +764,7 @@ public sealed class AbuseIpMenu : IMenu
 
             int headerRow = -1;
             int ipCol = -1;
+            int hitsCol = -1;
 
             for (int r = summaryRow + 1; r <= Math.Min(lastRow, summaryRow + 5); r++)
             {
@@ -760,6 +778,9 @@ public sealed class AbuseIpMenu : IMenu
                     headerRow = r;
                     ipCol = firstCol + idx;
                     ipColumnName = headers[idx];
+                    var hitsIdx = headers.FindIndex(h => h.Trim().Equals("Hits", StringComparison.OrdinalIgnoreCase));
+                    if (hitsIdx >= 0)
+                        hitsCol = firstCol + hitsIdx;
                     break;
                 }
             }
@@ -793,8 +814,16 @@ public sealed class AbuseIpMenu : IMenu
                 if (ip is null)
                     continue;
 
-                counts.TryGetValue(ip, out var cur);
-                counts[ip] = cur + 1;
+                var hits = 1;
+                if (hitsCol > 0)
+                {
+                    var hitsText = ws.Cell(r, hitsCol).GetString();
+                    if (int.TryParse(hitsText.Replace(",", ""), out var parsedHits) && parsedHits > 0)
+                        hits = parsedHits;
+                }
+
+                counts[ip] = hits;
+                orderedChoices.Add(new IpChoice(ip, hits));
             }
 
             if (counts.Count == 0)
