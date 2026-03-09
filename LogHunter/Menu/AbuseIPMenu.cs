@@ -703,7 +703,12 @@ public sealed class AbuseIpMenu : IMenu
 
         try
         {
-            using var wb = new XLWorkbook(xlsxPath);
+            using var fs = new FileStream(
+                xlsxPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var wb = new XLWorkbook(fs);
             var ws = wb.Worksheets.FirstOrDefault();
             if (ws is null)
             {
@@ -723,10 +728,27 @@ public sealed class AbuseIpMenu : IMenu
             var firstCol = usedRange.RangeAddress.FirstAddress.ColumnNumber;
             var lastCol = usedRange.RangeAddress.LastAddress.ColumnNumber;
 
+            int summaryRow = -1;
+            for (int r = firstRow; r <= Math.Min(lastRow, firstRow + 80); r++)
+            {
+                var marker = ws.Cell(r, firstCol).GetString().Trim();
+                if (marker.Equals("Top IP Summary", StringComparison.OrdinalIgnoreCase))
+                {
+                    summaryRow = r;
+                    break;
+                }
+            }
+
+            if (summaryRow < 0)
+            {
+                error = "Could not find 'Top IP Summary' section in the first sheet.";
+                return false;
+            }
+
             int headerRow = -1;
             int ipCol = -1;
 
-            for (int r = firstRow; r <= Math.Min(lastRow, firstRow + 30); r++)
+            for (int r = summaryRow + 1; r <= Math.Min(lastRow, summaryRow + 5); r++)
             {
                 var headers = new List<string>();
                 for (int c = firstCol; c <= lastCol; c++)
@@ -744,13 +766,13 @@ public sealed class AbuseIpMenu : IMenu
 
             if (headerRow < 0 || ipCol < 0)
             {
-                error = "Could not detect an IP column in the first sheet/table.";
+                error = "Could not detect an IP column under 'Top IP Summary'.";
                 return false;
             }
 
             for (int r = headerRow + 1; r <= lastRow; r++)
             {
-                // Stop when we leave the first table region (blank full row or section heading in col A).
+                // Stop when we leave the summary table region.
                 bool allBlank = true;
                 for (int c = firstCol; c <= Math.Min(firstCol + 2, lastCol); c++)
                 {
