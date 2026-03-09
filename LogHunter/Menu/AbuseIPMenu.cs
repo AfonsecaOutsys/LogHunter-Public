@@ -1,4 +1,5 @@
-﻿using LogHunter.Services;
+﻿using ClosedXML.Excel;
+using LogHunter.Services;
 using LogHunter.Utils;
 using Spectre.Console;
 using System;
@@ -38,8 +39,8 @@ public sealed class AbuseIpMenu : IMenu
         var items = new[]
         {
             new ConsoleEx.MenuItem(
-                "Check IPs from output CSV",
-                "Pick a CSV from /output, detect an IP column, select IPs and run checks.\n" +
+                "Check IPs from output file (CSV/XLSX)",
+                "Pick a CSV or XLSX from /output, detect an IP column, select IPs and run checks.\n" +
                 $"API key: {keySource}\n" +
                 $"maxAgeInDays: {cfg.MaxAgeInDays}"),
 
@@ -73,7 +74,7 @@ public sealed class AbuseIpMenu : IMenu
         switch (selected.Value)
         {
             case 0:
-                await CheckFromOutputCsvAsync(ct).ConfigureAwait(false);
+                await CheckFromOutputFileAsync(ct).ConfigureAwait(false);
                 return this;
 
             case 1:
@@ -258,9 +259,9 @@ public sealed class AbuseIpMenu : IMenu
         await CheckIpsAsync(ipsToCheck, sourceLabel: "Platform suspicious cache", ct).ConfigureAwait(false);
     }
 
-    private async Task CheckFromOutputCsvAsync(CancellationToken ct)
+    private async Task CheckFromOutputFileAsync(CancellationToken ct)
     {
-        ConsoleEx.Header("AbuseIPDB: select CSV", $"Workspace: {_session.Root}");
+        ConsoleEx.Header("AbuseIPDB: select file", $"Workspace: {_session.Root}");
 
         var outDir = AppFolders.Output;
         if (!Directory.Exists(outDir))
@@ -270,7 +271,8 @@ public sealed class AbuseIpMenu : IMenu
             return;
         }
 
-        var files = Directory.EnumerateFiles(outDir, "*.csv", SearchOption.TopDirectoryOnly)
+        var files = Directory.EnumerateFiles(outDir, "*", SearchOption.TopDirectoryOnly)
+            .Where(p => p.EndsWith(".csv", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
             .Select(p => new FileInfo(p))
             .OrderByDescending(f => SafeCreationUtc(f))
             .ThenByDescending(f => f.LastWriteTimeUtc)
@@ -278,7 +280,7 @@ public sealed class AbuseIpMenu : IMenu
 
         if (files.Count == 0)
         {
-            AnsiConsole.MarkupLine("[grey](no .csv files found in /output)[/]");
+            AnsiConsole.MarkupLine("[grey](no .csv/.xlsx files found in /output)[/]");
             ConsoleEx.Pause("Press Enter to return...");
             return;
         }
@@ -290,7 +292,7 @@ public sealed class AbuseIpMenu : IMenu
 
         var picked = AnsiConsole.Prompt(
             new SelectionPrompt<FileChoice>()
-                .Title("Pick a CSV from /output (newest first):")
+                .Title("Pick a file from /output (CSV/XLSX, newest first):")
                 .PageSize(15)
                 .WrapAround()
                 .AddChoices(choices)
@@ -298,8 +300,8 @@ public sealed class AbuseIpMenu : IMenu
 
         ConsoleEx.Header("AbuseIPDB: extract IPs", Path.GetFileName(picked.FullPath));
 
-        if (!TryExtractIpCounts(
-                csvPath: picked.FullPath,
+        if (!TryExtractIpCountsFromFile(
+                filePath: picked.FullPath,
                 out var ipColumnName,
                 out var counts,
                 out var error))
@@ -340,7 +342,7 @@ public sealed class AbuseIpMenu : IMenu
         }
 
         var ipsToCheck = selectedIps.Select(x => x.Ip).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        await CheckIpsAsync(ipsToCheck, sourceLabel: $"CSV: {Path.GetFileName(picked.FullPath)}", ct).ConfigureAwait(false);
+        await CheckIpsAsync(ipsToCheck, sourceLabel: $"File: {Path.GetFileName(picked.FullPath)}", ct).ConfigureAwait(false);
     }
 
     private async Task CheckIpsAsync(List<string> ipsToCheck, string sourceLabel, CancellationToken ct)
@@ -607,7 +609,21 @@ public sealed class AbuseIpMenu : IMenu
 
     // ---- CSV/IP extraction ----
 
-    private static bool TryExtractIpCounts(
+    private static bool TryExtractIpCountsFromFile(
+        string filePath,
+        out string ipColumnName,
+        out Dictionary<string, int> counts,
+        out string error)
+    {
+        var ext = Path.GetExtension(filePath);
+
+        if (ext.Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
+            return TryExtractIpCountsFromXlsxFirstTable(filePath, out ipColumnName, out counts, out error);
+
+        return TryExtractIpCountsFromCsv(filePath, out ipColumnName, out counts, out error);
+    }
+
+    private static bool TryExtractIpCountsFromCsv(
         string csvPath,
         out string ipColumnName,
         out Dictionary<string, int> counts,
@@ -663,6 +679,105 @@ public sealed class AbuseIpMenu : IMenu
             if (counts.Count == 0)
             {
                 error = $"Detected IP column '{ipColumnName}', but no valid IPs were found in that column.";
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static bool TryExtractIpCountsFromXlsxFirstTable(
+        string xlsxPath,
+        out string ipColumnName,
+        out Dictionary<string, int> counts,
+        out string error)
+    {
+        ipColumnName = "";
+        counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        error = "";
+
+        try
+        {
+            using var wb = new XLWorkbook(xlsxPath);
+            var ws = wb.Worksheets.FirstOrDefault();
+            if (ws is null)
+            {
+                error = "XLSX has no worksheets.";
+                return false;
+            }
+
+            var usedRange = ws.RangeUsed();
+            if (usedRange is null)
+            {
+                error = "XLSX worksheet is empty.";
+                return false;
+            }
+
+            var firstRow = usedRange.RangeAddress.FirstAddress.RowNumber;
+            var lastRow = usedRange.RangeAddress.LastAddress.RowNumber;
+            var firstCol = usedRange.RangeAddress.FirstAddress.ColumnNumber;
+            var lastCol = usedRange.RangeAddress.LastAddress.ColumnNumber;
+
+            int headerRow = -1;
+            int ipCol = -1;
+
+            for (int r = firstRow; r <= Math.Min(lastRow, firstRow + 30); r++)
+            {
+                var headers = new List<string>();
+                for (int c = firstCol; c <= lastCol; c++)
+                    headers.Add(ws.Cell(r, c).GetString());
+
+                var idx = FindIpColumnIndex(headers);
+                if (idx >= 0)
+                {
+                    headerRow = r;
+                    ipCol = firstCol + idx;
+                    ipColumnName = headers[idx];
+                    break;
+                }
+            }
+
+            if (headerRow < 0 || ipCol < 0)
+            {
+                error = "Could not detect an IP column in the first sheet/table.";
+                return false;
+            }
+
+            for (int r = headerRow + 1; r <= lastRow; r++)
+            {
+                // Stop when we leave the first table region (blank full row or section heading in col A).
+                bool allBlank = true;
+                for (int c = firstCol; c <= Math.Min(firstCol + 2, lastCol); c++)
+                {
+                    if (!string.IsNullOrWhiteSpace(ws.Cell(r, c).GetString()))
+                    {
+                        allBlank = false;
+                        break;
+                    }
+                }
+                if (allBlank)
+                    break;
+
+                var sectionMarker = ws.Cell(r, firstCol).GetString();
+                if (!string.IsNullOrWhiteSpace(sectionMarker) && sectionMarker.StartsWith("IP #", StringComparison.OrdinalIgnoreCase))
+                    break;
+
+                var ip = NormalizeIp(ws.Cell(r, ipCol).GetString());
+                if (ip is null)
+                    continue;
+
+                counts.TryGetValue(ip, out var cur);
+                counts[ip] = cur + 1;
+            }
+
+            if (counts.Count == 0)
+            {
+                error = $"Detected IP column '{ipColumnName}', but no valid IPs were found in the first table.";
                 return false;
             }
 
