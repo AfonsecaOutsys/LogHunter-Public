@@ -36,8 +36,8 @@ public sealed class AlbMenu : IMenu
                 "Find the slowest request paths (query removed), ordered by average duration."),
 
             new ConsoleEx.MenuItem(
-                "Requests per IP per 5 minutes (chart)",
-                "Build 5-minute request time series per IP and generate chart/CSV outputs."),
+                "Requests per IP per 5 minutes (chart from CSV/XLSX IP selection)",
+                "Pick an exported CSV/XLSX from /output, select IPs, then generate the existing 5-minute chart/CSV from ALB logs."),
 
             new ConsoleEx.MenuItem(
                 "WAF blocked summary + top blocked requests",

@@ -12,6 +12,7 @@ public sealed class SessionState
 
     // IIS burst tracking (shared across IIS options during a run)
     public HashSet<string> IisBurstIps { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, int>? IisBurstIpHits { get; private set; }
     public DateTime? IisBurstIpsUpdatedUtc { get; private set; }
 
     // Platform scanners (cached results during a run)
@@ -26,6 +27,9 @@ public sealed class SessionState
     }
 
     public void ReplaceIisBurstIps(IEnumerable<string> ips)
+        => ReplaceIisBurstIps(ips, null);
+
+    public void ReplaceIisBurstIps(IEnumerable<string> ips, Dictionary<string, int>? ipHits)
     {
         IisBurstIps.Clear();
 
@@ -36,6 +40,10 @@ public sealed class SessionState
 
             IisBurstIps.Add(ip.Trim());
         }
+
+        IisBurstIpHits = ipHits is null
+            ? null
+            : new Dictionary<string, int>(ipHits, StringComparer.OrdinalIgnoreCase);
 
         IisBurstIpsUpdatedUtc = DateTime.UtcNow;
     }

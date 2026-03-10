@@ -403,10 +403,16 @@ public static class IisOption_FindBurstPatterns
         if (ConsoleEx.ReadYesNo("Save burst IPs (distinct) to session? This replaces the previous burst-IP list.", defaultYes: true))
         {
             var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var ipHits = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var b in burstCandidates)
+            {
                 set.Add(b.Agg.Ip);
+                ipHits[b.Agg.Ip] = ipHits.TryGetValue(b.Agg.Ip, out var existing)
+                    ? existing + b.Agg.TotalDynamic
+                    : b.Agg.TotalDynamic;
+            }
 
-            session.ReplaceIisBurstIps(set);
+            session.ReplaceIisBurstIps(set, ipHits);
 
             AnsiConsole.MarkupLine($"[green]Saved[/] {set.Count} IP(s) to session (updated {session.IisBurstIpsUpdatedUtc:yyyy-MM-dd HH:mm:ss}Z).");
             AnsiConsole.WriteLine();

@@ -2,6 +2,7 @@
 using LogHunter.Services;
 using LogHunter.Utils;
 using Spectre.Console;
+using Spectre.Console.Rendering;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -39,8 +40,8 @@ public sealed class AbuseIpMenu : IMenu
         var items = new[]
         {
             new ConsoleEx.MenuItem(
-                "Check IPs from output file (CSV/XLSX)",
-                "Pick a CSV or XLSX from /output, detect an IP column, select IPs and run checks.\n" +
+                "Check IPs from ALB output file (CSV/XLSX)",
+                "Mainly for ALB CSV/XLSX exports in /output: detect an IP column, select IPs and run checks.\n" +
                 $"API key: {keySource}\n" +
                 $"maxAgeInDays: {cfg.MaxAgeInDays}"),
 
@@ -140,6 +141,7 @@ public sealed class AbuseIpMenu : IMenu
         ConsoleEx.Header("AbuseIPDB: IIS burst session", $"Workspace: {_session.Root}");
 
         var set = _session.IisBurstIps;
+        var ipHits = _session.IisBurstIpHits;
         var updated = _session.IisBurstIpsUpdatedUtc;
 
         if (set is null || set.Count == 0)
@@ -154,22 +156,25 @@ public sealed class AbuseIpMenu : IMenu
         AnsiConsole.MarkupLine($"[dim]Last updated:[/] {(updated is null ? "unknown" : updated.Value.ToString("yyyy-MM-dd HH:mm:ss") + "Z")}");
         AnsiConsole.WriteLine();
 
-        // Keep selection list manageable (UI), but allow Select ALL to check the full set.
-        var choices = set
-            .OrderBy(ip => ip, StringComparer.OrdinalIgnoreCase)
-            .Take(800)
-            .Select(ip => new IpChoice(ip, 0))
+        var choices = (ipHits is { Count: > 0 }
+                ? ipHits
+                    .OrderByDescending(kvp => kvp.Value)
+                    .ThenBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(kvp => new IpChoice(kvp.Key, kvp.Value))
+                : set
+                    .OrderBy(ip => ip, StringComparer.OrdinalIgnoreCase)
+                    .Select(ip => new IpChoice(ip, 0)))
+            .Take(20)
             .ToList();
 
-        var selectedIps = AnsiConsole.Prompt(
-            new MultiSelectionPrompt<IpChoice>()
-                .Title("Select IPs to check:")
-                .PageSize(18)
-                .WrapAround()
-                .NotRequired()
-                .InstructionsText("[grey](Space: toggle, Enter: run. List is capped to first 800; Select ALL checks the full set.)[/]")
-                .AddChoices(new[] { new IpChoice(SelectAllSentinel, -1) }.Concat(choices))
-                .UseConverter(x => x.Ip == SelectAllSentinel ? "[bold][[Select ALL]][/]" : x.Ip));
+        var selectedIps = SelectIpsWithEsc(
+            title: "Select IPs to check (IIS burst session)",
+            allCount: set.Count,
+            choices: choices,
+            includeHits: choices.Any(x => x.Hits > 0));
+
+        if (selectedIps is null)
+            return;
 
         if (selectedIps.Count == 0)
         {
@@ -363,6 +368,22 @@ public sealed class AbuseIpMenu : IMenu
         var results = new List<AbuseIpCheckResult>(ipsToCheck.Count);
         var failures = new List<(string Ip, string Error)>();
 
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var runtimeToken = linkedCts.Token;
+
+        _ = Task.Run(() =>
+        {
+            while (!runtimeToken.IsCancellationRequested)
+            {
+                var maybe = AnsiConsole.Console.Input.ReadKey(intercept: true);
+                if (maybe is not null && maybe.Value.Key == ConsoleKey.Escape)
+                {
+                    linkedCts.Cancel();
+                    return;
+                }
+            }
+        }, runtimeToken);
+
         await AnsiConsole.Progress()
             .AutoClear(true)
             .StartAsync(async ctx =>
@@ -371,14 +392,15 @@ public sealed class AbuseIpMenu : IMenu
 
                 foreach (var ip in ipsToCheck)
                 {
-                    ct.ThrowIfCancellationRequested();
+                    if (runtimeToken.IsCancellationRequested)
+                        break;
 
                     var done = false;
                     while (!done)
                     {
                         try
                         {
-                            var r = await client.CheckAsync(ip, cfg.MaxAgeInDays, cfg.Verbose, ct).ConfigureAwait(false);
+                            var r = await client.CheckAsync(ip, cfg.MaxAgeInDays, cfg.Verbose, runtimeToken).ConfigureAwait(false);
                             results.Add(r);
                             done = true;
                         }
@@ -473,6 +495,9 @@ public sealed class AbuseIpMenu : IMenu
         client.Dispose();
 
         ConsoleEx.Header("AbuseIPDB: results", $"Source: {sourceLabel} | Checked: {results.Count} | Failed: {failures.Count}");
+
+        if (runtimeToken.IsCancellationRequested)
+            ConsoleEx.Warn("Run cancelled (Esc pressed). Showing partial results.");
 
         RenderResultsTable(results);
 
@@ -885,4 +910,96 @@ public sealed class AbuseIpMenu : IMenu
 
     private sealed record FileChoice(string FullPath, string Display);
     private sealed record IpChoice(string Ip, int Hits);
+
+    private static List<IpChoice>? SelectIpsWithEsc(string title, int allCount, List<IpChoice> choices, bool includeHits)
+    {
+        var allChoices = new List<IpChoice> { new(SelectAllSentinel, -1) };
+        allChoices.AddRange(choices);
+
+        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var selectedIndex = 0;
+        List<IpChoice>? result = null;
+
+        AnsiConsole.Live(BuildIpPicker(title, allChoices, selected, selectedIndex, allCount, includeHits))
+            .AutoClear(true)
+            .Start(ctx =>
+            {
+                while (true)
+                {
+                    var maybe = AnsiConsole.Console.Input.ReadKey(intercept: true);
+                    if (maybe is null)
+                        continue;
+
+                    var key = maybe.Value;
+                    if (key.Key == ConsoleKey.Escape)
+                    {
+                        result = null;
+                        break;
+                    }
+
+                    if (key.Key == ConsoleKey.UpArrow)
+                    {
+                        selectedIndex = (selectedIndex - 1 + allChoices.Count) % allChoices.Count;
+                    }
+                    else if (key.Key == ConsoleKey.DownArrow)
+                    {
+                        selectedIndex = (selectedIndex + 1) % allChoices.Count;
+                    }
+                    else if (key.Key == ConsoleKey.Spacebar)
+                    {
+                        var current = allChoices[selectedIndex];
+                        if (current.Ip == SelectAllSentinel)
+                        {
+                            if (selected.Contains(SelectAllSentinel))
+                            {
+                                selected.Clear();
+                            }
+                            else
+                            {
+                                selected.Clear();
+                                selected.Add(SelectAllSentinel);
+                            }
+                        }
+                        else
+                        {
+                            selected.Remove(SelectAllSentinel);
+                            if (!selected.Add(current.Ip))
+                                selected.Remove(current.Ip);
+                        }
+                    }
+                    else if (key.Key == ConsoleKey.Enter)
+                    {
+                        result = allChoices.Where(x => selected.Contains(x.Ip)).ToList();
+                        break;
+                    }
+
+                    ctx.UpdateTarget(BuildIpPicker(title, allChoices, selected, selectedIndex, allCount, includeHits));
+                    ctx.Refresh();
+                }
+            });
+
+        return result;
+    }
+
+    private static IRenderable BuildIpPicker(string title, List<IpChoice> allChoices, HashSet<string> selected, int selectedIndex, int allCount, bool includeHits)
+    {
+        var table = new Table().NoBorder();
+        table.AddColumn("");
+
+        for (var i = 0; i < allChoices.Count; i++)
+        {
+            var c = allChoices[i];
+            var cursor = i == selectedIndex ? "[green]>[/]" : " ";
+            var mark = selected.Contains(c.Ip) ? "[x]" : "[ ]";
+            var label = c.Ip == SelectAllSentinel
+                ? $"[bold]Select ALL[/] [grey]({allCount} IPs)[/]"
+                : includeHits ? $"{c.Ip} [grey]({c.Hits})[/]" : c.Ip;
+            table.AddRow($"{cursor} {mark} {label}");
+        }
+
+        return new Rows(
+            new Markup($"[bold]{Markup.Escape(title)}[/]"),
+            new Markup("[grey](Up/Down: move, Space: toggle, Enter: run, Esc: back)[/]"),
+            table);
+    }
 }

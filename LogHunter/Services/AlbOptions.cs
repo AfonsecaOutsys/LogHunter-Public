@@ -9,6 +9,7 @@ using ClosedXML.Excel;
 using LogHunter.Models;
 using LogHunter.Utils;
 using Spectre.Console;
+using Spectre.Console.Rendering;
 
 namespace LogHunter.Services;
 
@@ -35,6 +36,9 @@ public static class AlbOptions
     private sealed record TopIpRow(int Rank, string IP, int Hits);
     private sealed record TopUriRow(string URI, int Hits);
     private sealed record TopUrisByIpGroup(TopIpRow Ip, List<TopUriRow> TopUris);
+    private sealed record OutputFileChoice(string FullPath, string Display);
+    private sealed record IpChoice(string Ip, int Hits);
+    private const string SelectAllSentinel = "__ALL__";
 
     private static DateTime FloorTo5MinUtc(DateTime dtUtc)
     {
@@ -125,41 +129,38 @@ public static class AlbOptions
             return;
         }
 
-        // Gather up to 5 IPs
-        var ips = new List<string>(capacity: 5);
-        while (ips.Count < 5)
+        var outputFile = PickOutputAnalysisFile();
+        if (outputFile is null)
+            return;
+
+        if (!TryExtractIpCountsFromFile(outputFile.FullPath, out var ipColumn, out var counts, out var orderedChoices, out var error))
         {
-            var next = ConsoleEx.ReadLineWithEsc($"Add IP #{ips.Count + 1} (blank to finish):");
-            if (next is null)
-            {
-                ConsoleEx.Info("Cancelled.");
-                ConsoleEx.Pause("Press Enter to return...");
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(next))
-                break;
-
-            next = next.Trim();
-
-            if (!IsLikelyIp(next))
-            {
-                ConsoleEx.Warn("That does not look like an IPv4 address. Try again.");
-                continue;
-            }
-
-            if (ips.Contains(next, StringComparer.Ordinal))
-            {
-                ConsoleEx.Warn("Already added.");
-                continue;
-            }
-
-            ips.Add(next);
+            ConsoleEx.Error($"Failed to parse file: {error}");
+            ConsoleEx.Pause("Press Enter to return...");
+            return;
         }
+
+        AnsiConsole.MarkupLine($"[dim]Source file:[/] {Markup.Escape(Path.GetFileName(outputFile.FullPath))}");
+        AnsiConsole.MarkupLine($"[dim]Detected IP column:[/] [bold]{Markup.Escape(ipColumn)}[/]");
+        AnsiConsole.MarkupLine($"[dim]Unique IPs found:[/] {counts.Count}");
+        AnsiConsole.WriteLine();
+
+        var topChoices = orderedChoices.Take(50).ToList();
+        var selectedChoices = SelectIpsWithEsc(
+            title: "Select IPs to chart (ALB requests per 5 min)",
+            allCount: counts.Count,
+            choices: topChoices);
+
+        if (selectedChoices is null)
+            return;
+
+        var ips = selectedChoices.Any(x => x.Ip == SelectAllSentinel)
+            ? orderedChoices.Select(x => x.Ip).Distinct(StringComparer.Ordinal).ToList()
+            : selectedChoices.Select(x => x.Ip).Distinct(StringComparer.Ordinal).ToList();
 
         if (ips.Count == 0)
         {
-            ConsoleEx.Warn("No IPs provided.");
+            ConsoleEx.Warn("No IPs selected.");
             ConsoleEx.Pause("Press Enter to return...");
             return;
         }
@@ -174,6 +175,7 @@ public static class AlbOptions
 
         InfoPanel("Scan plan",
             ("Mode", "Requests per IP per 5 minutes"),
+            ("Selected from", Path.GetFileName(outputFile.FullPath)),
             ("IPs", string.Join(", ", ips)),
             ("Files", files.Count.ToString("N0")),
             ("Input", albFolder),
@@ -335,7 +337,10 @@ public static class AlbOptions
             return;
         }
 
-        var endpoint = ConsoleEx.Prompt("Endpoint/path fragment (e.g., login or /login/):");
+        var endpoint = ConsoleEx.ReadLineWithEsc("Endpoint/path fragment (e.g., login or /login/):");
+        if (endpoint is null)
+            return;
+
         if (string.IsNullOrWhiteSpace(endpoint))
         {
             ConsoleEx.Warn("No endpoint provided.");
@@ -1229,16 +1234,379 @@ public static class AlbOptions
         ConsoleEx.Pause("Press Enter to return...");
     }
 
-    private static bool IsLikelyIp(string s)
+    private static OutputFileChoice? PickOutputAnalysisFile()
     {
-        var parts = s.Split('.', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 4) return false;
-
-        foreach (var p in parts)
+        var outDir = AppFolders.Output;
+        if (!Directory.Exists(outDir))
         {
-            if (!int.TryParse(p, out int n)) return false;
-            if (n < 0 || n > 255) return false;
+            ConsoleEx.Warn($"Output folder not found: {outDir}");
+            ConsoleEx.Pause("Press Enter to return...");
+            return null;
         }
-        return true;
+
+        var files = Directory.EnumerateFiles(outDir, "*", SearchOption.TopDirectoryOnly)
+            .Where(p => p.EndsWith(".csv", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+            .Select(p => new FileInfo(p))
+            .OrderByDescending(f => f.LastWriteTimeUtc)
+            .Take(200)
+            .ToList();
+
+        if (files.Count == 0)
+        {
+            ConsoleEx.Warn("No CSV/XLSX analysis files found in /output.");
+            ConsoleEx.Pause("Press Enter to return...");
+            return null;
+        }
+
+        var items = files
+            .Select(f => new ConsoleEx.MenuItem(
+                f.Name,
+                $"Modified: {f.LastWriteTimeUtc:yyyy-MM-dd HH:mm:ss}Z | Size: {FormatBytes(f.Length)} | Path: {f.FullName}"))
+            .ToList();
+        items.Add(new ConsoleEx.MenuItem("Back", "Return without selecting a file."));
+
+        var selected = ConsoleEx.Menu("Pick CSV/XLSX from /output (Esc = back)", items, pageSize: 12);
+        if (selected is null)
+            return null;
+
+        if (selected.Value == items.Count - 1)
+            return null;
+
+        var file = files[selected.Value];
+        return new OutputFileChoice(file.FullName, file.Name);
+    }
+
+    private static List<IpChoice>? SelectIpsWithEsc(string title, int allCount, List<IpChoice> choices)
+    {
+        var allChoices = new List<IpChoice> { new(SelectAllSentinel, -1) };
+        allChoices.AddRange(choices);
+
+        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var selectedIndex = 0;
+        List<IpChoice>? result = null;
+
+        AnsiConsole.Live(BuildIpPicker(title, allChoices, selected, selectedIndex, allCount))
+            .AutoClear(true)
+            .Start(ctx =>
+            {
+                while (true)
+                {
+                    var maybe = AnsiConsole.Console.Input.ReadKey(intercept: true);
+                    if (maybe is null)
+                        continue;
+
+                    var key = maybe.Value;
+                    if (key.Key == ConsoleKey.Escape)
+                    {
+                        result = null;
+                        break;
+                    }
+
+                    if (key.Key == ConsoleKey.UpArrow)
+                        selectedIndex = (selectedIndex - 1 + allChoices.Count) % allChoices.Count;
+                    else if (key.Key == ConsoleKey.DownArrow)
+                        selectedIndex = (selectedIndex + 1) % allChoices.Count;
+                    else if (key.Key == ConsoleKey.Spacebar)
+                    {
+                        var current = allChoices[selectedIndex];
+                        if (current.Ip == SelectAllSentinel)
+                        {
+                            if (selected.Contains(SelectAllSentinel))
+                                selected.Clear();
+                            else
+                            {
+                                selected.Clear();
+                                selected.Add(SelectAllSentinel);
+                            }
+                        }
+                        else
+                        {
+                            selected.Remove(SelectAllSentinel);
+                            if (!selected.Add(current.Ip))
+                                selected.Remove(current.Ip);
+                        }
+                    }
+                    else if (key.Key == ConsoleKey.Enter)
+                    {
+                        result = allChoices.Where(x => selected.Contains(x.Ip)).ToList();
+                        break;
+                    }
+
+                    ctx.UpdateTarget(BuildIpPicker(title, allChoices, selected, selectedIndex, allCount));
+                    ctx.Refresh();
+                }
+            });
+
+        return result;
+    }
+
+    private static IRenderable BuildIpPicker(string title, List<IpChoice> allChoices, HashSet<string> selected, int selectedIndex, int allCount)
+    {
+        var table = new Table().NoBorder();
+        table.AddColumn("");
+
+        for (var i = 0; i < allChoices.Count; i++)
+        {
+            var c = allChoices[i];
+            var cursor = i == selectedIndex ? "[green]>[/]" : " ";
+            var mark = selected.Contains(c.Ip) ? "[x]" : "[ ]";
+            var label = c.Ip == SelectAllSentinel
+                ? $"[bold]Select ALL[/] [grey]({allCount} IPs)[/]"
+                : $"{c.Ip} [grey]({c.Hits})[/]";
+            table.AddRow($"{cursor} {mark} {label}");
+        }
+
+        return new Rows(
+            new Markup($"[bold]{Markup.Escape(title)}[/]"),
+            new Markup("[grey](Up/Down: move, Space: toggle, Enter: run, Esc: back)[/]"),
+            table);
+    }
+
+    private static bool TryExtractIpCountsFromFile(
+        string filePath,
+        out string ipColumnName,
+        out Dictionary<string, int> counts,
+        out List<IpChoice> orderedChoices,
+        out string error)
+    {
+        if (filePath.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+            return TryExtractIpCountsFromCsv(filePath, out ipColumnName, out counts, out orderedChoices, out error);
+
+        if (filePath.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+            return TryExtractIpCountsFromXlsx(filePath, out ipColumnName, out counts, out orderedChoices, out error);
+
+        ipColumnName = "";
+        counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        orderedChoices = new List<IpChoice>();
+        error = "Only CSV and XLSX are supported.";
+        return false;
+    }
+
+    private static bool TryExtractIpCountsFromCsv(
+        string filePath,
+        out string ipColumnName,
+        out Dictionary<string, int> counts,
+        out List<IpChoice> orderedChoices,
+        out string error)
+    {
+        ipColumnName = "";
+        counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        orderedChoices = new List<IpChoice>();
+        error = "";
+
+        try
+        {
+            using var sr = new StreamReader(filePath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var header = sr.ReadLine();
+            if (string.IsNullOrWhiteSpace(header))
+            {
+                error = "CSV appears empty.";
+                return false;
+            }
+
+            var delim = CsvLite.DetectDelimiter(header);
+            var headers = CsvLite.Split(header, delim).Select(h => h.Trim()).ToList();
+
+            var ipCol = FindIpColumnIndex(headers);
+            if (ipCol < 0)
+            {
+                error = "No IP-like column found in CSV header.";
+                return false;
+            }
+
+            ipColumnName = headers[ipCol];
+            var hitsCol = FindHitsColumnIndex(headers);
+
+            string? line;
+            while ((line = sr.ReadLine()) is not null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                var cols = CsvLite.Split(line, delim);
+                if (ipCol >= cols.Count) continue;
+
+                var ip = NormalizeIp(cols[ipCol]);
+                if (ip is null) continue;
+
+                var hits = 1;
+                if (hitsCol >= 0 && hitsCol < cols.Count)
+                {
+                    var text = cols[hitsCol].Trim();
+                    if (int.TryParse(text.Replace(",", "", StringComparison.Ordinal), out var parsed) && parsed > 0)
+                        hits = parsed;
+                }
+
+                counts[ip] = counts.TryGetValue(ip, out var cur) ? cur + hits : hits;
+            }
+
+            orderedChoices = counts
+                .OrderByDescending(kvp => kvp.Value)
+                .ThenBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(kvp => new IpChoice(kvp.Key, kvp.Value))
+                .ToList();
+
+            if (orderedChoices.Count == 0)
+            {
+                error = $"Detected IP column '{ipColumnName}', but no valid IPs were found.";
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static bool TryExtractIpCountsFromXlsx(
+        string filePath,
+        out string ipColumnName,
+        out Dictionary<string, int> counts,
+        out List<IpChoice> orderedChoices,
+        out string error)
+    {
+        ipColumnName = "";
+        counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        orderedChoices = new List<IpChoice>();
+        error = "";
+
+        try
+        {
+            using var wb = new XLWorkbook(filePath);
+            var ws = wb.Worksheets.FirstOrDefault();
+            if (ws is null)
+            {
+                error = "Workbook has no worksheets.";
+                return false;
+            }
+
+            var used = ws.RangeUsed();
+            if (used is null)
+            {
+                error = "Worksheet is empty.";
+                return false;
+            }
+
+            var firstRow = used.RangeAddress.FirstAddress.RowNumber;
+            var lastRow = used.RangeAddress.LastAddress.RowNumber;
+            var firstCol = used.RangeAddress.FirstAddress.ColumnNumber;
+            var lastCol = used.RangeAddress.LastAddress.ColumnNumber;
+
+            var headers = new List<string>();
+            for (var c = firstCol; c <= lastCol; c++)
+                headers.Add(ws.Cell(firstRow, c).GetString().Trim());
+
+            var ipIdx = FindIpColumnIndex(headers);
+            if (ipIdx < 0)
+            {
+                error = "No IP-like column found in XLSX header.";
+                return false;
+            }
+
+            ipColumnName = headers[ipIdx];
+            var ipCol = firstCol + ipIdx;
+            var hitsIdx = FindHitsColumnIndex(headers);
+            var hitsCol = hitsIdx >= 0 ? firstCol + hitsIdx : -1;
+
+            for (var r = firstRow + 1; r <= lastRow; r++)
+            {
+                var ip = NormalizeIp(ws.Cell(r, ipCol).GetString());
+                if (ip is null) continue;
+
+                var hits = 1;
+                if (hitsCol > 0)
+                {
+                    var text = ws.Cell(r, hitsCol).GetString().Trim();
+                    if (int.TryParse(text.Replace(",", "", StringComparison.Ordinal), out var parsed) && parsed > 0)
+                        hits = parsed;
+                }
+
+                counts[ip] = counts.TryGetValue(ip, out var cur) ? cur + hits : hits;
+            }
+
+            orderedChoices = counts
+                .OrderByDescending(kvp => kvp.Value)
+                .ThenBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(kvp => new IpChoice(kvp.Key, kvp.Value))
+                .ToList();
+
+            if (orderedChoices.Count == 0)
+            {
+                error = $"Detected IP column '{ipColumnName}', but no valid IPs were found.";
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static int FindIpColumnIndex(IReadOnlyList<string> headers)
+    {
+        var preferred = new[] { "ip", "ipaddress", "ip_address", "clientip", "client_ip", "sourceip", "source_ip" };
+
+        for (var i = 0; i < headers.Count; i++)
+        {
+            var h = headers[i].Trim().ToLowerInvariant();
+            if (preferred.Contains(h))
+                return i;
+        }
+
+        for (var i = 0; i < headers.Count; i++)
+        {
+            var h = headers[i].Trim().ToLowerInvariant();
+            if (h.Contains("ip") && !h.Contains("zip") && !h.Contains("ship"))
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static int FindHitsColumnIndex(IReadOnlyList<string> headers)
+    {
+        var preferred = new[] { "hits", "count", "requests", "total", "occurrences" };
+
+        for (var i = 0; i < headers.Count; i++)
+        {
+            var h = headers[i].Trim().ToLowerInvariant();
+            if (preferred.Contains(h))
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static string? NormalizeIp(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        var s = raw.Trim().Trim('"').Trim();
+        if (s.Contains('.') && s.Count(c => c == ':') == 1)
+            s = s.Split(':', 2)[0];
+        if (s.StartsWith('[') && s.EndsWith(']') && s.Length > 2)
+            s = s[1..^1];
+
+        return System.Net.IPAddress.TryParse(s, out _) ? s : null;
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        var suf = new[] { "B", "KB", "MB", "GB", "TB" };
+        double b = bytes;
+        var i = 0;
+        while (b >= 1024 && i < suf.Length - 1)
+        {
+            b /= 1024;
+            i++;
+        }
+
+        return $"{b:0.##} {suf[i]}";
     }
 }

@@ -8,7 +8,6 @@
 		<InformationalVersion>1.1.0</InformationalVersion>
 		<AssemblyVersion>1.1.0.0</AssemblyVersion>
 		<FileVersion>1.1.0.0</FileVersion>
-		<ApplicationIcon>Assets\LogHunter.ico</ApplicationIcon>
 
 		<OutputType>Exe</OutputType>
 		<TargetFramework>net8.0</TargetFramework>
