@@ -1349,7 +1349,7 @@ public static class AlbOptions
         {
             var c = allChoices[i];
             var cursor = i == selectedIndex ? "[green]>[/]" : " ";
-            var mark = selected.Contains(c.Ip) ? "[x]" : "[ ]";
+            var mark = selected.Contains(c.Ip) ? "[[x]]" : "[[ ]]";
             var label = c.Ip == SelectAllSentinel
                 ? $"[bold]Select ALL[/] [grey]({allCount} IPs)[/]"
                 : $"{c.Ip} [grey]({c.Hits})[/]";

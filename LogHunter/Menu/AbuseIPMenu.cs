@@ -990,7 +990,7 @@ public sealed class AbuseIpMenu : IMenu
         {
             var c = allChoices[i];
             var cursor = i == selectedIndex ? "[green]>[/]" : " ";
-            var mark = selected.Contains(c.Ip) ? "[x]" : "[ ]";
+            var mark = selected.Contains(c.Ip) ? "[[x]]" : "[[ ]]";
             var label = c.Ip == SelectAllSentinel
                 ? $"[bold]Select ALL[/] [grey]({allCount} IPs)[/]"
                 : includeHits ? $"{c.Ip} [grey]({c.Hits})[/]" : c.Ip;
