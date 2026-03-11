@@ -43,6 +43,16 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ---
 
+## Release notes
+
+### 1.1.1
+
+- Version bump for the latest merged branch.
+- Documentation refresh to support packaging and publication of the `1.1.1` release.
+- No breaking CLI changes; existing module flows and commands remain stable.
+
+---
+
 ## Navigation and usage notes
 
 On first run, LogHunter creates these folders:
