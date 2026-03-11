@@ -9,7 +9,6 @@ using ClosedXML.Excel;
 using LogHunter.Models;
 using LogHunter.Utils;
 using Spectre.Console;
-using Spectre.Console.Rendering;
 
 namespace LogHunter.Services;
 
@@ -1258,14 +1257,20 @@ public static class AlbOptions
         AnsiConsole.MarkupLine($"[dim]Unique IPs found:[/] {counts.Count}");
         AnsiConsole.WriteLine();
 
-        var topChoices = orderedChoices.Take(50).ToList();
-        var selectedChoices = SelectIpsWithEsc(
-            title: "Select IPs for ALB request timeline (5-minute buckets)",
-            allCount: counts.Count,
-            choices: topChoices);
+        RenderTopIpPreview(orderedChoices, top: 20);
 
-        if (selectedChoices is null)
-            return null;
+        var visibleChoices = orderedChoices.Take(400).ToList();
+        var selectedChoices = AnsiConsole.Prompt(
+            new MultiSelectionPrompt<IpChoice>()
+                .Title("Select IPs for ALB request timeline (5-minute buckets):")
+                .PageSize(18)
+                .WrapAround()
+                .NotRequired()
+                .InstructionsText("[grey](Space: toggle, Enter: run, Esc: back. List is capped to top 400; Select ALL uses the full valid ALB IP set.)[/]")
+                .AddChoices(new[] { new IpChoice(SelectAllSentinel, -1) }.Concat(visibleChoices))
+                .UseConverter(x => x.Ip == SelectAllSentinel
+                    ? $"[bold]Select ALL[/] [grey]({orderedChoices.Count} IPs)[/]"
+                    : $"{x.Ip} [grey]({x.Hits})[/]"));
 
         var ips = selectedChoices.Any(x => x.Ip == SelectAllSentinel)
             ? orderedChoices.Select(x => x.Ip).Distinct(StringComparer.Ordinal).ToList()
@@ -1360,90 +1365,27 @@ public static class AlbOptions
         return new OutputFileChoice(file.FullName, file.Name);
     }
 
-    private static List<IpChoice>? SelectIpsWithEsc(string title, int allCount, List<IpChoice> choices)
+    private static void RenderTopIpPreview(List<IpChoice> orderedChoices, int top)
     {
-        var allChoices = new List<IpChoice> { new(SelectAllSentinel, -1) };
-        allChoices.AddRange(choices);
+        var table = new Table().RoundedBorder();
+        table.AddColumn("#");
+        table.AddColumn("IP");
+        table.AddColumn("Hits");
 
-        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var selectedIndex = 0;
-        List<IpChoice>? result = null;
+        var topRows = orderedChoices
+            .OrderByDescending(x => x.Hits)
+            .ThenBy(x => x.Ip, StringComparer.OrdinalIgnoreCase)
+            .Take(top)
+            .ToList();
 
-        AnsiConsole.Live(BuildIpPicker(title, allChoices, selected, selectedIndex, allCount))
-            .AutoClear(true)
-            .Start(ctx =>
-            {
-                while (true)
-                {
-                    var maybe = AnsiConsole.Console.Input.ReadKey(intercept: true);
-                    if (maybe is null)
-                        continue;
-
-                    var key = maybe.Value;
-                    if (key.Key == ConsoleKey.Escape)
-                    {
-                        result = null;
-                        break;
-                    }
-
-                    if (key.Key == ConsoleKey.UpArrow)
-                        selectedIndex = (selectedIndex - 1 + allChoices.Count) % allChoices.Count;
-                    else if (key.Key == ConsoleKey.DownArrow)
-                        selectedIndex = (selectedIndex + 1) % allChoices.Count;
-                    else if (key.Key == ConsoleKey.Spacebar)
-                    {
-                        var current = allChoices[selectedIndex];
-                        if (current.Ip == SelectAllSentinel)
-                        {
-                            if (selected.Contains(SelectAllSentinel))
-                                selected.Clear();
-                            else
-                            {
-                                selected.Clear();
-                                selected.Add(SelectAllSentinel);
-                            }
-                        }
-                        else
-                        {
-                            selected.Remove(SelectAllSentinel);
-                            if (!selected.Add(current.Ip))
-                                selected.Remove(current.Ip);
-                        }
-                    }
-                    else if (key.Key == ConsoleKey.Enter)
-                    {
-                        result = allChoices.Where(x => selected.Contains(x.Ip)).ToList();
-                        break;
-                    }
-
-                    ctx.UpdateTarget(BuildIpPicker(title, allChoices, selected, selectedIndex, allCount));
-                    ctx.Refresh();
-                }
-            });
-
-        return result;
-    }
-
-    private static IRenderable BuildIpPicker(string title, List<IpChoice> allChoices, HashSet<string> selected, int selectedIndex, int allCount)
-    {
-        var table = new Table().NoBorder();
-        table.AddColumn("");
-
-        for (var i = 0; i < allChoices.Count; i++)
+        for (var i = 0; i < topRows.Count; i++)
         {
-            var c = allChoices[i];
-            var cursor = i == selectedIndex ? "[green]>[/]" : " ";
-            var mark = selected.Contains(c.Ip) ? "[[x]]" : "[[ ]]";
-            var label = c.Ip == SelectAllSentinel
-                ? $"[bold]Select ALL[/] [grey]({allCount} IPs)[/]"
-                : $"{c.Ip} [grey]({c.Hits})[/]";
-            table.AddRow($"{cursor} {mark} {label}");
+            var x = topRows[i];
+            table.AddRow((i + 1).ToString(CultureInfo.InvariantCulture), Markup.Escape(x.Ip), x.Hits.ToString("N0", CultureInfo.InvariantCulture));
         }
 
-        return new Rows(
-            new Markup($"[bold]{Markup.Escape(title)}[/]"),
-            new Markup("[grey](Up/Down: move, Space: toggle, Enter: run, Esc: back)[/]"),
-            table);
+        AnsiConsole.Write(table);
+        AnsiConsole.WriteLine();
     }
 
     private static bool TryExtractIpCountsFromFile(
