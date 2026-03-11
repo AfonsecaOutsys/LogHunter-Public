@@ -37,7 +37,7 @@ public static class AlbOptions
     private sealed record TopUrisByIpGroup(TopIpRow Ip, List<TopUriRow> TopUris);
     private sealed record OutputFileChoice(string FullPath, string Display);
     private sealed record IpChoice(string Ip, int Hits);
-    private sealed record Option6SelectionResult(List<string> Ips, string SourceLabel);
+    private sealed record Option6SelectionResult(List<string> Ips, string SourceLabel, Dictionary<string, int>? SourceHitsByIp = null);
     private const string SelectAllSentinel = "__ALL__";
 
     private static DateTime FloorTo5MinUtc(DateTime dtUtc)
@@ -273,7 +273,7 @@ public static class AlbOptions
 
         // Build series for chart (shared timeline)
         var times = allBuckets.ToArray();
-        var series = new List<(string SeriesName, DateTime[] TimesUtc, double[] Values)>(ips.Count);
+        var series = new List<Charts.TimeSeriesSeries>(ips.Count);
 
         foreach (var ip in ips)
         {
@@ -286,7 +286,15 @@ public static class AlbOptions
                 ys[i] = c;
             }
 
-            series.Add((ip, times, ys));
+            long? sourceHits = null;
+            if (selection.SourceHitsByIp is not null && selection.SourceHitsByIp.TryGetValue(ip, out var srcHits) && srcHits > 0)
+                sourceHits = srcHits;
+
+            series.Add(new Charts.TimeSeriesSeries(
+                SeriesName: ip,
+                TimesUtc: times,
+                Values: ys,
+                SourceHits: sourceHits));
         }
 
         var html = Charts.SaveTimeSeriesHtmlAndOpen(
@@ -1283,7 +1291,14 @@ public static class AlbOptions
             return null;
         }
 
-        return new Option6SelectionResult(ips, Path.GetFileName(outputFile.FullPath));
+        var sourceHitsByIp = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ip in ips)
+        {
+            if (counts.TryGetValue(ip, out var hits) && hits > 0)
+                sourceHitsByIp[ip] = hits;
+        }
+
+        return new Option6SelectionResult(ips, Path.GetFileName(outputFile.FullPath), sourceHitsByIp);
     }
 
     private static Option6SelectionResult? SelectOption6ManualIps()
@@ -1321,7 +1336,7 @@ public static class AlbOptions
             return null;
         }
 
-        return new Option6SelectionResult(ips, "Manual entry");
+        return new Option6SelectionResult(ips, "Manual entry", null);
     }
 
     private static OutputFileChoice? PickAlbOutputAnalysisFile(IReadOnlyCollection<string> allowedPrefixes)
