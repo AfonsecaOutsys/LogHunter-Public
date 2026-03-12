@@ -370,13 +370,15 @@ public sealed class AbuseIpMenu : IMenu
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var runtimeToken = linkedCts.Token;
+        using var escListenerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var escToken = escListenerCts.Token;
+        var userCancelled = false;
 
         // Keep ESC-to-cancel support without spawning a lingering blocking ReadKey task.
-        // The previous implementation could leave orphan readers alive after the check run,
-        // causing subsequent menus to feel laggy/unresponsive due to console input contention.
+        // The listener is scoped to this run and explicitly stopped in finally.
         var escListener = Task.Run(async () =>
         {
-            while (!runtimeToken.IsCancellationRequested)
+            while (!escToken.IsCancellationRequested && !runtimeToken.IsCancellationRequested)
             {
                 try
                 {
@@ -385,6 +387,7 @@ public sealed class AbuseIpMenu : IMenu
                         var maybe = AnsiConsole.Console.Input.ReadKey(intercept: true);
                         if (maybe is not null && maybe.Value.Key == ConsoleKey.Escape)
                         {
+                            userCancelled = true;
                             linkedCts.Cancel();
                             return;
                         }
@@ -397,14 +400,14 @@ public sealed class AbuseIpMenu : IMenu
 
                 try
                 {
-                    await Task.Delay(40, runtimeToken).ConfigureAwait(false);
+                    await Task.Delay(40, escToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
                     return;
                 }
             }
-        }, runtimeToken);
+        }, escToken);
 
         try
         {
@@ -518,8 +521,8 @@ public sealed class AbuseIpMenu : IMenu
         }
         finally
         {
-            if (!linkedCts.IsCancellationRequested)
-                linkedCts.Cancel();
+            if (!escListenerCts.IsCancellationRequested)
+                escListenerCts.Cancel();
 
             try
             {
@@ -535,7 +538,7 @@ public sealed class AbuseIpMenu : IMenu
 
         ConsoleEx.Header("AbuseIPDB: results", $"Source: {sourceLabel} | Checked: {results.Count} | Failed: {failures.Count}");
 
-        if (runtimeToken.IsCancellationRequested)
+        if (userCancelled)
             ConsoleEx.Warn("Run cancelled (Esc pressed). Showing partial results.");
 
         RenderResultsTable(results);
@@ -963,6 +966,9 @@ public sealed class AbuseIpMenu : IMenu
             .AutoClear(true)
             .Start(ctx =>
             {
+                ctx.UpdateTarget(BuildIpPicker(title, allChoices, selected, selectedIndex, allCount, includeHits));
+                ctx.Refresh();
+
                 while (true)
                 {
                     var maybe = AnsiConsole.Console.Input.ReadKey(intercept: true);

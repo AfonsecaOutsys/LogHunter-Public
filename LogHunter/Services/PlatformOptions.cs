@@ -26,7 +26,14 @@ public static class PlatformOptions
             return;
         }
 
-        var result = await PlatformScanner.ScanSuspiciousRequestsAsync(platformDir, ct).ConfigureAwait(false);
+        PlatformSuspiciousScanResult result = null!;
+        await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Processing platform logs...", async ctx =>
+            {
+                ctx.Status("Processing platform logs... (suspicious request scan)");
+                result = await PlatformScanner.ScanSuspiciousRequestsAsync(platformDir, ct).ConfigureAwait(false);
+            });
 
         AnsiConsole.MarkupLine($"[dim]Scanned files:[/] {result.FilesScanned}  [dim]Matched files:[/] {result.FilesMatched}");
         AnsiConsole.MarkupLine($"[dim]Matched rows:[/] {result.MatchedRows}  [dim]Distinct effective IPs:[/] {result.DistinctEffectiveIps}");
@@ -115,7 +122,14 @@ public static class PlatformOptions
             return;
         }
 
-        var result = await PlatformAuthScanner.ScanAuthenticatedActivityAsync(platformDir, suspicious, ct).ConfigureAwait(false);
+        PlatformAuthScanResult result = null!;
+        await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Processing platform logs...", async ctx =>
+            {
+                ctx.Status("Processing platform logs... (authenticated activity check)");
+                result = await PlatformAuthScanner.ScanAuthenticatedActivityAsync(platformDir, suspicious, ct).ConfigureAwait(false);
+            });
 
         AnsiConsole.MarkupLine($"[dim]Suspicious IPs (input):[/] {result.SuspiciousIpsInput}");
         AnsiConsole.MarkupLine($"[dim]Scanned files:[/] {result.FilesScanned}  [dim]Matched files:[/] {result.FilesMatched}");
