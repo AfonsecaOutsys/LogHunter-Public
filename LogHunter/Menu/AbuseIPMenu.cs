@@ -219,26 +219,26 @@ public sealed class AbuseIpMenu : IMenu
         AnsiConsole.MarkupLine($"[dim]Last updated:[/] {(updated is null ? "unknown" : updated.Value.ToString("yyyy-MM-dd HH:mm:ss") + "Z")}");
         AnsiConsole.WriteLine();
 
+        const int pickerCap = 250;
+
         var choices = dict
             .OrderByDescending(kvp => kvp.Value)
             .ThenBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
-            .Take(800)
+            .Take(pickerCap)
             .Select(kvp => new IpChoice(kvp.Key, kvp.Value))
             .ToList();
 
-        var selectedIps = AnsiConsole.Prompt(
-            new MultiSelectionPrompt<IpChoice>()
-                .Title("Select IPs to check:")
-                .PageSize(18)
-                .WrapAround()
-                .NotRequired()
-                .InstructionsText("[grey](Space: toggle, Enter: run. List is capped to top 800; Select ALL checks the full set.)[/]")
-                .AddChoices(new[] { new IpChoice(SelectAllSentinel, -1) }.Concat(choices))
-                .UseConverter(x =>
-                {
-                    if (x.Ip == SelectAllSentinel) return "[bold][[Select ALL]][/]";
-                    return $"{x.Ip} [grey]({x.Hits})[/]";
-                }));
+        AnsiConsole.MarkupLine($"[dim]Picker list:[/] top {choices.Count} by hits (Select ALL still checks full set).");
+        AnsiConsole.WriteLine();
+
+        var selectedIps = SelectIpsWithEsc(
+            title: "Select IPs to check (Platform suspicious cache)",
+            allCount: dict.Count,
+            choices: choices,
+            includeHits: true);
+
+        if (selectedIps is null)
+            return;
 
         if (selectedIps.Count == 0)
         {
@@ -371,126 +371,165 @@ public sealed class AbuseIpMenu : IMenu
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var runtimeToken = linkedCts.Token;
 
-        _ = Task.Run(() =>
+        // Keep ESC-to-cancel support without spawning a lingering blocking ReadKey task.
+        // The previous implementation could leave orphan readers alive after the check run,
+        // causing subsequent menus to feel laggy/unresponsive due to console input contention.
+        var escListener = Task.Run(async () =>
         {
             while (!runtimeToken.IsCancellationRequested)
             {
-                var maybe = AnsiConsole.Console.Input.ReadKey(intercept: true);
-                if (maybe is not null && maybe.Value.Key == ConsoleKey.Escape)
+                try
                 {
-                    linkedCts.Cancel();
+                    if (Console.KeyAvailable)
+                    {
+                        var maybe = AnsiConsole.Console.Input.ReadKey(intercept: true);
+                        if (maybe is not null && maybe.Value.Key == ConsoleKey.Escape)
+                        {
+                            linkedCts.Cancel();
+                            return;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Some hosts can throw for KeyAvailable; ignore and keep running checks.
+                }
+
+                try
+                {
+                    await Task.Delay(40, runtimeToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
                     return;
                 }
             }
         }, runtimeToken);
 
-        await AnsiConsole.Progress()
-            .AutoClear(true)
-            .StartAsync(async ctx =>
-            {
-                var task = ctx.AddTask("Checking IP reputation...", maxValue: ipsToCheck.Count);
-
-                foreach (var ip in ipsToCheck)
+        try
+        {
+            await AnsiConsole.Progress()
+                .AutoClear(true)
+                .StartAsync(async ctx =>
                 {
-                    if (runtimeToken.IsCancellationRequested)
-                        break;
+                    var task = ctx.AddTask("Checking IP reputation...", maxValue: ipsToCheck.Count);
 
-                    var done = false;
-                    while (!done)
+                    foreach (var ip in ipsToCheck)
                     {
-                        try
-                        {
-                            var r = await client.CheckAsync(ip, cfg.MaxAgeInDays, cfg.Verbose, runtimeToken).ConfigureAwait(false);
-                            results.Add(r);
-                            done = true;
-                        }
-                        catch (AbuseIpQuotaExceededException qex)
-                        {
-                            var reset = qex.RateLimit.ResetAtUtc?.ToString("yyyy-MM-dd HH:mm:ss") + "Z";
-                            AnsiConsole.MarkupLine($"[yellow]Quota reached[/] (resets {Markup.Escape(reset ?? "unknown")}).");
+                        if (runtimeToken.IsCancellationRequested)
+                            break;
 
-                            var action = AnsiConsole.Prompt(
-                                new SelectionPrompt<string>()
-                                    .Title("Switch API key?")
-                                    .AddChoices("Enter different key (this run only)", "Save different key to config", "Cancel"));
-
-                            if (action == "Cancel")
+                        var done = false;
+                        while (!done)
+                        {
+                            try
                             {
-                                failures.Add((ip, qex.Message));
+                                var r = await client.CheckAsync(ip, cfg.MaxAgeInDays, cfg.Verbose, runtimeToken).ConfigureAwait(false);
+                                results.Add(r);
                                 done = true;
-                                break;
                             }
-
-                            var newKey = AnsiConsole.Prompt(
-                                new TextPrompt<string>("New API key:")
-                                    .Secret()
-                                    .ValidationErrorMessage("API key cannot be empty.")
-                                    .Validate(s => !string.IsNullOrWhiteSpace(s)));
-
-                            if (action == "Save different key to config")
+                            catch (AbuseIpQuotaExceededException qex)
                             {
-                                var updated = cfg with { ApiKey = newKey.Trim() };
-                                AbuseIpDbClient.SaveConfig(_session.Root, updated);
-                                cfg = updated;
-                                sessionApiKeyOverride = null;
+                                var reset = qex.RateLimit.ResetAtUtc?.ToString("yyyy-MM-dd HH:mm:ss") + "Z";
+                                AnsiConsole.MarkupLine($"[yellow]Quota reached[/] (resets {Markup.Escape(reset ?? "unknown")}).");
+
+                                var action = AnsiConsole.Prompt(
+                                    new SelectionPrompt<string>()
+                                        .Title("Switch API key?")
+                                        .AddChoices("Enter different key (this run only)", "Save different key to config", "Cancel"));
+
+                                if (action == "Cancel")
+                                {
+                                    failures.Add((ip, qex.Message));
+                                    done = true;
+                                    break;
+                                }
+
+                                var newKey = AnsiConsole.Prompt(
+                                    new TextPrompt<string>("New API key:")
+                                        .Secret()
+                                        .ValidationErrorMessage("API key cannot be empty.")
+                                        .Validate(s => !string.IsNullOrWhiteSpace(s)));
+
+                                if (action == "Save different key to config")
+                                {
+                                    var updated = cfg with { ApiKey = newKey.Trim() };
+                                    AbuseIpDbClient.SaveConfig(_session.Root, updated);
+                                    cfg = updated;
+                                    sessionApiKeyOverride = null;
+                                }
+                                else
+                                {
+                                    sessionApiKeyOverride = newKey.Trim();
+                                }
+
+                                client.Dispose();
+                                client = new AbuseIpDbClient(_session.Root, sessionApiKeyOverride);
+                                // retry same IP
                             }
-                            else
+                            catch (AbuseIpAuthException aex)
                             {
-                                sessionApiKeyOverride = newKey.Trim();
+                                AnsiConsole.MarkupLine($"[red]Auth error[/]: {Markup.Escape(aex.Message)}");
+
+                                var action = AnsiConsole.Prompt(
+                                    new SelectionPrompt<string>()
+                                        .Title("Fix API key?")
+                                        .AddChoices("Enter different key (this run only)", "Save different key to config", "Skip this IP"));
+
+                                if (action == "Skip this IP")
+                                {
+                                    failures.Add((ip, aex.Message));
+                                    done = true;
+                                    break;
+                                }
+
+                                var newKey = AnsiConsole.Prompt(
+                                    new TextPrompt<string>("New API key:")
+                                        .Secret()
+                                        .ValidationErrorMessage("API key cannot be empty.")
+                                        .Validate(s => !string.IsNullOrWhiteSpace(s)));
+
+                                if (action == "Save different key to config")
+                                {
+                                    var updated = cfg with { ApiKey = newKey.Trim() };
+                                    AbuseIpDbClient.SaveConfig(_session.Root, updated);
+                                    cfg = updated;
+                                    sessionApiKeyOverride = null;
+                                }
+                                else
+                                {
+                                    sessionApiKeyOverride = newKey.Trim();
+                                }
+
+                                client.Dispose();
+                                client = new AbuseIpDbClient(_session.Root, sessionApiKeyOverride);
+                                // retry same IP
                             }
-
-                            client.Dispose();
-                            client = new AbuseIpDbClient(_session.Root, sessionApiKeyOverride);
-                            // retry same IP
-                        }
-                        catch (AbuseIpAuthException aex)
-                        {
-                            AnsiConsole.MarkupLine($"[red]Auth error[/]: {Markup.Escape(aex.Message)}");
-
-                            var action = AnsiConsole.Prompt(
-                                new SelectionPrompt<string>()
-                                    .Title("Fix API key?")
-                                    .AddChoices("Enter different key (this run only)", "Save different key to config", "Skip this IP"));
-
-                            if (action == "Skip this IP")
+                            catch (Exception ex)
                             {
-                                failures.Add((ip, aex.Message));
+                                failures.Add((ip, ex.Message));
                                 done = true;
-                                break;
                             }
-
-                            var newKey = AnsiConsole.Prompt(
-                                new TextPrompt<string>("New API key:")
-                                    .Secret()
-                                    .ValidationErrorMessage("API key cannot be empty.")
-                                    .Validate(s => !string.IsNullOrWhiteSpace(s)));
-
-                            if (action == "Save different key to config")
-                            {
-                                var updated = cfg with { ApiKey = newKey.Trim() };
-                                AbuseIpDbClient.SaveConfig(_session.Root, updated);
-                                cfg = updated;
-                                sessionApiKeyOverride = null;
-                            }
-                            else
-                            {
-                                sessionApiKeyOverride = newKey.Trim();
-                            }
-
-                            client.Dispose();
-                            client = new AbuseIpDbClient(_session.Root, sessionApiKeyOverride);
-                            // retry same IP
                         }
-                        catch (Exception ex)
-                        {
-                            failures.Add((ip, ex.Message));
-                            done = true;
-                        }
+
+                        task.Increment(1);
                     }
+                });
+        }
+        finally
+        {
+            if (!linkedCts.IsCancellationRequested)
+                linkedCts.Cancel();
 
-                    task.Increment(1);
-                }
-            });
+            try
+            {
+                await escListener.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when leaving the check loop.
+            }
+        }
 
         client.Dispose();
 
@@ -983,10 +1022,17 @@ public sealed class AbuseIpMenu : IMenu
 
     private static IRenderable BuildIpPicker(string title, List<IpChoice> allChoices, HashSet<string> selected, int selectedIndex, int allCount, bool includeHits)
     {
+        const int pageSize = 18;
+
+        var half = Math.Max(1, pageSize / 2);
+        var start = Math.Max(0, selectedIndex - half);
+        start = Math.Min(start, Math.Max(0, allChoices.Count - pageSize));
+        var end = Math.Min(allChoices.Count, start + pageSize);
+
         var table = new Table().NoBorder();
         table.AddColumn("");
 
-        for (var i = 0; i < allChoices.Count; i++)
+        for (var i = start; i < end; i++)
         {
             var c = allChoices[i];
             var cursor = i == selectedIndex ? "[green]>[/]" : " ";
@@ -999,7 +1045,7 @@ public sealed class AbuseIpMenu : IMenu
 
         return new Rows(
             new Markup($"[bold]{Markup.Escape(title)}[/]"),
-            new Markup("[grey](Up/Down: move, Space: toggle, Enter: run, Esc: back)[/]"),
+            new Markup($"[grey](Up/Down: move, Space: toggle, Enter: run, Esc: back)  Showing {start + 1}-{end} of {allChoices.Count}[/]"),
             table);
     }
 }
