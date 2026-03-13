@@ -45,6 +45,12 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 1.1.2
+
+- Patch release for console UX responsiveness improvements.
+- AbuseIP: cleaner cancellation messaging and immediate first render in the IP picker.
+- Platform scans: visible processing spinner during heavy log analysis to avoid blank-screen confusion.
+
 ### 1.1.1
 
 - Version bump for the latest merged branch.
