@@ -6,8 +6,6 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 using System.Threading.Tasks;
 using LogHunter.Utils;
 using Spectre.Console;
@@ -53,27 +51,22 @@ public static partial class AlbOptions
             return;
         }
 
-        EmbeddedAssets.EnsureTabulatorAssets(root);
-        var assetsDir = Path.Combine(root, "ALB", "configs", "_assets");
-        var tabJs = Path.Combine(assetsDir, "tabulator.min.js");
-        var tabCss = Path.Combine(assetsDir, "tabulator.min.css");
-
-        if (!File.Exists(tabJs) || !File.Exists(tabCss))
-        {
-            ConsoleEx.Error("Tabulator assets are missing; cannot build the HTML report.");
-            AnsiConsole.MarkupLine($"[dim]Expected:[/]\n  {Markup.Escape(tabJs)}\n  {Markup.Escape(tabCss)}");
-            ConsoleEx.Pause("Press Enter to return...");
-            return;
-        }
+        Directory.CreateDirectory(outputFolder);
+        var sanitizedIp = SanitizeFileComponent(requestedIp.ToString());
+        var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
+        var excelPath = Path.Combine(outputFolder, $"alb_ip_summary_{sanitizedIp}_{stamp}.xlsx");
+        var sqlitePath = Path.Combine(outputFolder, $"alb_ip_summary_{sanitizedIp}_{stamp}.db");
 
         InfoPanel("Scan plan",
-            ("Mode", "IP summary with 1-minute ALB status chart + detailed request table"),
+            ("Mode", "IP summary with 1-minute ALB status chart + external detail export"),
             ("Client IP", requestedIp.ToString()),
             ("Files", files.Count.ToString("N0", CultureInfo.InvariantCulture)),
             ("Input", albFolder),
+            ("Excel threshold", "Rows < 1,000,000"),
+            ("SQLite threshold", "Rows >= 1,000,000"),
             ("Output", outputFolder));
 
-        var result = new AlbIpSummaryScanner.ScanResult(requestedIp.ToString());
+        using var result = new AlbIpSummaryScanner.ScanResult(requestedIp.ToString(), sqlitePath);
 
         await RunScanWithProgressAsync(
             title: "Scanning ALB logs (IP summary)",
@@ -86,49 +79,65 @@ public static partial class AlbOptions
                     reportBytesDelta: reportDelta)
         );
 
-        if (result.Rows.Count == 0)
+        result.CompleteStreamingExports();
+
+        if (result.TotalRows == 0)
         {
             ConsoleEx.Warn($"No ALB hits found for IP: {requestedIp}");
             ConsoleEx.Pause("Press Enter to return...");
             return;
         }
 
-        result.Rows.Sort((a, b) => a.TimestampUtc.CompareTo(b.TimestampUtc));
+        string detailExportPath;
+        string detailExportKind;
+        if (result.TotalRows < AlbIpSummaryScanner.ExcelRowThreshold)
+        {
+            result.Rows.Sort((a, b) => a.TimestampUtc.CompareTo(b.TimestampUtc));
+            AlbIpSummaryExportExcel.Export(excelPath, result);
+            detailExportPath = excelPath;
+            detailExportKind = "Excel";
+        }
+        else
+        {
+            detailExportPath = sqlitePath;
+            detailExportKind = "SQLite";
+        }
 
-        Directory.CreateDirectory(outputFolder);
-        var htmlPath = BuildIpSummaryReport(outputFolder, result, tabCss, tabJs);
+        var htmlPath = BuildIpSummaryReport(outputFolder, result, detailExportKind, detailExportPath, sanitizedIp);
 
         if (TryOpenFile(htmlPath))
-            ConsoleEx.Success($"Report opened: {htmlPath}");
+            ConsoleEx.Success($"HTML report opened: {htmlPath}");
         else
-            ConsoleEx.Success($"Report generated: {htmlPath}");
+            ConsoleEx.Success($"HTML report generated: {htmlPath}");
 
+        ConsoleEx.Success($"Detailed export generated as {detailExportKind}: {detailExportPath}");
         ConsoleEx.Pause("Press Enter to return...");
     }
 
     private static string BuildIpSummaryReport(
         string outputFolder,
         AlbIpSummaryScanner.ScanResult result,
-        string tabCssPath,
-        string tabJsPath)
+        string detailExportKind,
+        string detailExportPath,
+        string sanitizedIp)
     {
         var series = BuildIpSummarySeries(result);
-        var prefix = $"alb_ip_summary_{SanitizeFileComponent(result.RequestedIp)}";
         var htmlPath = Charts.SaveTimeSeriesHtml(
             outputFolder: outputFolder,
             title: $"ALB IP Summary: {result.RequestedIp}",
             yLabel: "Requests per minute",
             series: series,
-            filePrefix: prefix);
+            filePrefix: $"alb_ip_summary_{sanitizedIp}");
 
-        var injected = BuildTabulatorSectionHtml(htmlPath, result, tabCssPath, tabJsPath);
         var html = File.ReadAllText(htmlPath);
         html = html.Replace("Filter IP...", "Filter series...", StringComparison.Ordinal);
         html = html.Replace(
             "<th>IP</th><th>Source hits</th><th>Total requests</th><th>Peak (5 min)</th><th>Visible</th>",
             "<th>Series</th><th>Source hits</th><th>Total requests</th><th>Peak (bucket)</th><th>Visible</th>",
             StringComparison.Ordinal);
-        html = html.Replace("</body>", injected + Environment.NewLine + "</body>", StringComparison.OrdinalIgnoreCase);
+
+        var summaryHtml = BuildSummarySectionHtml(result, detailExportKind, detailExportPath);
+        html = html.Replace("</body>", summaryHtml + Environment.NewLine + "</body>", StringComparison.OrdinalIgnoreCase);
         File.WriteAllText(htmlPath, html, Encoding.UTF8);
 
         return htmlPath;
@@ -136,12 +145,12 @@ public static partial class AlbOptions
 
     private static List<Charts.TimeSeriesSeries> BuildIpSummarySeries(AlbIpSummaryScanner.ScanResult result)
     {
-        var start = result.Rows[0].TimestampUtc;
-        var end = result.Rows[^1].TimestampUtc;
+        var start = result.FirstHitUtc!.Value;
+        var end = result.LastHitUtc!.Value;
         start = new DateTime(start.Year, start.Month, start.Day, start.Hour, start.Minute, 0, DateTimeKind.Utc);
         end = new DateTime(end.Year, end.Month, end.Day, end.Hour, end.Minute, 0, DateTimeKind.Utc);
 
-        var points = (int)Math.Max(1, ((end - start).TotalMinutes + 1));
+        var points = (int)Math.Max(1, (end - start).TotalMinutes + 1);
         var times = new DateTime[points];
         var elb2xx = new double[points];
         var elb3xx = new double[points];
@@ -203,176 +212,97 @@ public static partial class AlbOptions
             PeakBucket: peak);
     }
 
-    private static string BuildTabulatorSectionHtml(
-        string htmlPath,
+    private static string BuildSummarySectionHtml(
         AlbIpSummaryScanner.ScanResult result,
-        string tabCssPath,
-        string tabJsPath)
+        string detailExportKind,
+        string detailExportPath)
     {
-        var data = result.Rows.Select(r => new
-        {
-            TimestampUtc = r.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC",
-            TimestampUnixMs = new DateTimeOffset(r.TimestampUtc).ToUnixTimeMilliseconds(),
-            r.ClientIp,
-            r.ClientPort,
-            r.Method,
-            r.Host,
-            PathNoQuery = r.PathNoQuery,
-            r.RawRequest,
-            ElbStatusCode = r.ElbStatusCode,
-            TargetStatusCode = r.TargetStatusCode,
-            TargetEndpoint = r.TargetEndpoint,
-            TargetProcessingTimeSeconds = r.TargetProcessingTimeSeconds,
-            RequestProcessingTimeSeconds = r.RequestProcessingTimeSeconds,
-            ResponseProcessingTimeSeconds = r.ResponseProcessingTimeSeconds,
-            r.ActionsExecuted,
-            r.TraceId,
-            r.UserAgent,
-            r.SourceFile,
-            r.RawLine
-        }).ToList();
+        var firstHit = result.FirstHitUtc?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC";
+        var lastHit = result.LastHitUtc?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC";
 
-        var json = JsonSerializer.Serialize(data, new JsonSerializerOptions
-        {
-            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-        });
-
-        var cssHref = ToHtmlPath(Path.GetRelativePath(Path.GetDirectoryName(htmlPath)!, tabCssPath));
-        var jsSrc = ToHtmlPath(Path.GetRelativePath(Path.GetDirectoryName(htmlPath)!, tabJsPath));
-
-        var sb = new StringBuilder(128 * 1024);
-        sb.AppendLine($"<link rel=\"stylesheet\" href=\"{HtmlAttr(cssHref)}\" />");
+        var sb = new StringBuilder(32 * 1024);
         sb.AppendLine("<style>");
         sb.AppendLine(@"
-.lh-report { padding:0 16px 16px 16px; }
-.lh-card { margin-top:12px; background:#0f1620; border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:12px; box-shadow:0 12px 28px rgba(0,0,0,.35); }
-.lh-title { font-size:16px; font-weight:600; margin:0 0 8px 0; }
-.lh-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
-.lh-search { background:#0b0f14; color:#e6edf3; border:1px solid rgba(255,255,255,.14); border-radius:8px; padding:6px 8px; min-width:280px; }
-.lh-pill { font-size:12px; padding:6px 10px; border:1px solid rgba(255,255,255,.10); border-radius:999px; background:rgba(255,255,255,.03); }
-.lh-small { font-size:12px; opacity:.75; }
-#ip-summary-table { margin-top:8px; }
-.tabulator { background:#0b0f14; border:1px solid rgba(255,255,255,.10); color:#e6edf3; }
-.tabulator .tabulator-header { background:#111a25; color:#e6edf3; border-bottom:1px solid rgba(255,255,255,.12); }
-.tabulator .tabulator-col { background:#111a25; }
-.tabulator .tabulator-tableholder .tabulator-table { background:#0b0f14; color:#e6edf3; }
-.tabulator-row, .tabulator-row.tabulator-row-even { background:#0b0f14; }
-.tabulator-row:hover { background:#132031 !important; }
-.tabulator-row .tabulator-cell { border-right:1px solid rgba(255,255,255,.08); }
-.lh-detail { padding:12px; background:#0b0f14; border:1px solid rgba(255,255,255,.08); border-radius:10px; margin:6px 0 10px 0; }
-.lh-detail-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:12px; }
-.lh-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre-wrap; word-break:break-word; }
+.summary-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:12px; }
+.summary-card { margin-top:12px; background:#0f1620; border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:12px; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
+.summary-title { font-size:16px; font-weight:600; margin:0 0 8px 0; }
+.summary-subtitle { font-size:13px; font-weight:600; margin:0 0 8px 0; }
+.summary-table { width:100%; border-collapse: collapse; font-size:12px; }
+.summary-table th, .summary-table td { padding:6px 8px; border-bottom:1px solid rgba(255,255,255,.07); text-align:left; vertical-align:top; }
+.summary-table th:last-child, .summary-table td:last-child { text-align:right; }
+.summary-note { font-size:12px; opacity:.8; line-height:1.45; }
+.summary-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break:break-word; }
 ");
         sb.AppendLine("</style>");
-        sb.AppendLine("<div class=\"lh-report\">\n  <div class=\"lh-card\">\n    <div class=\"lh-title\">Matching requests</div>");
-        sb.AppendLine("    <div class=\"lh-row\">");
-        sb.AppendLine($"      <div class=\"lh-pill\">IP: {Html(result.RequestedIp)}</div>");
-        sb.AppendLine($"      <div class=\"lh-pill\">Rows: {result.Rows.Count.ToString("N0", CultureInfo.InvariantCulture)}</div>");
-        sb.AppendLine($"      <div class=\"lh-pill\">Files with hits: {result.SourceFiles.Count.ToString("N0", CultureInfo.InvariantCulture)}</div>");
+        sb.AppendLine("<div class=\"wrap\">");
+        sb.AppendLine("  <div class=\"summary-card\">");
+        sb.AppendLine("    <div class=\"summary-title\">IP summary</div>");
+        sb.AppendLine("    <div class=\"row\">");
+        sb.AppendLine($"      <div class=\"pill\">Requested IP: {Html(result.RequestedIp)}</div>");
+        sb.AppendLine($"      <div class=\"pill\">Total matching requests: {result.TotalRows.ToString("N0", CultureInfo.InvariantCulture)}</div>");
+        sb.AppendLine($"      <div class=\"pill\">Files with hits: {result.SourceFiles.Count.ToString("N0", CultureInfo.InvariantCulture)}</div>");
+        sb.AppendLine($"      <div class=\"pill\">Time range: {Html(firstHit ?? "-")} → {Html(lastHit ?? "-")}</div>");
         sb.AppendLine("    </div>");
-        sb.AppendLine("    <div class=\"lh-row\">");
-        sb.AppendLine("      <input id=\"ipSummarySearch\" class=\"lh-search\" type=\"text\" placeholder=\"Filter rows...\" />");
-        sb.AppendLine("      <div class=\"lh-small\">Default sort: chronological ascending. Click a row to inspect the raw ALB line.</div>");
+        sb.AppendLine("    <div class=\"summary-grid\">");
+        sb.AppendLine(BuildStatusTableHtml("ELB status totals", result.ElbTotals));
+        sb.AppendLine(BuildStatusTableHtml("Target status totals", result.TargetTotals));
+        sb.AppendLine(BuildExportCardHtml(detailExportKind, detailExportPath));
+        sb.AppendLine(BuildTopTableHtml("Top 10 paths", "Path", result.TopPaths(10)));
+        sb.AppendLine(BuildTopTableHtml("Top 10 hosts", "Host", result.TopHosts(10)));
+        sb.AppendLine(BuildTopTableHtml("Top 10 target endpoints", "Target endpoint", result.TopTargetEndpoints(10)));
         sb.AppendLine("    </div>");
-        sb.AppendLine("    <div id=\"ip-summary-table\"></div>");
-        sb.AppendLine("  </div>\n</div>");
-        sb.AppendLine($"<script src=\"{HtmlAttr(jsSrc)}\"></script>");
-        sb.AppendLine("<script>");
-        sb.Append("const IP_SUMMARY_DATA = ");
-        sb.Append(json);
-        sb.AppendLine(";");
-        sb.AppendLine("""
-function escHtml(v){
-  return String(v ?? '')
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;');
-}
-function fmtMaybe(v){
-  return v == null || v === '' ? '—' : String(v);
-}
-function fmtSeconds(v){
-  if(v == null || Number.isNaN(Number(v))) return '—';
-  return Number(v).toFixed(6);
-}
-function buildDetail(row){
-  return '' +
-    '<div class="lh-detail">' +
-      '<div class="lh-detail-grid">' +
-        '<div>' +
-          '<div class="lh-small">Raw request</div>' +
-          '<div class="lh-mono">' + escHtml(fmtMaybe(row.RawRequest)) + '</div>' +
-        '</div>' +
-        '<div>' +
-          '<div class="lh-small">Actions executed</div>' +
-          '<div class="lh-mono">' + escHtml(fmtMaybe(row.ActionsExecuted)) + '</div>' +
-        '</div>' +
-        '<div>' +
-          '<div class="lh-small">Trace ID</div>' +
-          '<div class="lh-mono">' + escHtml(fmtMaybe(row.TraceId)) + '</div>' +
-        '</div>' +
-        '<div>' +
-          '<div class="lh-small">User-Agent</div>' +
-          '<div class="lh-mono">' + escHtml(fmtMaybe(row.UserAgent)) + '</div>' +
-        '</div>' +
-        '<div style="grid-column:1 / -1">' +
-          '<div class="lh-small">Raw ALB line</div>' +
-          '<div class="lh-mono">' + escHtml(fmtMaybe(row.RawLine)) + '</div>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-}
-const table = new Tabulator('#ip-summary-table', {
-  data: IP_SUMMARY_DATA,
-  layout: 'fitDataStretch',
-  pagination: 'local',
-  paginationSize: 50,
-  movableColumns: true,
-  initialSort: [{ column: 'TimestampUnixMs', dir: 'asc' }],
-  columns: [
-    { title: 'Timestamp UTC', field: 'TimestampUtc', sorter: 'datetime', width: 185, cssClass: 'lh-mono' },
-    { title: 'Client IP', field: 'ClientIp', width: 150, cssClass: 'lh-mono' },
-    { title: 'Port', field: 'ClientPort', width: 90, cssClass: 'lh-mono' },
-    { title: 'Method', field: 'Method', width: 95 },
-    { title: 'Host', field: 'Host', width: 180, formatter: function(cell){ return '<span class="lh-mono">' + escHtml(fmtMaybe(cell.getValue())) + '</span>'; } },
-    { title: 'Path', field: 'PathNoQuery', width: 260, formatter: function(cell){ return '<span class="lh-mono">' + escHtml(fmtMaybe(cell.getValue())) + '</span>'; } },
-    { title: 'Raw request', field: 'RawRequest', width: 320, formatter: function(cell){ return '<span class="lh-mono">' + escHtml(fmtMaybe(cell.getValue())) + '</span>'; } },
-    { title: 'ELB status', field: 'ElbStatusCode', sorter: 'number', hozAlign: 'right', width: 110 },
-    { title: 'Target status', field: 'TargetStatusCode', sorter: 'number', hozAlign: 'right', width: 120 },
-    { title: 'Target endpoint', field: 'TargetEndpoint', width: 180, formatter: function(cell){ return '<span class="lh-mono">' + escHtml(fmtMaybe(cell.getValue())) + '</span>'; } },
-    { title: 'Target proc (s)', field: 'TargetProcessingTimeSeconds', sorter: 'number', hozAlign: 'right', width: 130, formatter: function(cell){ return '<span class="lh-mono">' + escHtml(fmtSeconds(cell.getValue())) + '</span>'; } },
-    { title: 'Request proc (s)', field: 'RequestProcessingTimeSeconds', sorter: 'number', hozAlign: 'right', width: 135, formatter: function(cell){ return '<span class="lh-mono">' + escHtml(fmtSeconds(cell.getValue())) + '</span>'; } },
-    { title: 'Response proc (s)', field: 'ResponseProcessingTimeSeconds', sorter: 'number', hozAlign: 'right', width: 140, formatter: function(cell){ return '<span class="lh-mono">' + escHtml(fmtSeconds(cell.getValue())) + '</span>'; } },
-    { title: 'Actions', field: 'ActionsExecuted', width: 180, formatter: function(cell){ return '<span class="lh-mono">' + escHtml(fmtMaybe(cell.getValue())) + '</span>'; } },
-    { title: 'Trace ID', field: 'TraceId', width: 220, formatter: function(cell){ return '<span class="lh-mono">' + escHtml(fmtMaybe(cell.getValue())) + '</span>'; } },
-    { title: 'User-Agent', field: 'UserAgent', width: 260, formatter: function(cell){ return '<span class="lh-mono">' + escHtml(fmtMaybe(cell.getValue())) + '</span>'; } },
-    { title: 'Source file', field: 'SourceFile', width: 220, formatter: function(cell){ return '<span class="lh-mono">' + escHtml(fmtMaybe(cell.getValue())) + '</span>'; } },
-    { title: 'Timestamp sort', field: 'TimestampUnixMs', visible: false }
-  ],
-  rowClick: function(e, row){
-    const el = row.getElement();
-    const next = el.nextElementSibling;
-    if(next && next.classList.contains('detail-row')){
-      next.remove();
-      return;
+        sb.AppendLine("  </div>");
+        sb.AppendLine("</div>");
+        return sb.ToString();
     }
-    const detail = document.createElement('div');
-    detail.className = 'detail-row';
-    detail.innerHTML = buildDetail(row.getData());
-    el.parentNode.insertBefore(detail, el.nextSibling);
-  }
-});
-const search = document.getElementById('ipSummarySearch');
-search.addEventListener('input', function(){
-  const term = (search.value || '').toLowerCase().trim();
-  table.setFilter(function(data){
-    if(!term) return true;
-    return JSON.stringify(data).toLowerCase().indexOf(term) >= 0;
-  });
-});
-""");
-        sb.AppendLine("</script>");
+
+    private static string BuildStatusTableHtml(string title, AlbIpSummaryScanner.StatusGroupCounts counts)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("<div class=\"summary-card\">");
+        sb.AppendLine($"  <div class=\"summary-subtitle\">{Html(title)}</div>");
+        sb.AppendLine("  <table class=\"summary-table\">");
+        sb.AppendLine("    <tr><th>Class</th><th>Hits</th></tr>");
+        sb.AppendLine($"    <tr><td>2xx</td><td>{counts.S2xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
+        sb.AppendLine($"    <tr><td>3xx</td><td>{counts.S3xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
+        sb.AppendLine($"    <tr><td>4xx</td><td>{counts.S4xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
+        sb.AppendLine($"    <tr><td>5xx</td><td>{counts.S5xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
+        sb.AppendLine("  </table>");
+        sb.AppendLine("</div>");
+        return sb.ToString();
+    }
+
+    private static string BuildTopTableHtml(string title, string label, IReadOnlyList<KeyValuePair<string, int>> items)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("<div class=\"summary-card\">");
+        sb.AppendLine($"  <div class=\"summary-subtitle\">{Html(title)}</div>");
+        sb.AppendLine("  <table class=\"summary-table\">");
+        sb.AppendLine($"    <tr><th>{Html(label)}</th><th>Hits</th></tr>");
+
+        if (items.Count == 0)
+        {
+            sb.AppendLine("    <tr><td>(none)</td><td>0</td></tr>");
+        }
+        else
+        {
+            foreach (var item in items)
+                sb.AppendLine($"    <tr><td class=\"summary-mono\">{Html(item.Key)}</td><td>{item.Value.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
+        }
+
+        sb.AppendLine("  </table>");
+        sb.AppendLine("</div>");
+        return sb.ToString();
+    }
+
+    private static string BuildExportCardHtml(string detailExportKind, string detailExportPath)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("<div class=\"summary-card\">");
+        sb.AppendLine("  <div class=\"summary-subtitle\">Detailed export</div>");
+        sb.AppendLine($"  <div class=\"summary-note\">Full request detail was written to <strong>{Html(detailExportKind)}</strong> using the option 3 threshold rule.</div>");
+        sb.AppendLine($"  <div class=\"summary-note summary-mono\" style=\"margin-top:8px\">{Html(detailExportPath)}</div>");
+        sb.AppendLine("</div>");
         return sb.ToString();
     }
 
@@ -402,15 +332,10 @@ search.addEventListener('input', function(){
         return sb.ToString();
     }
 
-    private static string ToHtmlPath(string path)
-        => path.Replace(Path.DirectorySeparatorChar, '/');
-
     private static string Html(string value)
         => (value ?? string.Empty)
             .Replace("&", "&amp;", StringComparison.Ordinal)
             .Replace("<", "&lt;", StringComparison.Ordinal)
             .Replace(">", "&gt;", StringComparison.Ordinal)
             .Replace("\"", "&quot;", StringComparison.Ordinal);
-
-    private static string HtmlAttr(string value) => Html(value);
 }

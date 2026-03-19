@@ -10,23 +10,85 @@ namespace LogHunter.Services;
 
 public static class AlbIpSummaryScanner
 {
-    public sealed class ScanResult
+    public const int ExcelRowThreshold = 1_000_000;
+
+    public sealed class ScanResult : IDisposable
     {
-        public ScanResult(string requestedIp)
+        private readonly string _sqlitePath;
+        private AlbIpSummaryExportSqlite.Writer? _sqliteWriter;
+
+        public ScanResult(string requestedIp, string sqlitePath)
         {
             RequestedIp = requestedIp;
+            _sqlitePath = sqlitePath;
         }
 
         public string RequestedIp { get; }
         public List<AlbIpSummaryRow> Rows { get; } = new();
         public SortedDictionary<DateTime, BucketCounts> BucketsByMinuteUtc { get; } = new();
         public HashSet<string> SourceFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public StatusGroupCounts ElbTotals { get; } = new();
+        public StatusGroupCounts TargetTotals { get; } = new();
+        public Dictionary<string, int> PathCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, int> HostCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, int> TargetEndpointCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public long TotalRows { get; private set; }
+        public DateTime? FirstHitUtc { get; private set; }
+        public DateTime? LastHitUtc { get; private set; }
+        public bool UsesSqliteDetailExport => _sqliteWriter is not null;
+        public string SqlitePath => _sqlitePath;
 
         public void AddRow(AlbIpSummaryRow row)
         {
-            Rows.Add(row);
-            SourceFiles.Add(row.SourceFile);
+            TotalRows++;
 
+            if (!FirstHitUtc.HasValue || row.TimestampUtc < FirstHitUtc.Value)
+                FirstHitUtc = row.TimestampUtc;
+
+            if (!LastHitUtc.HasValue || row.TimestampUtc > LastHitUtc.Value)
+                LastHitUtc = row.TimestampUtc;
+
+            SourceFiles.Add(row.SourceFile);
+            AddBucket(row);
+            IncrementStatusBucket(ElbTotals, row.ElbStatusCode);
+            IncrementStatusBucket(TargetTotals, row.TargetStatusCode);
+            IncrementCount(PathCounts, row.PathNoQuery);
+            IncrementCount(HostCounts, row.Host);
+            IncrementCount(TargetEndpointCounts, row.TargetEndpoint);
+
+            if (_sqliteWriter is not null)
+            {
+                _sqliteWriter.WriteRow(row);
+                return;
+            }
+
+            Rows.Add(row);
+            if (TotalRows >= ExcelRowThreshold)
+            {
+                _sqliteWriter = AlbIpSummaryExportSqlite.Open(_sqlitePath);
+                _sqliteWriter.WriteRows(Rows);
+                Rows.Clear();
+                Rows.TrimExcess();
+            }
+        }
+
+        public void CompleteStreamingExports()
+        {
+            _sqliteWriter?.Complete();
+        }
+
+        public List<KeyValuePair<string, int>> TopPaths(int take) => TopCounts(PathCounts, take);
+        public List<KeyValuePair<string, int>> TopHosts(int take) => TopCounts(HostCounts, take);
+        public List<KeyValuePair<string, int>> TopTargetEndpoints(int take) => TopCounts(TargetEndpointCounts, take);
+
+        public void Dispose()
+        {
+            _sqliteWriter?.Dispose();
+        }
+
+        private void AddBucket(AlbIpSummaryRow row)
+        {
             var bucketUtc = FloorToMinuteUtc(row.TimestampUtc);
             if (!BucketsByMinuteUtc.TryGetValue(bucketUtc, out var bucket))
             {
@@ -37,6 +99,23 @@ public static class AlbIpSummaryScanner
             IncrementStatusBucket(bucket.Elb, row.ElbStatusCode);
             IncrementStatusBucket(bucket.Target, row.TargetStatusCode);
         }
+
+        private static void IncrementCount(Dictionary<string, int> counts, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value == "-")
+                return;
+
+            if (counts.TryGetValue(value, out var current))
+                counts[value] = current + 1;
+            else
+                counts[value] = 1;
+        }
+
+        private static List<KeyValuePair<string, int>> TopCounts(Dictionary<string, int> counts, int take)
+            => counts.OrderByDescending(x => x.Value)
+                .ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                .Take(take)
+                .ToList();
     }
 
     public sealed class BucketCounts
