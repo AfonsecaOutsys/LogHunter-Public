@@ -58,7 +58,7 @@ public static partial class AlbOptions
         var sqlitePath = Path.Combine(outputFolder, $"alb_ip_summary_{sanitizedIp}_{stamp}.db");
 
         InfoPanel("Scan plan",
-            ("Mode", "IP summary with 1-minute ALB status chart + external detail export"),
+            ("Mode", "IP summary with 1-minute FE/CF response chart + external detail export"),
             ("Client IP", requestedIp.ToString()),
             ("Files", files.Count.ToString("N0", CultureInfo.InvariantCulture)),
             ("Input", albFolder),
@@ -152,14 +152,12 @@ public static partial class AlbOptions
 
         var points = (int)Math.Max(1, (end - start).TotalMinutes + 1);
         var times = new DateTime[points];
-        var elb2xx = new double[points];
-        var elb3xx = new double[points];
-        var elb4xx = new double[points];
-        var elb5xx = new double[points];
-        var target2xx = new double[points];
-        var target3xx = new double[points];
-        var target4xx = new double[points];
-        var target5xx = new double[points];
+        var fe2xx3xx = new double[points];
+        var fe4xx = new double[points];
+        var fe5xx = new double[points];
+        var cf2xx3xx = new double[points];
+        var cf4xx = new double[points];
+        var cf5xx = new double[points];
 
         for (int i = 0; i < points; i++)
         {
@@ -169,26 +167,22 @@ public static partial class AlbOptions
             if (!result.BucketsByMinuteUtc.TryGetValue(bucketUtc, out var bucket))
                 continue;
 
-            elb2xx[i] = bucket.Elb.S2xx;
-            elb3xx[i] = bucket.Elb.S3xx;
-            elb4xx[i] = bucket.Elb.S4xx;
-            elb5xx[i] = bucket.Elb.S5xx;
-            target2xx[i] = bucket.Target.S2xx;
-            target3xx[i] = bucket.Target.S3xx;
-            target4xx[i] = bucket.Target.S4xx;
-            target5xx[i] = bucket.Target.S5xx;
+            fe2xx3xx[i] = bucket.Elb.S2xx + bucket.Elb.S3xx;
+            fe4xx[i] = bucket.Elb.S4xx;
+            fe5xx[i] = bucket.Elb.S5xx;
+            cf2xx3xx[i] = bucket.Target.S2xx + bucket.Target.S3xx;
+            cf4xx[i] = bucket.Target.S4xx;
+            cf5xx[i] = bucket.Target.S5xx;
         }
 
         return new List<Charts.TimeSeriesSeries>
         {
-            BuildSeries("ELB 2xx", times, elb2xx),
-            BuildSeries("ELB 3xx", times, elb3xx),
-            BuildSeries("ELB 4xx", times, elb4xx),
-            BuildSeries("ELB 5xx", times, elb5xx),
-            BuildSeries("Target 2xx", times, target2xx),
-            BuildSeries("Target 3xx", times, target3xx),
-            BuildSeries("Target 4xx", times, target4xx),
-            BuildSeries("Target 5xx", times, target5xx)
+            BuildSeries("FE 2xx/3xx", times, fe2xx3xx),
+            BuildSeries("FE 4xx", times, fe4xx),
+            BuildSeries("FE 5xx", times, fe5xx),
+            BuildSeries("CF 2xx/3xx", times, cf2xx3xx),
+            BuildSeries("CF 4xx", times, cf4xx),
+            BuildSeries("CF 5xx", times, cf5xx)
         };
     }
 
@@ -244,12 +238,13 @@ public static partial class AlbOptions
         sb.AppendLine($"      <div class=\"pill\">Time range: {Html(firstHit ?? "-")} → {Html(lastHit ?? "-")}</div>");
         sb.AppendLine("    </div>");
         sb.AppendLine("    <div class=\"summary-grid\">");
-        sb.AppendLine(BuildStatusTableHtml("ELB status totals", result.ElbTotals));
-        sb.AppendLine(BuildStatusTableHtml("Target status totals", result.TargetTotals));
+        sb.AppendLine(BuildStatusTableHtml("FE Response totals", result.ElbTotals));
+        sb.AppendLine(BuildStatusTableHtml("CF Response totals", result.TargetTotals));
+        sb.AppendLine(BuildMismatchCardHtml(result));
         sb.AppendLine(BuildExportCardHtml(detailExportKind, detailExportPath));
         sb.AppendLine(BuildTopTableHtml("Top 10 paths", "Path", result.TopPaths(10)));
         sb.AppendLine(BuildTopTableHtml("Top 10 hosts", "Host", result.TopHosts(10)));
-        sb.AppendLine(BuildTopTableHtml("Top 10 target endpoints", "Target endpoint", result.TopTargetEndpoints(10)));
+        sb.AppendLine(BuildTopTableHtml("Top 10 CF endpoints", "CF endpoint", result.TopTargetEndpoints(10)));
         sb.AppendLine("    </div>");
         sb.AppendLine("  </div>");
         sb.AppendLine("</div>");
@@ -263,10 +258,25 @@ public static partial class AlbOptions
         sb.AppendLine($"  <div class=\"summary-subtitle\">{Html(title)}</div>");
         sb.AppendLine("  <table class=\"summary-table\">");
         sb.AppendLine("    <tr><th>Class</th><th>Hits</th></tr>");
-        sb.AppendLine($"    <tr><td>2xx</td><td>{counts.S2xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
-        sb.AppendLine($"    <tr><td>3xx</td><td>{counts.S3xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
+        sb.AppendLine($"    <tr><td>2xx/3xx</td><td>{(counts.S2xx + counts.S3xx).ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
         sb.AppendLine($"    <tr><td>4xx</td><td>{counts.S4xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
         sb.AppendLine($"    <tr><td>5xx</td><td>{counts.S5xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
+        sb.AppendLine("  </table>");
+        sb.AppendLine("</div>");
+        return sb.ToString();
+    }
+
+    private static string BuildMismatchCardHtml(AlbIpSummaryScanner.ScanResult result)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("<div class=\"summary-card\" style=\"border-color: rgba(245, 158, 11, .45);\">");
+        sb.AppendLine("  <div class=\"summary-subtitle\">⭐ Interesting Mismatches</div>");
+        sb.AppendLine("  <table class=\"summary-table\">");
+        sb.AppendLine("    <tr><th>Signal</th><th>Hits</th></tr>");
+        sb.AppendLine($"    <tr><td>CF 5xx while FE is 2xx/3xx</td><td>{result.Cf5xxWhileFe2xx3xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
+        sb.AppendLine($"    <tr><td>CF 4xx while FE is 2xx/3xx</td><td>{result.Cf4xxWhileFe2xx3xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
+        sb.AppendLine($"    <tr><td>FE 5xx while CF is 2xx/3xx</td><td>{result.Fe5xxWhileCf2xx3xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
+        sb.AppendLine($"    <tr><td>FE 4xx while CF is 2xx/3xx</td><td>{result.Fe4xxWhileCf2xx3xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
         sb.AppendLine("  </table>");
         sb.AppendLine("</div>");
         return sb.ToString();

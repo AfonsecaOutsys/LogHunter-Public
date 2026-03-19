@@ -41,13 +41,16 @@ public static class AlbIpSummaryExportExcel
         ws.Cell(row, 2).Value = result.LastHitUtc?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "-";
         row += 2;
 
-        WriteStatusTable(ws, row, 1, "ELB status totals", result.ElbTotals);
-        WriteStatusTable(ws, row, 5, "Target status totals", result.TargetTotals);
+        WriteStatusTable(ws, row, 1, "FE Response totals", result.ElbTotals);
+        WriteStatusTable(ws, row, 5, "CF Response totals", result.TargetTotals);
+        row += 7;
+
+        WriteMismatchTable(ws, row, 1, result);
         row += 7;
 
         row = WriteTopCounts(ws, row, 1, "Top 10 paths", result.TopPaths(10));
         row = WriteTopCounts(ws, row, 4, "Top 10 hosts", result.TopHosts(10));
-        _ = WriteTopCounts(ws, row, 7, "Top 10 target endpoints", result.TopTargetEndpoints(10));
+        _ = WriteTopCounts(ws, row, 7, "Top 10 CF endpoints", result.TopTargetEndpoints(10));
 
         ws.Columns().AdjustToContents(10, 80);
     }
@@ -63,9 +66,9 @@ public static class AlbIpSummaryExportExcel
             "Host",
             "PathNoQuery",
             "RawRequest",
-            "ElbStatusCode",
-            "TargetStatusCode",
-            "TargetEndpoint",
+            "FeResponseStatusCode",
+            "CfResponseStatusCode",
+            "CfEndpoint",
             "TargetProcessingTimeSeconds",
             "RequestProcessingTimeSeconds",
             "ResponseProcessingTimeSeconds",
@@ -119,17 +122,38 @@ public static class AlbIpSummaryExportExcel
         ws.Cell(row, col).Style.Font.Bold = true;
         row++;
 
-        ws.Cell(row, col).Value = "2xx";
-        ws.Cell(row, col + 1).Value = counts.S2xx;
-        row++;
-        ws.Cell(row, col).Value = "3xx";
-        ws.Cell(row, col + 1).Value = counts.S3xx;
+        ws.Cell(row, col).Value = "2xx/3xx";
+        ws.Cell(row, col + 1).Value = counts.S2xx + counts.S3xx;
         row++;
         ws.Cell(row, col).Value = "4xx";
         ws.Cell(row, col + 1).Value = counts.S4xx;
         row++;
         ws.Cell(row, col).Value = "5xx";
         ws.Cell(row, col + 1).Value = counts.S5xx;
+    }
+
+    private static void WriteMismatchTable(IXLWorksheet ws, int row, int col, AlbIpSummaryScanner.ScanResult result)
+    {
+        ws.Cell(row, col).Value = "Interesting Mismatches";
+        ws.Cell(row, col).Style.Font.Bold = true;
+        row++;
+
+        ws.Cell(row, col).Value = "Signal";
+        ws.Cell(row, col + 1).Value = "Hits";
+        ws.Range(row, col, row, col + 1).Style.Font.Bold = true;
+        row++;
+
+        ws.Cell(row, col).Value = "CF 5xx while FE is 2xx/3xx";
+        ws.Cell(row, col + 1).Value = result.Cf5xxWhileFe2xx3xx;
+        row++;
+        ws.Cell(row, col).Value = "CF 4xx while FE is 2xx/3xx";
+        ws.Cell(row, col + 1).Value = result.Cf4xxWhileFe2xx3xx;
+        row++;
+        ws.Cell(row, col).Value = "FE 5xx while CF is 2xx/3xx";
+        ws.Cell(row, col + 1).Value = result.Fe5xxWhileCf2xx3xx;
+        row++;
+        ws.Cell(row, col).Value = "FE 4xx while CF is 2xx/3xx";
+        ws.Cell(row, col + 1).Value = result.Fe4xxWhileCf2xx3xx;
     }
 
     private static int WriteTopCounts(IXLWorksheet ws, int row, int col, string title, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, int>> items)

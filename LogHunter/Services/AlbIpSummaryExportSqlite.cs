@@ -44,9 +44,9 @@ CREATE TABLE Hits (
     Host TEXT,
     PathNoQuery TEXT,
     RawRequest TEXT,
-    ElbStatusCode INTEGER,
-    TargetStatusCode INTEGER,
-    TargetEndpoint TEXT,
+    FeStatusCode INTEGER,
+    CfStatusCode INTEGER,
+    CfEndpoint TEXT,
     TargetProcessingTimeSeconds REAL,
     RequestProcessingTimeSeconds REAL,
     ResponseProcessingTimeSeconds REAL,
@@ -71,9 +71,9 @@ INSERT INTO Hits (
     Host,
     PathNoQuery,
     RawRequest,
-    ElbStatusCode,
-    TargetStatusCode,
-    TargetEndpoint,
+    FeStatusCode,
+    CfStatusCode,
+    CfEndpoint,
     TargetProcessingTimeSeconds,
     RequestProcessingTimeSeconds,
     ResponseProcessingTimeSeconds,
@@ -90,9 +90,9 @@ INSERT INTO Hits (
     $Host,
     $PathNoQuery,
     $RawRequest,
-    $ElbStatusCode,
-    $TargetStatusCode,
-    $TargetEndpoint,
+    $FeStatusCode,
+    $CfStatusCode,
+    $CfEndpoint,
     $TargetProcessingTimeSeconds,
     $RequestProcessingTimeSeconds,
     $ResponseProcessingTimeSeconds,
@@ -110,9 +110,9 @@ INSERT INTO Hits (
             AddParameter("$Host");
             AddParameter("$PathNoQuery");
             AddParameter("$RawRequest");
-            AddParameter("$ElbStatusCode");
-            AddParameter("$TargetStatusCode");
-            AddParameter("$TargetEndpoint");
+            AddParameter("$FeStatusCode");
+            AddParameter("$CfStatusCode");
+            AddParameter("$CfEndpoint");
             AddParameter("$TargetProcessingTimeSeconds");
             AddParameter("$RequestProcessingTimeSeconds");
             AddParameter("$ResponseProcessingTimeSeconds");
@@ -138,9 +138,9 @@ INSERT INTO Hits (
             _insert.Parameters["$Host"].Value = DbValue(row.Host);
             _insert.Parameters["$PathNoQuery"].Value = DbValue(row.PathNoQuery);
             _insert.Parameters["$RawRequest"].Value = DbValue(row.RawRequest);
-            _insert.Parameters["$ElbStatusCode"].Value = DbValue(row.ElbStatusCode);
-            _insert.Parameters["$TargetStatusCode"].Value = DbValue(row.TargetStatusCode);
-            _insert.Parameters["$TargetEndpoint"].Value = DbValue(row.TargetEndpoint);
+            _insert.Parameters["$FeStatusCode"].Value = DbValue(row.ElbStatusCode);
+            _insert.Parameters["$CfStatusCode"].Value = DbValue(row.TargetStatusCode);
+            _insert.Parameters["$CfEndpoint"].Value = DbValue(row.TargetEndpoint);
             _insert.Parameters["$TargetProcessingTimeSeconds"].Value = DbValue(row.TargetProcessingTimeSeconds);
             _insert.Parameters["$RequestProcessingTimeSeconds"].Value = DbValue(row.RequestProcessingTimeSeconds);
             _insert.Parameters["$ResponseProcessingTimeSeconds"].Value = DbValue(row.ResponseProcessingTimeSeconds);
@@ -164,9 +164,9 @@ INSERT INTO Hits (
 CREATE INDEX idx_hits_timestamp_utc ON Hits(TimestampUtc);
 CREATE INDEX idx_hits_path_no_query ON Hits(PathNoQuery);
 CREATE INDEX idx_hits_host ON Hits(Host);
-CREATE INDEX idx_hits_elb_status ON Hits(ElbStatusCode);
-CREATE INDEX idx_hits_target_status ON Hits(TargetStatusCode);
-CREATE INDEX idx_hits_target_endpoint ON Hits(TargetEndpoint);";
+CREATE INDEX idx_hits_fe_status ON Hits(FeStatusCode);
+CREATE INDEX idx_hits_cf_status ON Hits(CfStatusCode);
+CREATE INDEX idx_hits_cf_endpoint ON Hits(CfEndpoint);";
             idx.ExecuteNonQuery();
 
             _completed = true;

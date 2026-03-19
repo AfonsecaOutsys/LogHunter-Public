@@ -32,6 +32,10 @@ public static class AlbIpSummaryScanner
         public Dictionary<string, int> PathCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, int> HostCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, int> TargetEndpointCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public long Cf5xxWhileFe2xx3xx { get; private set; }
+        public long Cf4xxWhileFe2xx3xx { get; private set; }
+        public long Fe5xxWhileCf2xx3xx { get; private set; }
+        public long Fe4xxWhileCf2xx3xx { get; private set; }
 
         public long TotalRows { get; private set; }
         public DateTime? FirstHitUtc { get; private set; }
@@ -56,6 +60,7 @@ public static class AlbIpSummaryScanner
             IncrementCount(PathCounts, row.PathNoQuery);
             IncrementCount(HostCounts, row.Host);
             IncrementCount(TargetEndpointCounts, row.TargetEndpoint);
+            UpdateMismatchCounts(row);
 
             if (_sqliteWriter is not null)
             {
@@ -116,6 +121,28 @@ public static class AlbIpSummaryScanner
                 .ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
                 .Take(take)
                 .ToList();
+
+        private void UpdateMismatchCounts(AlbIpSummaryRow row)
+        {
+            var feIs2xx3xx = Is2xx3xx(row.ElbStatusCode);
+            var cfIs2xx3xx = Is2xx3xx(row.TargetStatusCode);
+            var feIs4xx = Is4xx(row.ElbStatusCode);
+            var feIs5xx = Is5xx(row.ElbStatusCode);
+            var cfIs4xx = Is4xx(row.TargetStatusCode);
+            var cfIs5xx = Is5xx(row.TargetStatusCode);
+
+            if (cfIs5xx && feIs2xx3xx)
+                Cf5xxWhileFe2xx3xx++;
+
+            if (cfIs4xx && feIs2xx3xx)
+                Cf4xxWhileFe2xx3xx++;
+
+            if (feIs5xx && cfIs2xx3xx)
+                Fe5xxWhileCf2xx3xx++;
+
+            if (feIs4xx && cfIs2xx3xx)
+                Fe4xxWhileCf2xx3xx++;
+        }
     }
 
     public sealed class BucketCounts
@@ -289,6 +316,15 @@ public static class AlbIpSummaryScanner
         else if (statusCode.Value >= 500 && statusCode.Value <= 599)
             counts.S5xx++;
     }
+
+    private static bool Is2xx3xx(int? statusCode)
+        => statusCode.HasValue && statusCode.Value >= 200 && statusCode.Value <= 399;
+
+    private static bool Is4xx(int? statusCode)
+        => statusCode.HasValue && statusCode.Value >= 400 && statusCode.Value <= 499;
+
+    private static bool Is5xx(int? statusCode)
+        => statusCode.HasValue && statusCode.Value >= 500 && statusCode.Value <= 599;
 
     private static void ParseRequest(
         ReadOnlySpan<char> requestToken,
