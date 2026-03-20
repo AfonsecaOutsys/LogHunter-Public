@@ -227,7 +227,7 @@ public static partial class AlbOptions
         html = html.Replace("Filter IP...", "Filter series...", StringComparison.Ordinal);
         html = html.Replace(
             "<th>IP</th><th>Source hits</th><th>Total requests</th><th>Peak (5 min)</th><th>Visible</th>",
-            "<th title=\"The chart line or metric represented in this report.\">Series</th><th title=\"Total number of matching requests counted for this series across the full scan.\">Total requests</th><th title=\"Highest number of requests seen for this series in a single time bucket on the chart.\">Peak bucket</th><th title=\"UTC timestamp of the highest bucket value for this series.\">Peak time (UTC)</th><th title=\"Whether this series is currently shown or hidden on the chart.\">Visible</th>",
+            $"<th>{TitleTooltipHtml("Series", "The chart line or metric represented in this report.")}</th><th>{TitleTooltipHtml("Total requests", "Total number of matching requests counted for this series across the full scan.")}</th><th>{TitleTooltipHtml("Peak bucket", "Highest number of requests seen for this series in a single time bucket on the chart.")}</th><th>{TitleTooltipHtml("Peak time (UTC)", "UTC timestamp of the highest bucket value for this series.")}</th><th>{TitleTooltipHtml("Visible", "Whether this series is currently shown or hidden on the chart.")}</th>",
             StringComparison.Ordinal);
         html = html.Replace(
             "function buildSummary(){",
@@ -342,10 +342,14 @@ function buildSummary(){",
 .summary-table th:last-child, .summary-table td:last-child { text-align:right; }
 .summary-note { font-size:12px; opacity:.8; line-height:1.45; }
 .summary-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break:break-word; }
-.lh-tip { position:relative; cursor:help; border-bottom:1px dotted rgba(255,255,255,.28); }
+.lh-tip, .lh-tip-inline { display:inline-flex; align-items:center; gap:6px; cursor:help; border-bottom:1px dotted rgba(255,255,255,.28); text-decoration:none; }
+.lh-tip { position:relative; }
+.lh-tip:focus-visible, .lh-tip-inline:focus-visible { outline:none; border-bottom-color:rgba(125,211,252,.5); }
 .lh-tip::after { content:attr(data-tip); position:absolute; left:0; bottom:calc(100% + 8px); min-width:180px; max-width:280px; padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.12); background:#111926; color:#e6edf3; box-shadow:0 12px 28px rgba(0,0,0,.35); font-size:11px; font-weight:400; line-height:1.35; white-space:normal; opacity:0; pointer-events:none; transform:translateY(4px); transition:opacity .12s ease, transform .12s ease; z-index:30; }
 .lh-tip::before { content:''; position:absolute; left:14px; bottom:calc(100% + 2px); border:6px solid transparent; border-top-color:#111926; opacity:0; pointer-events:none; transform:translateY(4px); transition:opacity .12s ease, transform .12s ease; z-index:30; }
-.lh-tip:hover::after, .lh-tip:hover::before { opacity:1; transform:translateY(0); }
+.lh-tip:hover::after, .lh-tip:hover::before, .lh-tip:focus-visible::after, .lh-tip:focus-visible::before { opacity:1; transform:translateY(0); }
+.lh-tip-icon { font-size:11px; line-height:1; color:rgba(230,237,243,.58); transition:color .12s ease, transform .12s ease; }
+.lh-tip:hover .lh-tip-icon, .lh-tip:focus-visible .lh-tip-icon, .lh-tip-inline:hover .lh-tip-icon, .lh-tip-inline:focus-visible .lh-tip-icon { color:#cbd5e1; transform:translateY(-1px); }
 ");
         sb.AppendLine("</style>");
         sb.AppendLine("<div class=\"wrap\">");
@@ -377,7 +381,7 @@ function buildSummary(){",
     {
         var tooltip = title.StartsWith("ELB Response", StringComparison.Ordinal)
             ? "ELB Response status classes returned to the end user for this IP."
-            : "FE Response status classes returned by the backend or server for this IP.";
+            : "Front-End Response status classes returned by the backend or server for this IP.";
 
         var sb = new StringBuilder();
         sb.AppendLine("<div class=\"summary-card\">");
@@ -396,7 +400,7 @@ function buildSummary(){",
     {
         var sb = new StringBuilder();
         sb.AppendLine("<div class=\"summary-card\" style=\"border-color: rgba(245, 158, 11, .45);\">");
-        sb.AppendLine($"  <div class=\"summary-subtitle\">{TooltipHtml("⭐ Interesting Mismatches", "Counts of cases where ELB Response and FE Response differ in a meaningful way for investigation.")}</div>");
+        sb.AppendLine($"  <div class=\"summary-subtitle\">{TooltipHtml("⭐ Interesting Mismatches", "Counts of cases where ELB Response and Front-End Response differ in a meaningful way for investigation.")}</div>");
         sb.AppendLine("  <table class=\"summary-table\">");
         sb.AppendLine("    <tr><th>Signal</th><th>Hits</th></tr>");
         sb.AppendLine($"    <tr><td>FE Response 5xx while ELB Response is 2xx/3xx</td><td>{result.Fe5xxWhileElb2xx3xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
@@ -466,7 +470,10 @@ function buildSummary(){",
     }
 
     private static string TooltipHtml(string text, string tooltip)
-        => $"<span class=\"lh-tip\" data-tip=\"{Html(tooltip)}\">{Html(text)}</span>";
+        => $"<span class=\"lh-tip\" data-tip=\"{Html(tooltip)}\" tabindex=\"0\"><span class=\"lh-tip-label\">{Html(text)}</span><span class=\"lh-tip-icon\" aria-hidden=\"true\">ⓘ</span></span>";
+
+    private static string TitleTooltipHtml(string text, string tooltip)
+        => $"<span class=\"lh-tip-inline\" title=\"{Html(tooltip)}\" tabindex=\"0\"><span class=\"lh-tip-label\">{Html(text)}</span><span class=\"lh-tip-icon\" aria-hidden=\"true\">ⓘ</span></span>";
 
     private static bool TryOpenFile(string filePath)
     {
