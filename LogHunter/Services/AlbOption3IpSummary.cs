@@ -68,21 +68,27 @@ public static partial class AlbOptions
             ("1M-row behavior", "Prompt once for optional SQLite deep analysis"),
             ("Output", outputFolder));
 
-        using var result = new AlbIpSummaryScanner.ScanResult(
-            requestedIp.ToString(),
-            sqlitePath,
-            resolveThresholdMode: PromptForIpSummaryDetailMode);
+        using var result = new AlbIpSummaryScanner.ScanResult(requestedIp.ToString(), sqlitePath);
 
-        await RunScanWithProgressAsync(
-            title: "Scanning ALB logs (IP summary)",
-            files: files,
-            scanFileAsync: (file, reportDelta) =>
-                AlbIpSummaryScanner.ScanFileAsync(
-                    filePath: file,
-                    requestedIp: requestedIp,
-                    result: result,
-                    reportBytesDelta: reportDelta)
-        );
+        for (int i = 0; i < files.Count; i++)
+        {
+            var file = files[i];
+            var fileNumber = i + 1;
+
+            await RunScanWithProgressAsync(
+                title: $"Scanning ALB logs (IP summary) [{fileNumber.ToString(CultureInfo.InvariantCulture)}/{files.Count.ToString(CultureInfo.InvariantCulture)}]",
+                files: new List<string> { file },
+                scanFileAsync: (scanFile, reportDelta) =>
+                    AlbIpSummaryScanner.ScanFileAsync(
+                        filePath: scanFile,
+                        requestedIp: requestedIp,
+                        result: result,
+                        reportBytesDelta: reportDelta)
+            );
+
+            if (result.ThresholdPromptPending)
+                result.ApplyThresholdDecision(PromptForIpSummaryDetailMode());
+        }
 
         result.CompleteStreamingExports();
 

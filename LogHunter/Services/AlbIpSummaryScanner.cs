@@ -22,14 +22,12 @@ public static class AlbIpSummaryScanner
     public sealed class ScanResult : IDisposable
     {
         private readonly string _sqlitePath;
-        private readonly Func<DetailRetentionMode>? _resolveThresholdMode;
         private AlbIpSummaryExportSqlite.Writer? _sqliteWriter;
 
-        public ScanResult(string requestedIp, string sqlitePath, Func<DetailRetentionMode>? resolveThresholdMode = null)
+        public ScanResult(string requestedIp, string sqlitePath)
         {
             RequestedIp = requestedIp;
             _sqlitePath = sqlitePath;
-            _resolveThresholdMode = resolveThresholdMode;
         }
 
         public string RequestedIp { get; }
@@ -48,7 +46,8 @@ public static class AlbIpSummaryScanner
         public DateTime? FirstHitUtc { get; private set; }
         public DateTime? LastHitUtc { get; private set; }
         public bool UsesSqliteDetailExport => _sqliteWriter is not null;
-        public bool ThresholdPromptShown { get; private set; }
+        public bool ThresholdReached { get; private set; }
+        public bool ThresholdPromptPending { get; private set; }
         public DetailRetentionMode DetailMode { get; private set; } = DetailRetentionMode.BelowThreshold;
         public string SqlitePath => _sqlitePath;
 
@@ -80,7 +79,10 @@ public static class AlbIpSummaryScanner
 
             Rows.Add(row);
             if (DetailMode == DetailRetentionMode.BelowThreshold && TotalRows >= ExcelRowThreshold)
-                ResolveThresholdDecision();
+            {
+                ThresholdReached = true;
+                ThresholdPromptPending = true;
+            }
         }
 
         public void CompleteStreamingExports()
@@ -95,13 +97,15 @@ public static class AlbIpSummaryScanner
             _sqliteWriter?.Dispose();
         }
 
-        private void ResolveThresholdDecision()
+        public void ApplyThresholdDecision(DetailRetentionMode mode)
         {
-            if (ThresholdPromptShown)
+            if (!ThresholdPromptPending || DetailMode != DetailRetentionMode.BelowThreshold)
                 return;
 
-            ThresholdPromptShown = true;
-            DetailMode = _resolveThresholdMode?.Invoke() ?? DetailRetentionMode.SqliteApproved;
+            ThresholdPromptPending = false;
+            DetailMode = mode == DetailRetentionMode.SummaryOnly
+                ? DetailRetentionMode.SummaryOnly
+                : DetailRetentionMode.SqliteApproved;
 
             if (DetailMode == DetailRetentionMode.SqliteApproved)
             {
