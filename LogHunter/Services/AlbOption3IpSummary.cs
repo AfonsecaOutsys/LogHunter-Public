@@ -76,7 +76,7 @@ public static partial class AlbOptions
             var fileNumber = i + 1;
 
             await RunScanWithProgressAsync(
-                title: $"Scanning ALB logs (IP summary) [{fileNumber.ToString(CultureInfo.InvariantCulture)}/{files.Count.ToString(CultureInfo.InvariantCulture)}]",
+                title: $"Scanning ALB logs (IP summary) - file {fileNumber.ToString(CultureInfo.InvariantCulture)} of {files.Count.ToString(CultureInfo.InvariantCulture)}",
                 files: new List<string> { file },
                 scanFileAsync: (scanFile, reportDelta) =>
                     AlbIpSummaryScanner.ScanFileAsync(
