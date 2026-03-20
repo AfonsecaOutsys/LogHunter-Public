@@ -45,6 +45,12 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 1.1.3
+
+- Merge-prep release for the ALB IP Summary feature set and related report/UI polish.
+- Establishes the `1.1.3` branch/version baseline before adding the SQLite parser/viewer in the browser.
+- No breaking CLI changes; this release is intended as the merge point immediately prior to the browser-based SQLite viewing work.
+
 ### 1.1.2
 
 - Patch release for console UX responsiveness improvements.
