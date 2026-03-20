@@ -12,15 +12,24 @@ public static class AlbIpSummaryScanner
 {
     public const int ExcelRowThreshold = 1_000_000;
 
+    public enum DetailRetentionMode
+    {
+        BelowThreshold = 0,
+        SqliteApproved = 1,
+        SummaryOnly = 2
+    }
+
     public sealed class ScanResult : IDisposable
     {
         private readonly string _sqlitePath;
+        private readonly Func<DetailRetentionMode>? _resolveThresholdMode;
         private AlbIpSummaryExportSqlite.Writer? _sqliteWriter;
 
-        public ScanResult(string requestedIp, string sqlitePath)
+        public ScanResult(string requestedIp, string sqlitePath, Func<DetailRetentionMode>? resolveThresholdMode = null)
         {
             RequestedIp = requestedIp;
             _sqlitePath = sqlitePath;
+            _resolveThresholdMode = resolveThresholdMode;
         }
 
         public string RequestedIp { get; }
@@ -39,6 +48,8 @@ public static class AlbIpSummaryScanner
         public DateTime? FirstHitUtc { get; private set; }
         public DateTime? LastHitUtc { get; private set; }
         public bool UsesSqliteDetailExport => _sqliteWriter is not null;
+        public bool ThresholdPromptShown { get; private set; }
+        public DetailRetentionMode DetailMode { get; private set; } = DetailRetentionMode.BelowThreshold;
         public string SqlitePath => _sqlitePath;
 
         public void AddRow(AlbIpSummaryRow row, string sourceFile)
@@ -58,6 +69,9 @@ public static class AlbIpSummaryScanner
             IncrementCount(TargetEndpointCounts, row.TargetEndpoint);
             UpdateMismatchCounts(row);
 
+            if (DetailMode == DetailRetentionMode.SummaryOnly)
+                return;
+
             if (_sqliteWriter is not null)
             {
                 _sqliteWriter.WriteRow(row);
@@ -65,13 +79,8 @@ public static class AlbIpSummaryScanner
             }
 
             Rows.Add(row);
-            if (TotalRows >= ExcelRowThreshold)
-            {
-                _sqliteWriter = AlbIpSummaryExportSqlite.Open(_sqlitePath);
-                _sqliteWriter.WriteRows(Rows);
-                Rows.Clear();
-                Rows.TrimExcess();
-            }
+            if (DetailMode == DetailRetentionMode.BelowThreshold && TotalRows >= ExcelRowThreshold)
+                ResolveThresholdDecision();
         }
 
         public void CompleteStreamingExports()
@@ -84,6 +93,24 @@ public static class AlbIpSummaryScanner
         public void Dispose()
         {
             _sqliteWriter?.Dispose();
+        }
+
+        private void ResolveThresholdDecision()
+        {
+            if (ThresholdPromptShown)
+                return;
+
+            ThresholdPromptShown = true;
+            DetailMode = _resolveThresholdMode?.Invoke() ?? DetailRetentionMode.SqliteApproved;
+
+            if (DetailMode == DetailRetentionMode.SqliteApproved)
+            {
+                _sqliteWriter = AlbIpSummaryExportSqlite.Open(_sqlitePath);
+                _sqliteWriter.WriteRows(Rows);
+            }
+
+            Rows.Clear();
+            Rows.TrimExcess();
         }
 
         private void AddBucket(AlbIpSummaryRow row)

@@ -15,6 +15,8 @@ namespace LogHunter.Services;
 public static partial class AlbOptions
 {
     // ---------- OPTION 3 ----------
+    private const string IpSummaryThresholdPrompt =
+        "1M rows have been processed so far, continuing means there will be no Excel export only the Charts View and summary, proceed with SQLite for deep analysis?";
 
     public static async Task IpSummaryAsync(string root)
     {
@@ -63,10 +65,13 @@ public static partial class AlbOptions
             ("Files", files.Count.ToString("N0", CultureInfo.InvariantCulture)),
             ("Input", albFolder),
             ("Excel threshold", "Rows < 1,000,000"),
-            ("SQLite threshold", "Rows >= 1,000,000"),
+            ("1M-row behavior", "Prompt once for optional SQLite deep analysis"),
             ("Output", outputFolder));
 
-        using var result = new AlbIpSummaryScanner.ScanResult(requestedIp.ToString(), sqlitePath);
+        using var result = new AlbIpSummaryScanner.ScanResult(
+            requestedIp.ToString(),
+            sqlitePath,
+            resolveThresholdMode: PromptForIpSummaryDetailMode);
 
         await RunScanWithProgressAsync(
             title: "Scanning ALB logs (IP summary)",
@@ -88,8 +93,8 @@ public static partial class AlbOptions
             return;
         }
 
-        string detailExportPath;
-        string detailExportKind;
+        string? detailExportPath = null;
+        string? detailExportKind = null;
         if (result.TotalRows < AlbIpSummaryScanner.ExcelRowThreshold)
         {
             result.Rows.Sort((a, b) => a.TimestampUtc.CompareTo(b.TimestampUtc));
@@ -97,7 +102,7 @@ public static partial class AlbOptions
             detailExportPath = excelPath;
             detailExportKind = "Excel";
         }
-        else
+        else if (result.DetailMode == AlbIpSummaryScanner.DetailRetentionMode.SqliteApproved)
         {
             detailExportPath = sqlitePath;
             detailExportKind = "SQLite";
@@ -110,15 +115,33 @@ public static partial class AlbOptions
         else
             ConsoleEx.Success($"HTML report generated: {htmlPath}");
 
-        ConsoleEx.Success($"Detailed export generated as {detailExportKind}: {detailExportPath}");
+        if (detailExportKind == "SQLite")
+        {
+            ConsoleEx.Success($"Charts View and summary generated from the full scan, and SQLite deep-analysis output was generated: {detailExportPath}");
+        }
+        else if (detailExportKind == "Excel")
+        {
+            ConsoleEx.Success($"Detailed export generated as Excel: {detailExportPath}");
+        }
+        else
+        {
+            ConsoleEx.Success("Charts View and summary were generated from the full scan.");
+            ConsoleEx.Success("Detailed export was intentionally skipped by user choice after the 1M-row prompt.");
+        }
+
         ConsoleEx.Pause("Press Enter to return...");
     }
+
+    private static AlbIpSummaryScanner.DetailRetentionMode PromptForIpSummaryDetailMode()
+        => ConsoleEx.ReadYesNo(IpSummaryThresholdPrompt, defaultYes: true)
+            ? AlbIpSummaryScanner.DetailRetentionMode.SqliteApproved
+            : AlbIpSummaryScanner.DetailRetentionMode.SummaryOnly;
 
     private static string BuildIpSummaryReport(
         string outputFolder,
         AlbIpSummaryScanner.ScanResult result,
-        string detailExportKind,
-        string detailExportPath,
+        string? detailExportKind,
+        string? detailExportPath,
         string sanitizedIp)
     {
         var series = BuildIpSummarySeries(result);
@@ -208,8 +231,8 @@ public static partial class AlbOptions
 
     private static string BuildSummarySectionHtml(
         AlbIpSummaryScanner.ScanResult result,
-        string detailExportKind,
-        string detailExportPath)
+        string? detailExportKind,
+        string? detailExportPath)
     {
         var firstHit = result.FirstHitUtc?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC";
         var lastHit = result.LastHitUtc?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC";
@@ -241,7 +264,7 @@ public static partial class AlbOptions
         sb.AppendLine(BuildStatusTableHtml("ELB Response totals", result.ElbResponseTotals));
         sb.AppendLine(BuildStatusTableHtml("FE Response totals", result.FeResponseTotals));
         sb.AppendLine(BuildMismatchCardHtml(result));
-        sb.AppendLine(BuildExportCardHtml(detailExportKind, detailExportPath));
+        sb.AppendLine(BuildExportCardHtml(result, detailExportKind, detailExportPath));
         sb.AppendLine(BuildTopTableHtml("Top 10 target endpoints", "Target endpoint", result.TopTargetEndpoints(10)));
         sb.AppendLine("    </div>");
         sb.AppendLine("  </div>");
@@ -303,13 +326,32 @@ public static partial class AlbOptions
         return sb.ToString();
     }
 
-    private static string BuildExportCardHtml(string detailExportKind, string detailExportPath)
+    private static string BuildExportCardHtml(
+        AlbIpSummaryScanner.ScanResult result,
+        string? detailExportKind,
+        string? detailExportPath)
     {
         var sb = new StringBuilder();
         sb.AppendLine("<div class=\"summary-card\">");
         sb.AppendLine("  <div class=\"summary-subtitle\">Detailed export</div>");
-        sb.AppendLine($"  <div class=\"summary-note\">Full request detail was written to <strong>{Html(detailExportKind)}</strong> using the option 3 threshold rule.</div>");
-        sb.AppendLine($"  <div class=\"summary-note summary-mono\" style=\"margin-top:8px\">{Html(detailExportPath)}</div>");
+
+        if (string.IsNullOrWhiteSpace(detailExportKind) || string.IsNullOrWhiteSpace(detailExportPath))
+        {
+            if (result.DetailMode == AlbIpSummaryScanner.DetailRetentionMode.SummaryOnly)
+            {
+                sb.AppendLine("  <div class=\"summary-note\">Charts View and summary were completed for the full scan. Detailed export was intentionally skipped after the 1M-row prompt.</div>");
+            }
+            else
+            {
+                sb.AppendLine("  <div class=\"summary-note\">No detailed export was generated.</div>");
+            }
+        }
+        else
+        {
+            sb.AppendLine($"  <div class=\"summary-note\">Full request detail was written to <strong>{Html(detailExportKind)}</strong> using the option 3 threshold rule.</div>");
+            sb.AppendLine($"  <div class=\"summary-note summary-mono\" style=\"margin-top:8px\">{Html(detailExportPath)}</div>");
+        }
+
         sb.AppendLine("</div>");
         return sb.ToString();
     }
