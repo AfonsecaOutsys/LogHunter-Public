@@ -227,7 +227,29 @@ public static partial class AlbOptions
         html = html.Replace("Filter IP...", "Filter series...", StringComparison.Ordinal);
         html = html.Replace(
             "<th>IP</th><th>Source hits</th><th>Total requests</th><th>Peak (5 min)</th><th>Visible</th>",
-            "<th title=\"The chart line or metric represented in this report.\">Series</th><th>Source hits</th><th title=\"Total number of matching requests counted for this series across the full scan.\">Total requests</th><th title=\"Highest number of requests seen for this series in a single time bucket on the chart.\">Peak (bucket)</th><th title=\"Whether this series is currently shown or hidden on the chart.\">Visible</th>",
+            "<th title=\"The chart line or metric represented in this report.\">Series</th><th title=\"Total number of matching requests counted for this series across the full scan.\">Total requests</th><th title=\"Highest number of requests seen for this series in a single time bucket on the chart.\">Peak bucket</th><th title=\"UTC timestamp of the highest bucket value for this series.\">Peak time (UTC)</th><th title=\"Whether this series is currently shown or hidden on the chart.\">Visible</th>",
+            StringComparison.Ordinal);
+        html = html.Replace(
+            "function buildSummary(){",
+            @"function getPeakTimeUtc(s){
+  let peakIndex = -1;
+  let peakValue = Number.NEGATIVE_INFINITY;
+  for (let idx = 0; idx < s.y.length; idx++) {
+    const value = s.y[idx];
+    if (value > peakValue) {
+      peakValue = value;
+      peakIndex = idx;
+    }
+  }
+  if (peakIndex < 0 || !Number.isFinite(peakValue)) return '—';
+  return fmtUtc(T[peakIndex]);
+}
+
+function buildSummary(){",
+            StringComparison.Ordinal);
+        html = html.Replace(
+            "      `<td>${s.sourceHits == null ? '—' : Number(s.sourceHits).toLocaleString('en-US')}</td>` +\n      `<td>${fmtNum(s.total)}</td>` +\n      `<td>${fmtNum(s.peak)}</td>` +\n      `<td>${s.visible ? 'Shown' : 'Hidden'}</td>`;",
+            "      `<td>${fmtNum(s.total)}</td>` +\n      `<td>${fmtNum(s.peak)}</td>` +\n      `<td>${getPeakTimeUtc(s)}</td>` +\n      `<td>${s.visible ? 'Shown' : 'Hidden'}</td>`;",
             StringComparison.Ordinal);
 
         var summaryHtml = BuildSummarySectionHtml(result, detailExportKind, detailExportPath);
