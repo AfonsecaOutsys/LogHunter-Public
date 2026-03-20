@@ -69,26 +69,7 @@ public static partial class AlbOptions
             ("Output", outputFolder));
 
         using var result = new AlbIpSummaryScanner.ScanResult(requestedIp.ToString(), sqlitePath);
-
-        for (int i = 0; i < files.Count; i++)
-        {
-            var file = files[i];
-            var fileNumber = i + 1;
-
-            await RunScanWithProgressAsync(
-                title: $"Scanning ALB logs (IP summary) - file {fileNumber.ToString(CultureInfo.InvariantCulture)} of {files.Count.ToString(CultureInfo.InvariantCulture)}",
-                files: new List<string> { file },
-                scanFileAsync: (scanFile, reportDelta) =>
-                    AlbIpSummaryScanner.ScanFileAsync(
-                        filePath: scanFile,
-                        requestedIp: requestedIp,
-                        result: result,
-                        reportBytesDelta: reportDelta)
-            );
-
-            if (result.ThresholdPromptPending)
-                result.ApplyThresholdDecision(PromptForIpSummaryDetailMode());
-        }
+        await ScanIpSummaryWithPhasedProgressAsync(files, requestedIp, result);
 
         result.CompleteStreamingExports();
 
@@ -142,6 +123,113 @@ public static partial class AlbOptions
         => ConsoleEx.ReadYesNo(IpSummaryThresholdPrompt, defaultYes: true)
             ? AlbIpSummaryScanner.DetailRetentionMode.SqliteApproved
             : AlbIpSummaryScanner.DetailRetentionMode.SummaryOnly;
+
+    private static async Task ScanIpSummaryWithPhasedProgressAsync(
+        List<string> files,
+        IPAddress requestedIp,
+        AlbIpSummaryScanner.ScanResult result)
+    {
+        int nextFileIndex = 0;
+        while (nextFileIndex < files.Count)
+        {
+            nextFileIndex = await RunIpSummaryScanPhaseAsync(files, nextFileIndex, requestedIp, result);
+
+            if (!result.ThresholdPromptPending)
+                continue;
+
+            result.ApplyThresholdDecision(PromptForIpSummaryDetailMode());
+        }
+    }
+
+    private static async Task<int> RunIpSummaryScanPhaseAsync(
+        List<string> files,
+        int startIndex,
+        IPAddress requestedIp,
+        AlbIpSummaryScanner.ScanResult result)
+    {
+        var phaseFiles = files.Skip(startIndex).ToList();
+        var totalBytes = SumFileSizesSafe(phaseFiles);
+        int nextFileIndex = startIndex;
+
+        await AnsiConsole.Progress()
+            .AutoClear(false)
+            .Columns(new ProgressColumn[]
+            {
+                new TaskDescriptionColumn(),
+                new ProgressBarColumn(),
+                new PercentageColumn(),
+                new RemainingTimeColumn(),
+                new SpinnerColumn()
+            })
+            .StartAsync(async ctx =>
+            {
+                var task = ctx.AddTask(
+                    BuildIpSummaryProgressDescription(startIndex + 1, files.Count, files[startIndex], result.DetailMode),
+                    maxValue: Math.Max(1, totalBytes));
+
+                for (int i = startIndex; i < files.Count; i++)
+                {
+                    task.Description = BuildIpSummaryProgressDescription(i + 1, files.Count, files[i], result.DetailMode);
+
+                    await AlbIpSummaryScanner.ScanFileAsync(
+                        filePath: files[i],
+                        requestedIp: requestedIp,
+                        result: result,
+                        reportBytesDelta: delta =>
+                        {
+                            if (delta <= 0)
+                                return;
+
+                            task.Increment(delta);
+                        }).ConfigureAwait(false);
+
+                    nextFileIndex = i + 1;
+                    if (result.ThresholdPromptPending)
+                        break;
+                }
+
+                if (nextFileIndex >= files.Count && task.Value < task.MaxValue)
+                    task.Value = task.MaxValue;
+
+                task.StopTask();
+            });
+
+        AnsiConsole.WriteLine();
+        return nextFileIndex;
+    }
+
+    private static string BuildIpSummaryProgressDescription(
+        int currentFileIndex,
+        int totalFiles,
+        string filePath,
+        AlbIpSummaryScanner.DetailRetentionMode mode)
+    {
+        var modeLabel = mode switch
+        {
+            AlbIpSummaryScanner.DetailRetentionMode.SummaryOnly => "summary-only",
+            AlbIpSummaryScanner.DetailRetentionMode.SqliteApproved => "detail+summary (SQLite)",
+            _ => "detail+summary"
+        };
+
+        var fileName = Path.GetFileName(filePath);
+        if (string.IsNullOrWhiteSpace(fileName))
+            fileName = filePath;
+
+        fileName = TruncateProgressText(fileName, 48);
+
+        return $"Scanning ALB logs (IP summary) - file {currentFileIndex.ToString(CultureInfo.InvariantCulture)} of {totalFiles.ToString(CultureInfo.InvariantCulture)} - {modeLabel} - {Markup.Escape(fileName)}";
+    }
+
+    private static string TruncateProgressText(string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+            return value;
+
+        if (maxLength <= 3)
+            return value[..maxLength];
+
+        return value[..(maxLength - 3)] + "...";
+    }
 
     private static string BuildIpSummaryReport(
         string outputFolder,
