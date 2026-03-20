@@ -1,6 +1,7 @@
 ﻿// Program.cs  (tidied, same behavior)
 using LogHunter.Menus;
 using LogHunter.Services;
+using LogHunter.Viewer;
 using Spectre.Console;
 using System.Diagnostics;
 using System.IO;
@@ -48,6 +49,8 @@ internal static class Program
             ?? "unknown";
 
         string? rootOverride = null;
+        string? viewerSqlitePath = null;
+        string? viewerIp = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -79,6 +82,34 @@ internal static class Program
                 continue;
             }
 
+            if (a == "--viewer-sqlite")
+            {
+                if (i + 1 >= args.Length)
+                {
+                    Console.WriteLine("Missing value for --viewer-sqlite");
+                    Console.WriteLine();
+                    ShowHelp(version);
+                    return;
+                }
+
+                viewerSqlitePath = args[++i];
+                continue;
+            }
+
+            if (a == "--viewer-ip")
+            {
+                if (i + 1 >= args.Length)
+                {
+                    Console.WriteLine("Missing value for --viewer-ip");
+                    Console.WriteLine();
+                    ShowHelp(version);
+                    return;
+                }
+
+                viewerIp = args[++i];
+                continue;
+            }
+
             Console.WriteLine($"Unknown argument: {a}");
             Console.WriteLine();
             ShowHelp(version);
@@ -100,6 +131,13 @@ internal static class Program
             var root = string.IsNullOrWhiteSpace(rootOverride)
                 ? AppContext.BaseDirectory
                 : Path.GetFullPath(rootOverride);
+
+            if (!string.IsNullOrWhiteSpace(viewerSqlitePath))
+            {
+                using var viewerHost = new AlbIpSummarySqliteViewerHost(viewerSqlitePath, viewerIp);
+                await viewerHost.RunAsync(() => _ctrlCRequested).ConfigureAwait(false);
+                return;
+            }
 
             AppFolders.Ensure();
             EmbeddedAssets.EnsureTabulatorAssets(root);
@@ -151,11 +189,13 @@ internal static class Program
         Console.WriteLine($"LogHunter {version}");
         Console.WriteLine();
         Console.WriteLine("Usage:");
-        Console.WriteLine("  LogHunter [--root <path>] [--version] [--help]");
+        Console.WriteLine("  LogHunter [--root <path>] [--viewer-sqlite <path> --viewer-ip <ip>] [--version] [--help]");
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --root <path>   Workspace path (defaults to the exe folder)");
-        Console.WriteLine("  --version, -v   Print version and exit");
+        Console.WriteLine("  --viewer-sqlite <path>  Start the ALB IP Summary SQLite viewer for the specified database");
+        Console.WriteLine("  --viewer-ip <ip>        Optional selected IP shown in viewer metadata");
+        Console.WriteLine("  --version, -v           Print version and exit");
         Console.WriteLine("  --help, -h      Show this help");
     }
 }

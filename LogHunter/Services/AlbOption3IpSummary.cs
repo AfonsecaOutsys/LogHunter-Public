@@ -103,6 +103,13 @@ public static partial class AlbOptions
 
         if (detailExportKind == "SQLite")
         {
+            ConsoleEx.Success($"SQLite deep analysis database created: {detailExportPath}");
+            ConsoleEx.Success("Launching local viewer...");
+            if (AlbIpSummarySqliteViewerLauncher.Launch(detailExportPath!, result.RequestedIp))
+                ConsoleEx.Success("Local SQLite viewer launched in a separate LogHunter process.");
+            else
+                ConsoleEx.Warn("SQLite viewer could not be launched automatically. Open it manually with --viewer-sqlite <path>.");
+
             ConsoleEx.Success($"Charts View and summary generated from the full scan, and SQLite deep-analysis output was generated: {detailExportPath}");
         }
         else if (detailExportKind == "Excel")
