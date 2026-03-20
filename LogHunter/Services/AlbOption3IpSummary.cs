@@ -227,7 +227,7 @@ public static partial class AlbOptions
         html = html.Replace("Filter IP...", "Filter series...", StringComparison.Ordinal);
         html = html.Replace(
             "<th>IP</th><th>Source hits</th><th>Total requests</th><th>Peak (5 min)</th><th>Visible</th>",
-            "<th>Series</th><th>Source hits</th><th>Total requests</th><th>Peak (bucket)</th><th>Visible</th>",
+            "<th><span class=\"lh-tip\" data-tip=\"The chart line or metric represented in this report.\">Series</span></th><th>Source hits</th><th><span class=\"lh-tip\" data-tip=\"Total number of matching requests counted for this series across the full scan.\">Total requests</span></th><th><span class=\"lh-tip\" data-tip=\"Highest number of requests seen for this series in a single time bucket on the chart.\">Peak (bucket)</span></th><th><span class=\"lh-tip\" data-tip=\"Whether this series is currently shown or hidden on the chart.\">Visible</span></th>",
             StringComparison.Ordinal);
 
         var summaryHtml = BuildSummarySectionHtml(result, detailExportKind, detailExportPath);
@@ -320,11 +320,15 @@ public static partial class AlbOptions
 .summary-table th:last-child, .summary-table td:last-child { text-align:right; }
 .summary-note { font-size:12px; opacity:.8; line-height:1.45; }
 .summary-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break:break-word; }
+.lh-tip { position:relative; cursor:help; border-bottom:1px dotted rgba(255,255,255,.28); }
+.lh-tip::after { content:attr(data-tip); position:absolute; left:0; bottom:calc(100% + 8px); min-width:180px; max-width:280px; padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.12); background:#111926; color:#e6edf3; box-shadow:0 12px 28px rgba(0,0,0,.35); font-size:11px; font-weight:400; line-height:1.35; white-space:normal; opacity:0; pointer-events:none; transform:translateY(4px); transition:opacity .12s ease, transform .12s ease; z-index:30; }
+.lh-tip::before { content:''; position:absolute; left:14px; bottom:calc(100% + 2px); border:6px solid transparent; border-top-color:#111926; opacity:0; pointer-events:none; transform:translateY(4px); transition:opacity .12s ease, transform .12s ease; z-index:30; }
+.lh-tip:hover::after, .lh-tip:hover::before { opacity:1; transform:translateY(0); }
 ");
         sb.AppendLine("</style>");
         sb.AppendLine("<div class=\"wrap\">");
         sb.AppendLine("  <div class=\"summary-card\">");
-        sb.AppendLine("    <div class=\"summary-title\">IP summary</div>");
+        sb.AppendLine($"    <div class=\"summary-title\">{TooltipHtml("IP summary", "High-level context for this IP across the scanned ALB logs.")}</div>");
         sb.AppendLine("    <div class=\"row\">");
         sb.AppendLine($"      <div class=\"pill\">Requested IP: {Html(result.RequestedIp)}</div>");
         sb.AppendLine($"      <div class=\"pill\">Total matching requests: {result.TotalRows.ToString("N0", CultureInfo.InvariantCulture)}</div>");
@@ -336,7 +340,11 @@ public static partial class AlbOptions
         sb.AppendLine(BuildStatusTableHtml("FE Response totals", result.FeResponseTotals));
         sb.AppendLine(BuildMismatchCardHtml(result));
         sb.AppendLine(BuildExportCardHtml(result, detailExportKind, detailExportPath));
-        sb.AppendLine(BuildTopTableHtml("Top 10 target endpoints", "Target endpoint", result.TopTargetEndpoints(10)));
+        sb.AppendLine(BuildTopTableHtml(
+            "Top 10 FE endpoints",
+            "FE endpoint",
+            result.TopTargetEndpoints(10),
+            "The backend endpoints most frequently reached by requests from this IP."));
         sb.AppendLine("    </div>");
         sb.AppendLine("  </div>");
         sb.AppendLine("</div>");
@@ -345,9 +353,13 @@ public static partial class AlbOptions
 
     private static string BuildStatusTableHtml(string title, AlbIpSummaryScanner.StatusGroupCounts counts)
     {
+        var tooltip = title.StartsWith("ELB Response", StringComparison.Ordinal)
+            ? "ELB Response status classes returned to the end user for this IP."
+            : "FE Response status classes returned by the backend or server for this IP.";
+
         var sb = new StringBuilder();
         sb.AppendLine("<div class=\"summary-card\">");
-        sb.AppendLine($"  <div class=\"summary-subtitle\">{Html(title)}</div>");
+        sb.AppendLine($"  <div class=\"summary-subtitle\">{TooltipHtml(title, tooltip)}</div>");
         sb.AppendLine("  <table class=\"summary-table\">");
         sb.AppendLine("    <tr><th>Class</th><th>Hits</th></tr>");
         sb.AppendLine($"    <tr><td>2xx/3xx</td><td>{(counts.S2xx + counts.S3xx).ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
@@ -362,7 +374,7 @@ public static partial class AlbOptions
     {
         var sb = new StringBuilder();
         sb.AppendLine("<div class=\"summary-card\" style=\"border-color: rgba(245, 158, 11, .45);\">");
-        sb.AppendLine("  <div class=\"summary-subtitle\">⭐ Interesting Mismatches</div>");
+        sb.AppendLine($"  <div class=\"summary-subtitle\">{TooltipHtml("⭐ Interesting Mismatches", "Counts of cases where ELB Response and FE Response differ in a meaningful way for investigation.")}</div>");
         sb.AppendLine("  <table class=\"summary-table\">");
         sb.AppendLine("    <tr><th>Signal</th><th>Hits</th></tr>");
         sb.AppendLine($"    <tr><td>FE Response 5xx while ELB Response is 2xx/3xx</td><td>{result.Fe5xxWhileElb2xx3xx.ToString("N0", CultureInfo.InvariantCulture)}</td></tr>");
@@ -374,11 +386,15 @@ public static partial class AlbOptions
         return sb.ToString();
     }
 
-    private static string BuildTopTableHtml(string title, string label, IReadOnlyList<KeyValuePair<string, int>> items)
+    private static string BuildTopTableHtml(
+        string title,
+        string label,
+        IReadOnlyList<KeyValuePair<string, int>> items,
+        string? titleTooltip = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("<div class=\"summary-card\">");
-        sb.AppendLine($"  <div class=\"summary-subtitle\">{Html(title)}</div>");
+        sb.AppendLine($"  <div class=\"summary-subtitle\">{(string.IsNullOrWhiteSpace(titleTooltip) ? Html(title) : TooltipHtml(title, titleTooltip))}</div>");
         sb.AppendLine("  <table class=\"summary-table\">");
         sb.AppendLine($"    <tr><th>{Html(label)}</th><th>Hits</th></tr>");
 
@@ -404,7 +420,7 @@ public static partial class AlbOptions
     {
         var sb = new StringBuilder();
         sb.AppendLine("<div class=\"summary-card\">");
-        sb.AppendLine("  <div class=\"summary-subtitle\">Detailed export</div>");
+        sb.AppendLine($"  <div class=\"summary-subtitle\">{TooltipHtml("Detailed export", "Where the full request-level export was written, if a detailed export was generated.")}</div>");
 
         if (string.IsNullOrWhiteSpace(detailExportKind) || string.IsNullOrWhiteSpace(detailExportPath))
         {
@@ -426,6 +442,9 @@ public static partial class AlbOptions
         sb.AppendLine("</div>");
         return sb.ToString();
     }
+
+    private static string TooltipHtml(string text, string tooltip)
+        => $"<span class=\"lh-tip\" data-tip=\"{Html(tooltip)}\">{Html(text)}</span>";
 
     private static bool TryOpenFile(string filePath)
     {
