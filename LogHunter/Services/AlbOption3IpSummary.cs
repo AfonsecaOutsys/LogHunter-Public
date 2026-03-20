@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
@@ -147,58 +146,36 @@ public static partial class AlbOptions
         IPAddress requestedIp,
         AlbIpSummaryScanner.ScanResult result)
     {
-        var phaseFiles = files.Skip(startIndex).ToList();
-        var totalBytes = SumFileSizesSafe(phaseFiles);
         int nextFileIndex = startIndex;
 
-        await AnsiConsole.Progress()
-            .AutoClear(false)
-            .Columns(new ProgressColumn[]
+        await AnsiConsole.Status()
+            .AutoRefresh(true)
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync(
+                BuildIpSummaryStatusText(startIndex + 1, files.Count, files[startIndex], result.DetailMode),
+                async ctx =>
             {
-                new TaskDescriptionColumn(),
-                new ProgressBarColumn(),
-                new PercentageColumn(),
-                new RemainingTimeColumn(),
-                new SpinnerColumn()
-            })
-            .StartAsync(async ctx =>
-            {
-                var task = ctx.AddTask(
-                    BuildIpSummaryProgressDescription(startIndex + 1, files.Count, files[startIndex], result.DetailMode),
-                    maxValue: Math.Max(1, totalBytes));
-
                 for (int i = startIndex; i < files.Count; i++)
                 {
-                    task.Description = BuildIpSummaryProgressDescription(i + 1, files.Count, files[i], result.DetailMode);
+                    ctx.Status(BuildIpSummaryStatusText(i + 1, files.Count, files[i], result.DetailMode));
 
                     await AlbIpSummaryScanner.ScanFileAsync(
                         filePath: files[i],
                         requestedIp: requestedIp,
                         result: result,
-                        reportBytesDelta: delta =>
-                        {
-                            if (delta <= 0)
-                                return;
-
-                            task.Increment(delta);
-                        }).ConfigureAwait(false);
+                        reportBytesDelta: _ => { }).ConfigureAwait(false);
 
                     nextFileIndex = i + 1;
                     if (result.ThresholdPromptPending)
                         break;
                 }
-
-                if (nextFileIndex >= files.Count && task.Value < task.MaxValue)
-                    task.Value = task.MaxValue;
-
-                task.StopTask();
             });
 
         AnsiConsole.WriteLine();
         return nextFileIndex;
     }
 
-    private static string BuildIpSummaryProgressDescription(
+    private static string BuildIpSummaryStatusText(
         int currentFileIndex,
         int totalFiles,
         string filePath,
@@ -217,7 +194,7 @@ public static partial class AlbOptions
 
         fileName = TruncateProgressText(fileName, 48);
 
-        return $"Scanning ALB logs (IP summary) - file {currentFileIndex.ToString(CultureInfo.InvariantCulture)} of {totalFiles.ToString(CultureInfo.InvariantCulture)} - {modeLabel} - {Markup.Escape(fileName)}";
+        return $"Scanning ALB logs (IP summary): file {currentFileIndex.ToString(CultureInfo.InvariantCulture)} of {totalFiles.ToString(CultureInfo.InvariantCulture)} | {modeLabel} | {Markup.Escape(fileName)}";
     }
 
     private static string TruncateProgressText(string value, int maxLength)
