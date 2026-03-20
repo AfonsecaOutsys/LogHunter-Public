@@ -41,16 +41,14 @@ public static class AlbIpSummaryExportExcel
         ws.Cell(row, 2).Value = result.LastHitUtc?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "-";
         row += 2;
 
-        WriteStatusTable(ws, row, 1, "FE Response totals", result.ElbTotals);
-        WriteStatusTable(ws, row, 5, "CF Response totals", result.TargetTotals);
+        WriteStatusTable(ws, row, 1, "ELB Response totals", result.ElbResponseTotals);
+        WriteStatusTable(ws, row, 5, "FE Response totals", result.FeResponseTotals);
         row += 7;
 
         WriteMismatchTable(ws, row, 1, result);
         row += 7;
 
-        row = WriteTopCounts(ws, row, 1, "Top 10 paths", result.TopPaths(10));
-        row = WriteTopCounts(ws, row, 4, "Top 10 hosts", result.TopHosts(10));
-        _ = WriteTopCounts(ws, row, 7, "Top 10 CF endpoints", result.TopTargetEndpoints(10));
+        _ = WriteTopCounts(ws, row, 1, "Top 10 target endpoints", result.TopTargetEndpoints(10));
 
         ws.Columns().AdjustToContents(10, 80);
     }
@@ -61,22 +59,16 @@ public static class AlbIpSummaryExportExcel
         {
             "TimestampUtc",
             "ClientIp",
-            "ClientPort",
             "Method",
-            "Host",
-            "PathNoQuery",
             "RawRequest",
-            "FeResponseStatusCode",
-            "CfResponseStatusCode",
-            "CfEndpoint",
+            "ELB Response Code",
+            "FE Response Code",
+            "TargetEndpoint",
             "TargetProcessingTimeSeconds",
             "RequestProcessingTimeSeconds",
             "ResponseProcessingTimeSeconds",
             "ActionsExecuted",
-            "TraceId",
-            "UserAgent",
-            "SourceFile",
-            "RawLine"
+            "UserAgent"
         };
 
         for (int i = 0; i < headers.Length; i++)
@@ -93,22 +85,16 @@ public static class AlbIpSummaryExportExcel
         {
             ws.Cell(row, 1).Value = hit.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC";
             ws.Cell(row, 2).Value = hit.ClientIp;
-            ws.Cell(row, 3).Value = hit.ClientPort;
-            ws.Cell(row, 4).Value = hit.Method;
-            ws.Cell(row, 5).Value = hit.Host;
-            ws.Cell(row, 6).Value = hit.PathNoQuery;
-            ws.Cell(row, 7).Value = hit.RawRequest;
-            ws.Cell(row, 8).Value = hit.ElbStatusCode;
-            ws.Cell(row, 9).Value = hit.TargetStatusCode;
-            ws.Cell(row, 10).Value = hit.TargetEndpoint;
-            ws.Cell(row, 11).Value = hit.TargetProcessingTimeSeconds;
-            ws.Cell(row, 12).Value = hit.RequestProcessingTimeSeconds;
-            ws.Cell(row, 13).Value = hit.ResponseProcessingTimeSeconds;
-            ws.Cell(row, 14).Value = hit.ActionsExecuted;
-            ws.Cell(row, 15).Value = hit.TraceId;
-            ws.Cell(row, 16).Value = hit.UserAgent;
-            ws.Cell(row, 17).Value = hit.SourceFile;
-            ws.Cell(row, 18).Value = hit.RawLine;
+            ws.Cell(row, 3).Value = hit.Method;
+            ws.Cell(row, 4).Value = hit.RawRequest;
+            ws.Cell(row, 5).Value = hit.ElbStatusCode;
+            ws.Cell(row, 6).Value = hit.FeStatusCode;
+            ws.Cell(row, 7).Value = hit.TargetEndpoint;
+            ws.Cell(row, 8).Value = hit.TargetProcessingTimeSeconds;
+            ws.Cell(row, 9).Value = hit.RequestProcessingTimeSeconds;
+            ws.Cell(row, 10).Value = hit.ResponseProcessingTimeSeconds;
+            ws.Cell(row, 11).Value = hit.ActionsExecuted;
+            ws.Cell(row, 12).Value = hit.UserAgent;
             row++;
         }
 
@@ -143,17 +129,17 @@ public static class AlbIpSummaryExportExcel
         ws.Range(row, col, row, col + 1).Style.Font.Bold = true;
         row++;
 
-        ws.Cell(row, col).Value = "CF 5xx while FE is 2xx/3xx";
-        ws.Cell(row, col + 1).Value = result.Cf5xxWhileFe2xx3xx;
+        ws.Cell(row, col).Value = "FE Response 5xx while ELB Response is 2xx/3xx";
+        ws.Cell(row, col + 1).Value = result.Fe5xxWhileElb2xx3xx;
         row++;
-        ws.Cell(row, col).Value = "CF 4xx while FE is 2xx/3xx";
-        ws.Cell(row, col + 1).Value = result.Cf4xxWhileFe2xx3xx;
+        ws.Cell(row, col).Value = "FE Response 4xx while ELB Response is 2xx/3xx";
+        ws.Cell(row, col + 1).Value = result.Fe4xxWhileElb2xx3xx;
         row++;
-        ws.Cell(row, col).Value = "FE 5xx while CF is 2xx/3xx";
-        ws.Cell(row, col + 1).Value = result.Fe5xxWhileCf2xx3xx;
+        ws.Cell(row, col).Value = "ELB Response 5xx while FE Response is 2xx/3xx";
+        ws.Cell(row, col + 1).Value = result.Elb5xxWhileFe2xx3xx;
         row++;
-        ws.Cell(row, col).Value = "FE 4xx while CF is 2xx/3xx";
-        ws.Cell(row, col + 1).Value = result.Fe4xxWhileCf2xx3xx;
+        ws.Cell(row, col).Value = "ELB Response 4xx while FE Response is 2xx/3xx";
+        ws.Cell(row, col + 1).Value = result.Elb4xxWhileFe2xx3xx;
     }
 
     private static int WriteTopCounts(IXLWorksheet ws, int row, int col, string title, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, int>> items)

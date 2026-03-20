@@ -25,7 +25,7 @@ public sealed class AlbMenu : IMenu
 
             new ConsoleEx.MenuItem(
                 "IP Summary",
-                "Enter one client IP, chart per-minute ALB status activity, and review matching requests in a detailed HTML report."),
+                "Enter one client IP, chart per-minute ELB/FE response activity, and review matching requests in a detailed HTML report."),
 
             new ConsoleEx.MenuItem(
                 "Top 50 IPs overall",

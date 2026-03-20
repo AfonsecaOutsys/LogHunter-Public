@@ -39,22 +39,16 @@ CREATE TABLE Hits (
     Id INTEGER PRIMARY KEY AUTOINCREMENT,
     TimestampUtc TEXT NOT NULL,
     ClientIp TEXT NOT NULL,
-    ClientPort TEXT,
     Method TEXT,
-    Host TEXT,
-    PathNoQuery TEXT,
     RawRequest TEXT,
-    FeStatusCode INTEGER,
-    CfStatusCode INTEGER,
-    CfEndpoint TEXT,
+    ElbResponseCode INTEGER,
+    FeResponseCode INTEGER,
+    TargetEndpoint TEXT,
     TargetProcessingTimeSeconds REAL,
     RequestProcessingTimeSeconds REAL,
     ResponseProcessingTimeSeconds REAL,
     ActionsExecuted TEXT,
-    TraceId TEXT,
-    UserAgent TEXT,
-    SourceFile TEXT,
-    RawLine TEXT
+    UserAgent TEXT
 );";
                 create.ExecuteNonQuery();
             }
@@ -66,61 +60,43 @@ CREATE TABLE Hits (
 INSERT INTO Hits (
     TimestampUtc,
     ClientIp,
-    ClientPort,
     Method,
-    Host,
-    PathNoQuery,
     RawRequest,
-    FeStatusCode,
-    CfStatusCode,
-    CfEndpoint,
+    ElbResponseCode,
+    FeResponseCode,
+    TargetEndpoint,
     TargetProcessingTimeSeconds,
     RequestProcessingTimeSeconds,
     ResponseProcessingTimeSeconds,
     ActionsExecuted,
-    TraceId,
-    UserAgent,
-    SourceFile,
-    RawLine
+    UserAgent
 ) VALUES (
     $TimestampUtc,
     $ClientIp,
-    $ClientPort,
     $Method,
-    $Host,
-    $PathNoQuery,
     $RawRequest,
-    $FeStatusCode,
-    $CfStatusCode,
-    $CfEndpoint,
+    $ElbResponseCode,
+    $FeResponseCode,
+    $TargetEndpoint,
     $TargetProcessingTimeSeconds,
     $RequestProcessingTimeSeconds,
     $ResponseProcessingTimeSeconds,
     $ActionsExecuted,
-    $TraceId,
-    $UserAgent,
-    $SourceFile,
-    $RawLine
+    $UserAgent
 );";
 
             AddParameter("$TimestampUtc");
             AddParameter("$ClientIp");
-            AddParameter("$ClientPort");
             AddParameter("$Method");
-            AddParameter("$Host");
-            AddParameter("$PathNoQuery");
             AddParameter("$RawRequest");
-            AddParameter("$FeStatusCode");
-            AddParameter("$CfStatusCode");
-            AddParameter("$CfEndpoint");
+            AddParameter("$ElbResponseCode");
+            AddParameter("$FeResponseCode");
+            AddParameter("$TargetEndpoint");
             AddParameter("$TargetProcessingTimeSeconds");
             AddParameter("$RequestProcessingTimeSeconds");
             AddParameter("$ResponseProcessingTimeSeconds");
             AddParameter("$ActionsExecuted");
-            AddParameter("$TraceId");
             AddParameter("$UserAgent");
-            AddParameter("$SourceFile");
-            AddParameter("$RawLine");
         }
 
         public void WriteRows(IEnumerable<AlbIpSummaryScanner.AlbIpSummaryRow> rows)
@@ -133,22 +109,16 @@ INSERT INTO Hits (
         {
             _insert.Parameters["$TimestampUtc"].Value = row.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC";
             _insert.Parameters["$ClientIp"].Value = row.ClientIp;
-            _insert.Parameters["$ClientPort"].Value = DbValue(row.ClientPort);
             _insert.Parameters["$Method"].Value = DbValue(row.Method);
-            _insert.Parameters["$Host"].Value = DbValue(row.Host);
-            _insert.Parameters["$PathNoQuery"].Value = DbValue(row.PathNoQuery);
             _insert.Parameters["$RawRequest"].Value = DbValue(row.RawRequest);
-            _insert.Parameters["$FeStatusCode"].Value = DbValue(row.ElbStatusCode);
-            _insert.Parameters["$CfStatusCode"].Value = DbValue(row.TargetStatusCode);
-            _insert.Parameters["$CfEndpoint"].Value = DbValue(row.TargetEndpoint);
+            _insert.Parameters["$ElbResponseCode"].Value = DbValue(row.ElbStatusCode);
+            _insert.Parameters["$FeResponseCode"].Value = DbValue(row.FeStatusCode);
+            _insert.Parameters["$TargetEndpoint"].Value = DbValue(row.TargetEndpoint);
             _insert.Parameters["$TargetProcessingTimeSeconds"].Value = DbValue(row.TargetProcessingTimeSeconds);
             _insert.Parameters["$RequestProcessingTimeSeconds"].Value = DbValue(row.RequestProcessingTimeSeconds);
             _insert.Parameters["$ResponseProcessingTimeSeconds"].Value = DbValue(row.ResponseProcessingTimeSeconds);
             _insert.Parameters["$ActionsExecuted"].Value = DbValue(row.ActionsExecuted);
-            _insert.Parameters["$TraceId"].Value = DbValue(row.TraceId);
             _insert.Parameters["$UserAgent"].Value = DbValue(row.UserAgent);
-            _insert.Parameters["$SourceFile"].Value = DbValue(row.SourceFile);
-            _insert.Parameters["$RawLine"].Value = DbValue(row.RawLine);
             _insert.ExecuteNonQuery();
         }
 
@@ -162,11 +132,9 @@ INSERT INTO Hits (
             using var idx = _connection.CreateCommand();
             idx.CommandText = @"
 CREATE INDEX idx_hits_timestamp_utc ON Hits(TimestampUtc);
-CREATE INDEX idx_hits_path_no_query ON Hits(PathNoQuery);
-CREATE INDEX idx_hits_host ON Hits(Host);
-CREATE INDEX idx_hits_fe_status ON Hits(FeStatusCode);
-CREATE INDEX idx_hits_cf_status ON Hits(CfStatusCode);
-CREATE INDEX idx_hits_cf_endpoint ON Hits(CfEndpoint);";
+CREATE INDEX idx_hits_elb_response_code ON Hits(ElbResponseCode);
+CREATE INDEX idx_hits_fe_response_code ON Hits(FeResponseCode);
+CREATE INDEX idx_hits_target_endpoint ON Hits(TargetEndpoint);";
             idx.ExecuteNonQuery();
 
             _completed = true;

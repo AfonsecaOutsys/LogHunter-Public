@@ -27,15 +27,13 @@ public static class AlbIpSummaryScanner
         public List<AlbIpSummaryRow> Rows { get; } = new();
         public SortedDictionary<DateTime, BucketCounts> BucketsByMinuteUtc { get; } = new();
         public HashSet<string> SourceFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public StatusGroupCounts ElbTotals { get; } = new();
-        public StatusGroupCounts TargetTotals { get; } = new();
-        public Dictionary<string, int> PathCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public Dictionary<string, int> HostCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public StatusGroupCounts ElbResponseTotals { get; } = new();
+        public StatusGroupCounts FeResponseTotals { get; } = new();
         public Dictionary<string, int> TargetEndpointCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public long Cf5xxWhileFe2xx3xx { get; private set; }
-        public long Cf4xxWhileFe2xx3xx { get; private set; }
-        public long Fe5xxWhileCf2xx3xx { get; private set; }
-        public long Fe4xxWhileCf2xx3xx { get; private set; }
+        public long Fe5xxWhileElb2xx3xx { get; private set; }
+        public long Fe4xxWhileElb2xx3xx { get; private set; }
+        public long Elb5xxWhileFe2xx3xx { get; private set; }
+        public long Elb4xxWhileFe2xx3xx { get; private set; }
 
         public long TotalRows { get; private set; }
         public DateTime? FirstHitUtc { get; private set; }
@@ -43,7 +41,7 @@ public static class AlbIpSummaryScanner
         public bool UsesSqliteDetailExport => _sqliteWriter is not null;
         public string SqlitePath => _sqlitePath;
 
-        public void AddRow(AlbIpSummaryRow row)
+        public void AddRow(AlbIpSummaryRow row, string sourceFile)
         {
             TotalRows++;
 
@@ -53,12 +51,10 @@ public static class AlbIpSummaryScanner
             if (!LastHitUtc.HasValue || row.TimestampUtc > LastHitUtc.Value)
                 LastHitUtc = row.TimestampUtc;
 
-            SourceFiles.Add(row.SourceFile);
+            SourceFiles.Add(sourceFile);
             AddBucket(row);
-            IncrementStatusBucket(ElbTotals, row.ElbStatusCode);
-            IncrementStatusBucket(TargetTotals, row.TargetStatusCode);
-            IncrementCount(PathCounts, row.PathNoQuery);
-            IncrementCount(HostCounts, row.Host);
+            IncrementStatusBucket(ElbResponseTotals, row.ElbStatusCode);
+            IncrementStatusBucket(FeResponseTotals, row.FeStatusCode);
             IncrementCount(TargetEndpointCounts, row.TargetEndpoint);
             UpdateMismatchCounts(row);
 
@@ -83,8 +79,6 @@ public static class AlbIpSummaryScanner
             _sqliteWriter?.Complete();
         }
 
-        public List<KeyValuePair<string, int>> TopPaths(int take) => TopCounts(PathCounts, take);
-        public List<KeyValuePair<string, int>> TopHosts(int take) => TopCounts(HostCounts, take);
         public List<KeyValuePair<string, int>> TopTargetEndpoints(int take) => TopCounts(TargetEndpointCounts, take);
 
         public void Dispose()
@@ -102,7 +96,7 @@ public static class AlbIpSummaryScanner
             }
 
             IncrementStatusBucket(bucket.Elb, row.ElbStatusCode);
-            IncrementStatusBucket(bucket.Target, row.TargetStatusCode);
+            IncrementStatusBucket(bucket.Fe, row.FeStatusCode);
         }
 
         private static void IncrementCount(Dictionary<string, int> counts, string value)
@@ -124,31 +118,31 @@ public static class AlbIpSummaryScanner
 
         private void UpdateMismatchCounts(AlbIpSummaryRow row)
         {
-            var feIs2xx3xx = Is2xx3xx(row.ElbStatusCode);
-            var cfIs2xx3xx = Is2xx3xx(row.TargetStatusCode);
-            var feIs4xx = Is4xx(row.ElbStatusCode);
-            var feIs5xx = Is5xx(row.ElbStatusCode);
-            var cfIs4xx = Is4xx(row.TargetStatusCode);
-            var cfIs5xx = Is5xx(row.TargetStatusCode);
+            var elbIs2xx3xx = Is2xx3xx(row.ElbStatusCode);
+            var feIs2xx3xx = Is2xx3xx(row.FeStatusCode);
+            var elbIs4xx = Is4xx(row.ElbStatusCode);
+            var elbIs5xx = Is5xx(row.ElbStatusCode);
+            var feIs4xx = Is4xx(row.FeStatusCode);
+            var feIs5xx = Is5xx(row.FeStatusCode);
 
-            if (cfIs5xx && feIs2xx3xx)
-                Cf5xxWhileFe2xx3xx++;
+            if (feIs5xx && elbIs2xx3xx)
+                Fe5xxWhileElb2xx3xx++;
 
-            if (cfIs4xx && feIs2xx3xx)
-                Cf4xxWhileFe2xx3xx++;
+            if (feIs4xx && elbIs2xx3xx)
+                Fe4xxWhileElb2xx3xx++;
 
-            if (feIs5xx && cfIs2xx3xx)
-                Fe5xxWhileCf2xx3xx++;
+            if (elbIs5xx && feIs2xx3xx)
+                Elb5xxWhileFe2xx3xx++;
 
-            if (feIs4xx && cfIs2xx3xx)
-                Fe4xxWhileCf2xx3xx++;
+            if (elbIs4xx && feIs2xx3xx)
+                Elb4xxWhileFe2xx3xx++;
         }
     }
 
     public sealed class BucketCounts
     {
         public StatusGroupCounts Elb { get; } = new();
-        public StatusGroupCounts Target { get; } = new();
+        public StatusGroupCounts Fe { get; } = new();
     }
 
     public sealed class StatusGroupCounts
@@ -162,22 +156,16 @@ public static class AlbIpSummaryScanner
     public sealed record AlbIpSummaryRow(
         DateTime TimestampUtc,
         string ClientIp,
-        string ClientPort,
         string Method,
-        string Host,
-        string PathNoQuery,
         string RawRequest,
         int? ElbStatusCode,
-        int? TargetStatusCode,
+        int? FeStatusCode,
         string TargetEndpoint,
         double? TargetProcessingTimeSeconds,
         double? RequestProcessingTimeSeconds,
         double? ResponseProcessingTimeSeconds,
         string ActionsExecuted,
-        string TraceId,
-        string UserAgent,
-        string SourceFile,
-        string RawLine);
+        string UserAgent);
 
     public static async Task ScanFileAsync(
         string filePath,
@@ -201,10 +189,10 @@ public static class AlbIpSummaryScanner
             if (line.Length == 0)
                 continue;
 
-            if (!TryParseMatchedRow(line, requestedIp, sourceFile, out var row))
+            if (!TryParseMatchedRow(line, requestedIp, out var row))
                 continue;
 
-            result.AddRow(row!);
+            result.AddRow(row!, sourceFile);
 
             var pos = fs.Position;
             if (pos - lastReportedPos >= chunk)
@@ -219,7 +207,7 @@ public static class AlbIpSummaryScanner
             reportBytesDelta(remaining);
     }
 
-    private static bool TryParseMatchedRow(string line, IPAddress requestedIp, string sourceFile, out AlbIpSummaryRow? row)
+    private static bool TryParseMatchedRow(string line, IPAddress requestedIp, out AlbIpSummaryRow? row)
     {
         row = null;
 
@@ -237,7 +225,7 @@ public static class AlbIpSummaryScanner
         if (!TryGetToken(span, 3, out var clientToken))
             return false;
 
-        SplitEndpoint(clientToken, out var clientIpToken, out var clientPortToken);
+        SplitEndpoint(clientToken, out var clientIpToken, out _);
         if (clientIpToken.Length == 0)
             return false;
 
@@ -252,34 +240,25 @@ public static class AlbIpSummaryScanner
         TryGetToken(span, 9, out var targetStatusToken);
         TryGetToken(span, 12, out var requestToken);
         TryGetToken(span, 13, out var userAgentToken);
-        TryGetToken(span, 17, out var traceIdToken);
         TryGetToken(span, 22, out var actionsToken);
 
         ParseRequest(requestToken,
             out var method,
-            out var host,
-            out var pathNoQuery,
             out var rawRequest);
 
         row = new AlbIpSummaryRow(
             TimestampUtc: DateTime.SpecifyKind(timestampUtc, DateTimeKind.Utc),
             ClientIp: clientIp.ToString(),
-            ClientPort: NormalizeToken(clientPortToken),
             Method: method,
-            Host: host,
-            PathNoQuery: pathNoQuery,
             RawRequest: rawRequest,
             ElbStatusCode: ParseNullableInt(elbStatusToken),
-            TargetStatusCode: ParseNullableInt(targetStatusToken),
+            FeStatusCode: ParseNullableInt(targetStatusToken),
             TargetEndpoint: NormalizeToken(targetToken),
             TargetProcessingTimeSeconds: ParseNullableDouble(targetProcToken),
             RequestProcessingTimeSeconds: ParseNullableDouble(requestProcToken),
             ResponseProcessingTimeSeconds: ParseNullableDouble(responseProcToken),
             ActionsExecuted: NormalizeToken(actionsToken),
-            TraceId: NormalizeToken(traceIdToken),
-            UserAgent: NormalizeToken(userAgentToken),
-            SourceFile: sourceFile,
-            RawLine: line);
+            UserAgent: NormalizeToken(userAgentToken));
 
         return true;
     }
@@ -329,13 +308,9 @@ public static class AlbIpSummaryScanner
     private static void ParseRequest(
         ReadOnlySpan<char> requestToken,
         out string method,
-        out string host,
-        out string pathNoQuery,
         out string rawRequest)
     {
         method = "-";
-        host = "-";
-        pathNoQuery = "-";
         rawRequest = NormalizeToken(requestToken);
 
         if (requestToken.Length == 0 || requestToken.SequenceEqual("-".AsSpan()))
@@ -347,26 +322,6 @@ public static class AlbIpSummaryScanner
 
         method = NormalizeToken(requestToken[..sp1]);
 
-        var rest = requestToken[(sp1 + 1)..];
-        int sp2 = rest.IndexOf(' ');
-        var urlToken = sp2 >= 0 ? rest[..sp2] : rest;
-
-        if (urlToken.Length == 0)
-            return;
-
-        var urlText = urlToken.ToString();
-        if (Uri.TryCreate(urlText, UriKind.Absolute, out var absolute))
-        {
-            host = string.IsNullOrWhiteSpace(absolute.Host) ? "-" : absolute.Host;
-            pathNoQuery = string.IsNullOrWhiteSpace(absolute.AbsolutePath) ? "/" : absolute.AbsolutePath;
-            return;
-        }
-
-        int q = urlToken.IndexOf('?');
-        if (q >= 0)
-            urlToken = urlToken[..q];
-
-        pathNoQuery = urlToken.Length == 0 ? "-" : urlToken.ToString();
     }
 
     private static string NormalizeToken(ReadOnlySpan<char> token)
