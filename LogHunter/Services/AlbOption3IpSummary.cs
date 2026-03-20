@@ -227,7 +227,7 @@ public static partial class AlbOptions
         html = html.Replace("Filter IP...", "Filter series...", StringComparison.Ordinal);
         html = html.Replace(
             "<th>IP</th><th>Source hits</th><th>Total requests</th><th>Peak (5 min)</th><th>Visible</th>",
-            "<th><span class=\"lh-tip\" data-tip=\"The chart line or metric represented in this report.\">Series</span></th><th>Source hits</th><th><span class=\"lh-tip\" data-tip=\"Total number of matching requests counted for this series across the full scan.\">Total requests</span></th><th><span class=\"lh-tip\" data-tip=\"Highest number of requests seen for this series in a single time bucket on the chart.\">Peak (bucket)</span></th><th><span class=\"lh-tip\" data-tip=\"Whether this series is currently shown or hidden on the chart.\">Visible</span></th>",
+            "<th title=\"The chart line or metric represented in this report.\">Series</th><th>Source hits</th><th title=\"Total number of matching requests counted for this series across the full scan.\">Total requests</th><th title=\"Highest number of requests seen for this series in a single time bucket on the chart.\">Peak (bucket)</th><th title=\"Whether this series is currently shown or hidden on the chart.\">Visible</th>",
             StringComparison.Ordinal);
 
         var summaryHtml = BuildSummarySectionHtml(result, detailExportKind, detailExportPath);
