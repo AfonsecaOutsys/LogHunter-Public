@@ -224,6 +224,7 @@ public static partial class AlbOptions
             filePrefix: $"alb_ip_summary_{sanitizedIp}");
 
         var html = File.ReadAllText(htmlPath);
+        html = html.Replace("\r\n", "\n", StringComparison.Ordinal);
         html = html.Replace("Filter IP...", "Filter series...", StringComparison.Ordinal);
         html = html.Replace(
             "<th>IP</th><th>Source hits</th><th>Total requests</th><th>Peak (5 min)</th><th>Visible</th>",
