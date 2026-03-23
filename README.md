@@ -45,6 +45,12 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 1.2
+
+- Merge-to-main release for the ALB IP Summary work.
+- Includes the option 3 HTML report fix so the chart summary columns render correctly on Windows.
+- Establishes the `1.2` version baseline for the next mainline release.
+
 ### 1.1.3
 
 - Merge-prep release for the ALB IP Summary feature set and related report/UI polish.
