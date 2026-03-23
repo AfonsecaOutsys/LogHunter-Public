@@ -134,7 +134,9 @@ INSERT INTO Hits (
 CREATE INDEX idx_hits_timestamp_utc ON Hits(TimestampUtc);
 CREATE INDEX idx_hits_elb_response_code ON Hits(ElbResponseCode);
 CREATE INDEX idx_hits_fe_response_code ON Hits(FeResponseCode);
-CREATE INDEX idx_hits_target_endpoint ON Hits(TargetEndpoint);";
+CREATE INDEX idx_hits_target_endpoint ON Hits(TargetEndpoint);
+CREATE INDEX idx_hits_method ON Hits(Method);
+CREATE INDEX idx_hits_timestamp_elb_fe ON Hits(TimestampUtc, ElbResponseCode, FeResponseCode);";
             idx.ExecuteNonQuery();
 
             _completed = true;
