@@ -100,12 +100,12 @@ public static class IisOption_4xxPivot2xx3xx
                             }
                         }
 
-                        var ip = GetRealIpPreferOriginal(tokens, iOriginalIp, iCIp);
+                        var ip = IisClientIpResolver.ResolveClientIpPreferOriginal(tokens, iOriginalIp, iCIp);
                         if (ip is null)
                             return;
 
                         // Focus on public clients
-                        if (IsPrivateOrLoopback(ip))
+                        if (IisClientIpResolver.IsPrivateOrLoopback(ip))
                             return;
 
                         if (!statsByIp.TryGetValue(ip, out var s))
@@ -238,11 +238,11 @@ public static class IisOption_4xxPivot2xx3xx
                         if (status < 200 || status > 399)
                             return;
 
-                        var ip = GetRealIpPreferOriginal(tokens, iOriginalIp, iCIp);
+                        var ip = IisClientIpResolver.ResolveClientIpPreferOriginal(tokens, iOriginalIp, iCIp);
                         if (ip is null)
                             return;
 
-                        if (IsPrivateOrLoopback(ip))
+                        if (IisClientIpResolver.IsPrivateOrLoopback(ip))
                             return;
 
                         if (!selectedIps.Contains(ip))
@@ -325,73 +325,6 @@ public static class IisOption_4xxPivot2xx3xx
         value = 0;
         if (s.IsEmpty || s[0] == '-') return false;
         return int.TryParse(s, out value);
-    }
-
-    private static string? GetRealIpPreferOriginal(IisW3cReader.TokenReader tokens, int iOriginalIp, int iCIp)
-    {
-        ReadOnlySpan<char> raw = default;
-
-        if (iOriginalIp >= 0)
-            raw = tokens.Get(iOriginalIp);
-
-        if (raw.IsEmpty || raw[0] == '-')
-        {
-            if (iCIp >= 0)
-                raw = tokens.Get(iCIp);
-        }
-
-        return NormalizeIp(raw);
-    }
-
-    private static string? NormalizeIp(ReadOnlySpan<char> raw)
-    {
-        if (raw.IsEmpty) return null;
-
-        raw = raw.Trim();
-        if (raw.IsEmpty || raw[0] == '-') return null;
-
-        // "1.2.3.4, 10.0.0.1"
-        var comma = raw.IndexOf(',');
-        if (comma >= 0)
-            raw = raw.Slice(0, comma).Trim();
-
-        // "[::1]:1234" => "::1"
-        if (raw.Length > 0 && raw[0] == '[')
-        {
-            var end = raw.IndexOf(']');
-            if (end > 1)
-                raw = raw.Slice(1, end - 1);
-        }
-        else
-        {
-            // IPv4:port (single colon)
-            var colon = raw.IndexOf(':');
-            if (colon > 0 && raw.Slice(colon + 1).IndexOf(':') < 0)
-                raw = raw.Slice(0, colon);
-        }
-
-        var s = raw.ToString().Trim();
-        return s.Length == 0 ? null : s;
-    }
-
-    private static bool IsPrivateOrLoopback(string ip)
-    {
-        if (!IPAddress.TryParse(ip, out var addr))
-            return false;
-
-        if (IPAddress.IsLoopback(addr))
-            return true;
-
-        if (addr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-        {
-            var b = addr.GetAddressBytes();
-            if (b[0] == 10) return true;
-            if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return true;
-            if (b[0] == 192 && b[1] == 168) return true;
-            if (b[0] == 169 && b[1] == 254) return true;
-        }
-
-        return false;
     }
 
     private static bool LooksSensitiveOutSystems(string uriStem)

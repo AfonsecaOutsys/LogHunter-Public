@@ -3,6 +3,7 @@ using LogHunter.Menus;
 using LogHunter.Services;
 using LogHunter.Viewer;
 using Spectre.Console;
+using Microsoft.Data.Sqlite;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
@@ -134,8 +135,24 @@ internal static class Program
 
             if (!string.IsNullOrWhiteSpace(viewerSqlitePath))
             {
-                using var viewerHost = new AlbIpSummarySqliteViewerHost(viewerSqlitePath, viewerIp);
-                await viewerHost.RunAsync(() => _ctrlCRequested).ConfigureAwait(false);
+                if (TryDetectViewerKind(viewerSqlitePath, out var viewerKind))
+                {
+                    if (viewerKind == "iis")
+                    {
+                        using var viewerHost = new IisIpSummarySqliteViewerHost(viewerSqlitePath, viewerIp);
+                        await viewerHost.RunAsync(() => _ctrlCRequested).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        using var viewerHost = new AlbIpSummarySqliteViewerHost(viewerSqlitePath, viewerIp);
+                        await viewerHost.RunAsync(() => _ctrlCRequested).ConfigureAwait(false);
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("Unable to determine viewer type for the SQLite file.");
+                }
+
                 return;
             }
 
@@ -197,5 +214,44 @@ internal static class Program
         Console.WriteLine("  --viewer-ip <ip>        Optional selected IP shown in viewer metadata");
         Console.WriteLine("  --version, -v           Print version and exit");
         Console.WriteLine("  --help, -h      Show this help");
+    }
+
+    private static bool TryDetectViewerKind(string dbPath, out string kind)
+    {
+        kind = "alb";
+
+        try
+        {
+            using var connection = new SqliteConnection($"Data Source={Path.GetFullPath(dbPath)};Mode=ReadOnly");
+            connection.Open();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "PRAGMA table_info(Hits);";
+            using var reader = cmd.ExecuteReader();
+
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (reader.Read())
+            {
+                if (!reader.IsDBNull(1))
+                    columns.Add(reader.GetString(1));
+            }
+
+            if (columns.Contains("ScStatusCode"))
+            {
+                kind = "iis";
+                return true;
+            }
+
+            if (columns.Contains("ElbResponseCode"))
+            {
+                kind = "alb";
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
     }
 }

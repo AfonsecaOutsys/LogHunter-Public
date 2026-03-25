@@ -276,10 +276,10 @@ public static class IisOption_BytesIntel
                     {
                         if (IsIgnoredByUa(tokens, iUA)) return;
 
-                        var ip = GetRealIpPreferOriginal(tokens, iOriginalIp, iCIp);
+                        var ip = IisClientIpResolver.ResolveClientIpPreferOriginal(tokens, iOriginalIp, iCIp);
                         if (ip is null) return;
 
-                        if (!IsPublicIp(ip, ipClassCache)) return;
+                        if (!IisClientIpResolver.IsPublicIp(ip, ipClassCache)) return;
 
                         long scBytes = TryParseLong(tokens.Get(iScBytes), out var scb) ? scb : 0L;
                         long csBytes = (iCsBytes >= 0 && TryParseLong(tokens.Get(iCsBytes), out var csb)) ? csb : 0L;
@@ -363,10 +363,10 @@ public static class IisOption_BytesIntel
                         if (!TryParseLong(tokens.Get(iCsBytes), out var csBytes)) return;
                         if (csBytes <= 0) return;
 
-                        var ip = GetRealIpPreferOriginal(tokens, iOriginalIp, iCIp);
+                        var ip = IisClientIpResolver.ResolveClientIpPreferOriginal(tokens, iOriginalIp, iCIp);
                         if (ip is null) return;
 
-                        if (!IsPublicIp(ip, ipClassCache)) return;
+                        if (!IisClientIpResolver.IsPublicIp(ip, ipClassCache)) return;
 
                         long scBytes = (iScBytes >= 0 && TryParseLong(tokens.Get(iScBytes), out var scb)) ? scb : 0L;
                         int status = (iStatus >= 0 && TryParseInt(tokens.Get(iStatus), out var st)) ? st : 0;
@@ -428,10 +428,10 @@ public static class IisOption_BytesIntel
                     {
                         if (IsIgnoredByUa(tokens, iUA)) return;
 
-                        var ip = GetRealIpPreferOriginal(tokens, iOriginalIp, iCIp);
+                        var ip = IisClientIpResolver.ResolveClientIpPreferOriginal(tokens, iOriginalIp, iCIp);
                         if (ip is null) return;
 
-                        if (!IsPublicIp(ip, ipClassCache)) return;
+                        if (!IisClientIpResolver.IsPublicIp(ip, ipClassCache)) return;
                         if (!topIps.Contains(ip)) return;
 
                         long scBytes = TryParseLong(tokens.Get(iScBytes), out var scb) ? scb : 0L;
@@ -498,10 +498,10 @@ public static class IisOption_BytesIntel
                         if (!TryParseLong(tokens.Get(iCsBytes), out var csBytes)) return;
                         if (csBytes <= 0) return;
 
-                        var ip = GetRealIpPreferOriginal(tokens, iOriginalIp, iCIp);
+                        var ip = IisClientIpResolver.ResolveClientIpPreferOriginal(tokens, iOriginalIp, iCIp);
                         if (ip is null) return;
 
-                        if (!IsPublicIp(ip, ipClassCache)) return;
+                        if (!IisClientIpResolver.IsPublicIp(ip, ipClassCache)) return;
                         if (!topIps.Contains(ip)) return;
 
                         if (iUriStem < 0) return;
@@ -572,14 +572,6 @@ public static class IisOption_BytesIntel
         public long CsBytes;
         public long MaxCsBytes;
         public long SensitiveHits;
-    }
-
-    private enum IpClass : byte
-    {
-        Unknown = 0,
-        Invalid = 1,
-        PrivateOrLoopback = 2,
-        Public = 3
     }
 
     // -------- Rendering --------
@@ -1025,81 +1017,6 @@ public static class IisOption_BytesIntel
 
     private static bool TryParseLong(ReadOnlySpan<char> s, out long value)
         => long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
-
-    private static string? GetRealIpPreferOriginal(IisW3cReader.TokenReader tokens, int iOriginalIp, int iCIp)
-    {
-        ReadOnlySpan<char> raw = default;
-
-        if (iOriginalIp >= 0)
-            raw = tokens.Get(iOriginalIp);
-
-        if (raw.IsEmpty || raw[0] == '-')
-        {
-            if (iCIp >= 0)
-                raw = tokens.Get(iCIp);
-        }
-
-        return NormalizeIp(raw);
-    }
-
-    private static string? NormalizeIp(ReadOnlySpan<char> raw)
-    {
-        if (raw.IsEmpty) return null;
-
-        raw = raw.Trim();
-        if (raw.IsEmpty || raw[0] == '-') return null;
-
-        var comma = raw.IndexOf(',');
-        if (comma >= 0)
-            raw = raw.Slice(0, comma).Trim();
-
-        if (raw.Length > 0 && raw[0] == '[')
-        {
-            var end = raw.IndexOf(']');
-            if (end > 1)
-                raw = raw.Slice(1, end - 1);
-        }
-        else
-        {
-            var colon = raw.IndexOf(':');
-            if (colon > 0 && raw.Slice(colon + 1).IndexOf(':') < 0)
-                raw = raw.Slice(0, colon);
-        }
-
-        var s = raw.ToString().Trim();
-        return s.Length == 0 ? null : s;
-    }
-
-    private static bool IsPublicIp(string ip, Dictionary<string, IpClass> cache)
-    {
-        if (cache.TryGetValue(ip, out var cls))
-            return cls == IpClass.Public;
-
-        if (!IPAddress.TryParse(ip, out var addr))
-        {
-            cache[ip] = IpClass.Invalid;
-            return false;
-        }
-
-        if (IPAddress.IsLoopback(addr))
-        {
-            cache[ip] = IpClass.PrivateOrLoopback;
-            return false;
-        }
-
-        if (addr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-        {
-            var b = addr.GetAddressBytes();
-            if (b[0] == 10) { cache[ip] = IpClass.PrivateOrLoopback; return false; }
-            if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) { cache[ip] = IpClass.PrivateOrLoopback; return false; }
-            if (b[0] == 192 && b[1] == 168) { cache[ip] = IpClass.PrivateOrLoopback; return false; }
-            if (b[0] == 169 && b[1] == 254) { cache[ip] = IpClass.PrivateOrLoopback; return false; }
-            if (b[0] == 127) { cache[ip] = IpClass.PrivateOrLoopback; return false; }
-        }
-
-        cache[ip] = IpClass.Public;
-        return true;
-    }
 
     private static bool LooksSensitiveOutSystems(string uriStem)
     {

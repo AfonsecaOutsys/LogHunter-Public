@@ -21,6 +21,10 @@ public sealed class IisMenu : IMenu
         var items = new[]
         {
             new ConsoleEx.MenuItem(
+                "IP Summary",
+                "Enter one client IP, chart per-minute IIS response activity, and review matching requests in a detailed HTML report."),
+
+            new ConsoleEx.MenuItem(
                 "4xx -> pick suspicious IPs -> pivot to 2xx/3xx",
                 "Scan 4xx responses, show top IPs, select suspicious entries,\nthen export and summarize their 2xx/3xx traffic."),
 
@@ -50,22 +54,26 @@ public sealed class IisMenu : IMenu
         switch (selected.Value)
         {
             case 0:
-                await IisOption_4xxPivot2xx3xx.RunAsync(_session.Root, ct).ConfigureAwait(false);
+                await IisOption_IpSummary.RunAsync(_session.Root, ct).ConfigureAwait(false);
                 return this;
 
             case 1:
-                await IisOption_FindBurstPatterns.RunAsync(_session, ct).ConfigureAwait(false);
+                await IisOption_4xxPivot2xx3xx.RunAsync(_session.Root, ct).ConfigureAwait(false);
                 return this;
 
             case 2:
-                await IisOption_BytesIntel.RunTopBandwidthAsync(_session.Root, ct).ConfigureAwait(false);
+                await IisOption_FindBurstPatterns.RunAsync(_session, ct).ConfigureAwait(false);
                 return this;
 
             case 3:
-                await IisOption_BytesIntel.RunUploadsPayloadsAsync(_session.Root, ct).ConfigureAwait(false);
+                await IisOption_BytesIntel.RunTopBandwidthAsync(_session.Root, ct).ConfigureAwait(false);
                 return this;
 
             case 4:
+                await IisOption_BytesIntel.RunUploadsPayloadsAsync(_session.Root, ct).ConfigureAwait(false);
+                return this;
+
+            case 5:
                 return new MainMenu(_session);
 
             default:

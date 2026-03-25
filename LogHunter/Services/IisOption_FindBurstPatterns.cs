@@ -257,9 +257,9 @@ public static class IisOption_FindBurstPatterns
                             }
                         }
 
-                        var ip = GetRealIpPreferOriginal(tokens, iOriginalIp, iCIp);
+                        var ip = IisClientIpResolver.ResolveClientIpPreferOriginal(tokens, iOriginalIp, iCIp);
                         if (ip is null) return;
-                        if (IsPrivateOrLoopback(ip)) return;
+                        if (IisClientIpResolver.IsPrivateOrLoopback(ip)) return;
 
                         var key = $"{ip}|{bucketStart.Ticks}";
                         if (!aggs.TryGetValue(key, out var agg))
@@ -538,7 +538,7 @@ public static class IisOption_FindBurstPatterns
                         if (!TryParseDateTimeUtc(tokens.Get(iDate), tokens.Get(iTime), out var tsUtc))
                             return;
 
-                        var ip = GetRealIpPreferOriginal(tokens, iOriginalIp, iCIp);
+                        var ip = IisClientIpResolver.ResolveClientIpPreferOriginal(tokens, iOriginalIp, iCIp);
                         if (ip is null) return;
 
                         if (!windowsByIp.TryGetValue(ip, out var list))
@@ -988,70 +988,6 @@ applyFilters();
         var ticksPerBucket = TimeSpan.FromSeconds(bucketSeconds).Ticks;
         var floored = utc.Ticks - (utc.Ticks % ticksPerBucket);
         return new DateTime(floored, DateTimeKind.Utc);
-    }
-
-    private static string? GetRealIpPreferOriginal(IisW3cReader.TokenReader tokens, int iOriginalIp, int iCIp)
-    {
-        ReadOnlySpan<char> raw = default;
-
-        if (iOriginalIp >= 0)
-            raw = tokens.Get(iOriginalIp);
-
-        if (raw.IsEmpty || raw[0] == '-')
-        {
-            if (iCIp >= 0)
-                raw = tokens.Get(iCIp);
-        }
-
-        return NormalizeIp(raw);
-    }
-
-    private static string? NormalizeIp(ReadOnlySpan<char> raw)
-    {
-        if (raw.IsEmpty) return null;
-
-        raw = raw.Trim();
-        if (raw.IsEmpty || raw[0] == '-') return null;
-
-        var comma = raw.IndexOf(',');
-        if (comma >= 0)
-            raw = raw.Slice(0, comma).Trim();
-
-        if (raw.Length > 0 && raw[0] == '[')
-        {
-            var end = raw.IndexOf(']');
-            if (end > 1)
-                raw = raw.Slice(1, end - 1);
-        }
-        else
-        {
-            var colon = raw.IndexOf(':');
-            if (colon > 0 && raw.Slice(colon + 1).IndexOf(':') < 0)
-                raw = raw.Slice(0, colon);
-        }
-
-        var s = raw.ToString().Trim();
-        return s.Length == 0 ? null : s;
-    }
-
-    private static bool IsPrivateOrLoopback(string ip)
-    {
-        if (!IPAddress.TryParse(ip, out var addr))
-            return false;
-
-        if (IPAddress.IsLoopback(addr))
-            return true;
-
-        if (addr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-        {
-            var b = addr.GetAddressBytes();
-            if (b[0] == 10) return true;
-            if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return true;
-            if (b[0] == 192 && b[1] == 168) return true;
-            if (b[0] == 169 && b[1] == 254) return true;
-        }
-
-        return false;
     }
 
     private static bool IsDynamicPath(string uriStem)
