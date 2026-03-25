@@ -20,6 +20,7 @@
 
 		<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
 		<EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+		<PublishReadyToRun>true</PublishReadyToRun>
 
 		<PublishTrimmed>false</PublishTrimmed>
 		<InvariantGlobalization>false</InvariantGlobalization>
