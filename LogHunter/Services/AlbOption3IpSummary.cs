@@ -32,17 +32,9 @@ public static partial class AlbOptions
             return;
         }
 
-        var input = ConsoleEx.ReadLineWithEsc("Client IP to summarize:");
-        if (input is null)
+        var requestedIps = PromptForAlbIpSummaryIps();
+        if (requestedIps is null || requestedIps.Count == 0)
             return;
-
-        input = input.Trim();
-        if (!IPAddress.TryParse(input, out var requestedIp))
-        {
-            ConsoleEx.Error($"Invalid IP address: {input}");
-            ConsoleEx.Pause("Press Enter to return...");
-            return;
-        }
 
         var files = AlbScanner.GetLogFiles();
         if (files.Count == 0)
@@ -53,73 +45,105 @@ public static partial class AlbOptions
         }
 
         Directory.CreateDirectory(outputFolder);
-        var sanitizedIp = SanitizeFileComponent(requestedIp.ToString());
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-        var excelPath = Path.Combine(outputFolder, $"alb_ip_summary_{sanitizedIp}_{stamp}.xlsx");
-        var sqlitePath = Path.Combine(outputFolder, $"alb_ip_summary_{sanitizedIp}_{stamp}.db");
+        var htmlPath = Path.Combine(outputFolder, $"alb_ip_summary_multi_{stamp}.html");
+        var excelPath = Path.Combine(outputFolder, $"alb_ip_summary_multi_{stamp}.xlsx");
+        var sqlitePath = Path.Combine(outputFolder, $"alb_ip_summary_multi_{stamp}.db");
 
+        var resultsByIp = requestedIps.ToDictionary(
+            ip => ip,
+            ip => new AlbIpSummaryScanner.ScanResult(ip, Path.Combine(outputFolder, $"alb_ip_summary_{SanitizeFileComponent(ip)}_{stamp}.db")),
+            StringComparer.OrdinalIgnoreCase);
+
+        AlbIpSummaryExportSqlite.Writer? sharedSqliteWriter = null;
         InfoPanel("Scan plan",
-            ("Mode", "IP summary with 1-minute ELB/FE response chart + external detail export"),
-            ("Client IP", requestedIp.ToString()),
+            ("Mode", "Multi-IP summary with one shared report and shared detail export behavior"),
+            ("Requested IPs", string.Join(", ", requestedIps)),
             ("Files", files.Count.ToString("N0", CultureInfo.InvariantCulture)),
             ("Input", albFolder),
-            ("Excel threshold", "Rows < 1,000,000"),
-            ("1M-row behavior", "Prompt once for optional SQLite deep analysis"),
+            ("Excel threshold", "Rows < 1,000,000 across the combined retained result set"),
+            ("1M-row behavior", "Prompt once, then use one aggregated SQLite database for all selected IPs if approved"),
             ("Output", outputFolder));
 
-        using var result = new AlbIpSummaryScanner.ScanResult(requestedIp.ToString(), sqlitePath);
-        await ScanIpSummaryWithPhasedProgressAsync(files, requestedIp, result);
-
-        result.CompleteStreamingExports();
-
-        if (result.TotalRows == 0)
+        try
         {
-            ConsoleEx.Warn($"No ALB hits found for IP: {requestedIp}");
-            ConsoleEx.Pause("Press Enter to return...");
-            return;
-        }
+            sharedSqliteWriter = await ScanIpSummaryMultiWithPhasedProgressAsync(files, resultsByIp, sqlitePath).ConfigureAwait(false);
 
-        string? detailExportPath = null;
-        string? detailExportKind = null;
-        if (result.TotalRows < AlbIpSummaryScanner.ExcelRowThreshold)
-        {
-            result.Rows.Sort((a, b) => a.TimestampUtc.CompareTo(b.TimestampUtc));
-            AlbIpSummaryExportExcel.Export(excelPath, result);
-            detailExportPath = excelPath;
-            detailExportKind = "Excel";
-        }
-        else if (result.DetailMode == AlbIpSummaryScanner.DetailRetentionMode.SqliteApproved)
-        {
-            detailExportPath = sqlitePath;
-            detailExportKind = "SQLite";
-        }
+            foreach (var result in resultsByIp.Values)
+                result.CompleteStreamingExports();
+            sharedSqliteWriter?.Complete();
 
-        var htmlPath = BuildIpSummaryReport(outputFolder, result, detailExportKind, detailExportPath, sanitizedIp);
+            var anyHits = resultsByIp.Values.Any(r => r.TotalRows > 0);
+            if (!anyHits)
+            {
+                foreach (var ip in requestedIps)
+                    ConsoleEx.Warn($"No ALB hits found for IP: {ip}");
 
-        if (TryOpenFile(htmlPath))
-            ConsoleEx.Success($"HTML report opened: {htmlPath}");
-        else
-            ConsoleEx.Success($"HTML report generated: {htmlPath}");
+                ConsoleEx.Pause("Press Enter to return...");
+                return;
+            }
 
-        if (detailExportKind == "SQLite")
-        {
-            ConsoleEx.Success($"SQLite deep analysis database created: {detailExportPath}");
-            ConsoleEx.Success("Launching local viewer...");
-            if (AlbIpSummarySqliteViewerLauncher.Launch(detailExportPath!, result.RequestedIp))
-                ConsoleEx.Success("Local SQLite viewer launched in a separate LogHunter process.");
+            var artifactsByIp = new Dictionary<string, DetailArtifact>(StringComparer.OrdinalIgnoreCase);
+            var anySqlite = resultsByIp.Values.Any(r => r.DetailMode == AlbIpSummaryScanner.DetailRetentionMode.SqliteApproved);
+
+            var excelEligible = resultsByIp.Values
+                .Where(r => !anySqlite && r.TotalRows > 0 && r.HasRetainedRows)
+                .OrderBy(r => r.RequestedIp, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var result in excelEligible)
+                result.Rows.Sort((a, b) => a.TimestampUtc.CompareTo(b.TimestampUtc));
+
+            if (excelEligible.Count > 0)
+                AlbIpSummaryExportExcel.Export(excelPath, excelEligible);
+
+            foreach (var result in resultsByIp.Values)
+            {
+                if (result.TotalRows == 0)
+                    artifactsByIp[result.RequestedIp] = new DetailArtifact(null, null);
+                else if (result.DetailMode == AlbIpSummaryScanner.DetailRetentionMode.SqliteApproved)
+                    artifactsByIp[result.RequestedIp] = new DetailArtifact("SQLite", sqlitePath);
+                else if (!anySqlite && result.HasRetainedRows)
+                    artifactsByIp[result.RequestedIp] = new DetailArtifact("Excel", excelPath);
+                else
+                    artifactsByIp[result.RequestedIp] = new DetailArtifact(null, null);
+            }
+
+            BuildMultiIpSummaryReport(htmlPath, resultsByIp.Values.OrderBy(r => r.RequestedIp, StringComparer.OrdinalIgnoreCase).ToList(), artifactsByIp);
+
+            if (TryOpenFile(htmlPath))
+                ConsoleEx.Success($"HTML report opened: {htmlPath}");
             else
-                ConsoleEx.Warn("SQLite viewer could not be launched automatically. Open it manually with --viewer-sqlite <path>.");
+                ConsoleEx.Success($"HTML report generated: {htmlPath}");
 
-            ConsoleEx.Success($"Charts View and summary generated from the full scan, and SQLite deep-analysis output was generated: {detailExportPath}");
+            if (excelEligible.Count > 0)
+                ConsoleEx.Success($"Detailed export generated as Excel: {excelPath}");
+
+            var sqliteApproved = resultsByIp.Values
+                .Where(r => artifactsByIp[r.RequestedIp].Kind == "SQLite")
+                .OrderBy(r => r.RequestedIp, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (sqliteApproved.Count > 0)
+            {
+                ConsoleEx.Success($"SQLite deep analysis database created for {sqliteApproved.Count} IPs: {sqlitePath}");
+                if (AlbIpSummarySqliteViewerLauncher.Launch(sqlitePath, null))
+                    ConsoleEx.Success("Local SQLite viewer launched for the aggregated ALB IP summary database.");
+                else
+                    ConsoleEx.Warn("SQLite viewer could not be launched automatically for the aggregated ALB IP summary database.");
+            }
+
+            foreach (var result in resultsByIp.Values.OrderBy(r => r.RequestedIp, StringComparer.OrdinalIgnoreCase))
+            {
+                if (result.TotalRows == 0)
+                    ConsoleEx.Warn($"No ALB hits found for IP: {result.RequestedIp}");
+            }
         }
-        else if (detailExportKind == "Excel")
+        finally
         {
-            ConsoleEx.Success($"Detailed export generated as Excel: {detailExportPath}");
-        }
-        else
-        {
-            ConsoleEx.Success("Charts View and summary were generated from the full scan.");
-            ConsoleEx.Success("Detailed export was intentionally skipped by user choice after the 1M-row prompt.");
+            sharedSqliteWriter?.Dispose();
+            foreach (var result in resultsByIp.Values)
+                result.Dispose();
         }
 
         ConsoleEx.Pause("Press Enter to return...");

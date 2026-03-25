@@ -7,7 +7,7 @@ namespace LogHunter.Services;
 
 public static class AlbIpSummarySqliteViewerLauncher
 {
-    public static bool Launch(string dbPath, string requestedIp)
+    public static bool Launch(string dbPath, string? requestedIp)
     {
         if (string.IsNullOrWhiteSpace(dbPath) || !File.Exists(dbPath))
             return false;
@@ -21,11 +21,7 @@ public static class AlbIpSummarySqliteViewerLauncher
             var startInfo = new ProcessStartInfo
             {
                 FileName = executablePath,
-                Arguments = string.Format(
-                    CultureInfo.InvariantCulture,
-                    "--viewer-sqlite {0} --viewer-ip {1}",
-                    QuoteArg(Path.GetFullPath(dbPath)),
-                    QuoteArg(requestedIp)),
+                Arguments = BuildArguments(dbPath, requestedIp),
                 UseShellExecute = true,
                 WorkingDirectory = AppContext.BaseDirectory
             };
@@ -37,6 +33,14 @@ public static class AlbIpSummarySqliteViewerLauncher
         {
             return false;
         }
+    }
+
+    private static string BuildArguments(string dbPath, string? requestedIp)
+    {
+        var args = $"--viewer-sqlite {QuoteArg(Path.GetFullPath(dbPath))}";
+        if (!string.IsNullOrWhiteSpace(requestedIp))
+            args += $" --viewer-ip {QuoteArg(requestedIp)}";
+        return args;
     }
 
     private static string QuoteArg(string value)
