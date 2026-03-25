@@ -116,14 +116,16 @@ internal sealed class IisIpSummarySqliteViewerHost : IDisposable
     private ViewerMetadata LoadMetadata()
     {
         using var cmd = _connection.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*), MIN(TimestampUtc), MAX(TimestampUtc), MIN(ClientIp) FROM Hits;";
+        cmd.CommandText = "SELECT COUNT(*), MIN(TimestampUtc), MAX(TimestampUtc), MIN(ClientIp), COUNT(DISTINCT ClientIp) FROM Hits;";
         using var reader = cmd.ExecuteReader();
         reader.Read();
 
         var totalRows = reader.IsDBNull(0) ? 0L : reader.GetInt64(0);
         var startUtc = reader.IsDBNull(1) ? null : reader.GetString(1);
         var endUtc = reader.IsDBNull(2) ? null : reader.GetString(2);
-        var clientIp = _requestedIp ?? (reader.IsDBNull(3) ? null : reader.GetString(3));
+        var fallbackIp = reader.IsDBNull(3) ? null : reader.GetString(3);
+        var distinctIps = reader.IsDBNull(4) ? 0 : reader.GetInt32(4);
+        var clientIp = _requestedIp ?? (distinctIps > 1 ? $"Multiple ({distinctIps})" : fallbackIp);
 
         return new ViewerMetadata(
             SelectedIp: clientIp ?? string.Empty,
@@ -231,6 +233,7 @@ ORDER BY {MapSortField(request.SortField)} {MapSortDirection(request.SortDirecti
 
     private static void ApplyFilters(List<string> where, SqliteCommand cmd, ViewerQueryRequest request)
     {
+        AddContains(where, cmd, "ClientIp", "$clientIpContains", request.ClientIpContains);
         if (!string.IsNullOrWhiteSpace(request.Method))
         {
             where.Add("Method = $method");
@@ -361,13 +364,13 @@ ORDER BY {MapSortField(request.SortField)} {MapSortDirection(request.SortDirecti
     private sealed record ViewerMetadata(string SelectedIp, string DatabaseName, string DatabasePath, long TotalRows, string? StartUtc, string? EndUtc, string TimeRangeUtc, string ViewerUrl, string[] Methods);
     private sealed record ViewerRowsResponse(long TotalFiltered, int Page, int PageSize, IReadOnlyList<ViewerRow> Rows);
     private sealed record ViewerRow(string TimestampUtc, string ClientIp, string Method, string UriStem, string UriQuery, string Host, int? ScStatusCode, int? ScSubStatusCode, int? ScWin32StatusCode, long? TimeTakenMs, long? CsBytes, long? ScBytes, string UserAgent, string Referer);
-    private sealed record ViewerQueryRequest(int Page, int PageSize, string SortField, string SortDirection, string Preset, string? Method, string? StartUtc, string? EndUtc, string? StatusCode, string? StatusClass, string? UriContains, string? QueryContains, string? HostContains, string? UserAgentContains, string? RefererContains)
+    private sealed record ViewerQueryRequest(int Page, int PageSize, string SortField, string SortDirection, string Preset, string? ClientIpContains, string? Method, string? StartUtc, string? EndUtc, string? StatusCode, string? StatusClass, string? UriContains, string? QueryContains, string? HostContains, string? UserAgentContains, string? RefererContains)
     {
         public static ViewerQueryRequest From(NameValueCollection query)
         {
             var page = Math.Max(1, ParseInt(query["page"], 1));
             var pageSize = Math.Clamp(ParseInt(query["pageSize"], 100), 1, 500);
-            return new ViewerQueryRequest(page, pageSize, query["sortField"] ?? "timestampUtc", query["sortDirection"] ?? "desc", query["preset"] ?? "all", query["method"], query["startUtc"], query["endUtc"], query["statusCode"], query["statusClass"], query["uriContains"], query["queryContains"], query["hostContains"], query["userAgentContains"], query["refererContains"]);
+            return new ViewerQueryRequest(page, pageSize, query["sortField"] ?? "timestampUtc", query["sortDirection"] ?? "desc", query["preset"] ?? "all", query["clientIpContains"], query["method"], query["startUtc"], query["endUtc"], query["statusCode"], query["statusClass"], query["uriContains"], query["queryContains"], query["hostContains"], query["userAgentContains"], query["refererContains"]);
         }
 
         private static int ParseInt(string? value, int fallback)

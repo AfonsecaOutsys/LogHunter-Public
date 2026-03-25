@@ -23,8 +23,9 @@ public static class IisIpSummaryScanner
 
     public sealed class ScanResult : IDisposable
     {
-        private readonly string _sqlitePath;
+        private string _sqlitePath;
         private IisIpSummaryExportSqlite.Writer? _sqliteWriter;
+        private bool _ownsSqliteWriter;
 
         public ScanResult(string requestedIp, string sqlitePath)
         {
@@ -33,6 +34,7 @@ public static class IisIpSummaryScanner
         }
 
         public string RequestedIp { get; }
+        public bool HasRetainedRows => Rows.Count > 0;
         public List<IisIpSummaryRow> Rows { get; } = new();
         public SortedDictionary<DateTime, StatusGroupCounts> BucketsByMinuteUtc { get; } = new();
         public HashSet<string> SourceFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -101,22 +103,49 @@ public static class IisIpSummaryScanner
 
         public void CompleteStreamingExports()
         {
-            _sqliteWriter?.Complete();
+            if (_ownsSqliteWriter)
+                _sqliteWriter?.Complete();
         }
 
-        public void ApplyThresholdDecision(DetailRetentionMode mode)
+        public void ApplyThresholdDecision(DetailRetentionMode mode, IisIpSummaryExportSqlite.Writer? sharedWriter = null, string? sharedSqlitePath = null)
         {
             if (!ThresholdPromptPending || DetailMode != DetailRetentionMode.BelowThreshold)
                 return;
 
+            ApplyDetailMode(mode, sharedWriter, sharedSqlitePath);
+        }
+
+        public void ApplyGlobalDetailMode(DetailRetentionMode mode, IisIpSummaryExportSqlite.Writer? sharedWriter = null, string? sharedSqlitePath = null)
+        {
+            if (DetailMode != DetailRetentionMode.BelowThreshold)
+                return;
+
+            ApplyDetailMode(mode, sharedWriter, sharedSqlitePath);
+        }
+
+        private void ApplyDetailMode(DetailRetentionMode mode, IisIpSummaryExportSqlite.Writer? sharedWriter, string? sharedSqlitePath)
+        {
             ThresholdPromptPending = false;
+            ThresholdReached = ThresholdReached || TotalRows >= ExcelRowThreshold;
             DetailMode = mode == DetailRetentionMode.SummaryOnly
                 ? DetailRetentionMode.SummaryOnly
                 : DetailRetentionMode.SqliteApproved;
 
             if (DetailMode == DetailRetentionMode.SqliteApproved)
             {
-                _sqliteWriter = IisIpSummaryExportSqlite.Open(_sqlitePath);
+                if (sharedWriter is not null)
+                {
+                    _sqliteWriter = sharedWriter;
+                    _ownsSqliteWriter = false;
+                    if (!string.IsNullOrWhiteSpace(sharedSqlitePath))
+                        _sqlitePath = sharedSqlitePath;
+                }
+                else
+                {
+                    _sqliteWriter = IisIpSummaryExportSqlite.Open(_sqlitePath);
+                    _ownsSqliteWriter = true;
+                }
+
                 _sqliteWriter.WriteRows(Rows);
             }
 
@@ -142,7 +171,8 @@ public static class IisIpSummaryScanner
 
         public void Dispose()
         {
-            _sqliteWriter?.Dispose();
+            if (_ownsSqliteWriter)
+                _sqliteWriter?.Dispose();
         }
 
         private void AddBucket(IisIpSummaryRow row)
@@ -212,10 +242,12 @@ public static class IisIpSummaryScanner
 
     public static async Task ScanFileAsync(
         string filePath,
-        IPAddress requestedIp,
-        ScanResult result,
+        IReadOnlyDictionary<string, ScanResult> resultsByIp,
         CancellationToken ct)
     {
+        if (resultsByIp.Count == 0)
+            return;
+
         var sourceFile = SafeSourceFile(filePath);
         var map = await IisW3cReader.ReadFieldMapAsync(filePath, ct).ConfigureAwait(false);
         if (map is null)
@@ -248,12 +280,12 @@ public static class IisIpSummaryScanner
                 return;
 
             var ip = IisClientIpResolver.ResolveClientIpPreferOriginal(tokens, iOriginalIp, iCIp);
-            if (ip is null || !IPAddress.TryParse(ip, out var parsedIp) || !parsedIp.Equals(requestedIp))
+            if (ip is null || !resultsByIp.TryGetValue(ip, out var result))
                 return;
 
             var row = new IisIpSummaryRow(
                 TimestampUtc: timestampUtc,
-                ClientIp: parsedIp.ToString(),
+                ClientIp: ip,
                 Method: NormalizeToken(tokens.Get(iMethod)),
                 UriStem: NormalizeToken(tokens.Get(iUriStem)),
                 UriQuery: NormalizeToken(tokens.Get(iUriQuery)),
