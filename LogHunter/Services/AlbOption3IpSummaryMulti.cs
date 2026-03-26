@@ -232,7 +232,7 @@ public static partial class AlbOptions
 
         ConsoleEx.Header("ALB: IP Summary - gather IPs", Path.GetFileName(picked.FullPath));
 
-        if (!TryExtractIpCountsFromFile(
+        if (!TryExtractRequestedIpCountsFromFile(
                 filePath: picked.FullPath,
                 out var ipColumnName,
                 out var counts,
@@ -882,7 +882,7 @@ renderSelected();
         AnsiConsole.WriteLine();
     }
 
-    private static bool TryExtractIpCountsFromFile(
+    private static bool TryExtractRequestedIpCountsFromFile(
         string filePath,
         out string ipColumnName,
         out Dictionary<string, int> counts,
@@ -893,79 +893,7 @@ renderSelected();
         if (ext.Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
             return TryExtractIpCountsFromXlsxFirstTable(filePath, out ipColumnName, out counts, out orderedChoices, out error);
 
-        return TryExtractIpCountsFromCsv(filePath, out ipColumnName, out counts, out orderedChoices, out error);
-    }
-
-    private static bool TryExtractIpCountsFromCsv(
-        string csvPath,
-        out string ipColumnName,
-        out Dictionary<string, int> counts,
-        out List<IpChoice> orderedChoices,
-        out string error)
-    {
-        ipColumnName = "";
-        counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        orderedChoices = new List<IpChoice>();
-        error = "";
-
-        try
-        {
-            using var fs = File.OpenRead(csvPath);
-            using var sr = new StreamReader(fs);
-            var headerLine = sr.ReadLine();
-            if (string.IsNullOrWhiteSpace(headerLine))
-            {
-                error = "CSV is empty.";
-                return false;
-            }
-
-            var delimiter = CsvLite.DetectDelimiter(headerLine);
-            var headers = CsvLite.Split(headerLine, delimiter);
-            var ipIndex = FindIpColumnIndex(headers);
-            if (ipIndex < 0)
-            {
-                error = $"Could not detect an IP column. Headers: {string.Join(", ", headers)}";
-                return false;
-            }
-
-            ipColumnName = headers[ipIndex];
-            string? line;
-            while ((line = sr.ReadLine()) is not null)
-            {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-
-                var cols = CsvLite.Split(line, delimiter);
-                if (ipIndex >= cols.Count)
-                    continue;
-
-                var ip = NormalizeIp(cols[ipIndex]);
-                if (ip is null)
-                    continue;
-
-                counts.TryGetValue(ip, out var cur);
-                counts[ip] = cur + 1;
-            }
-
-            if (counts.Count == 0)
-            {
-                error = $"Detected IP column '{ipColumnName}', but no valid IPs were found in that column.";
-                return false;
-            }
-
-            orderedChoices = counts
-                .OrderByDescending(kvp => kvp.Value)
-                .ThenBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(kvp => new IpChoice(kvp.Key, kvp.Value))
-                .ToList();
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            error = ex.Message;
-            return false;
-        }
+        return TryExtractIpCountsFromFile(filePath, out ipColumnName, out counts, out orderedChoices, out error);
     }
 
     private static bool TryExtractIpCountsFromXlsxFirstTable(
@@ -1098,40 +1026,6 @@ renderSelected();
         }
     }
 
-    private static int FindIpColumnIndex(IReadOnlyList<string> headers)
-    {
-        var preferred = new[] { "ip", "ipaddress", "ip_address", "clientip", "client_ip", "client ip", "sourceip", "source_ip", "source ip" };
-        for (var i = 0; i < headers.Count; i++)
-        {
-            var h = headers[i].Trim().ToLowerInvariant();
-            if (preferred.Contains(h))
-                return i;
-        }
-
-        for (var i = 0; i < headers.Count; i++)
-        {
-            var h = headers[i].Trim().ToLowerInvariant();
-            if (h.Contains("ip") && !h.Contains("zip") && !h.Contains("ship"))
-                return i;
-        }
-
-        return -1;
-    }
-
-    private static string? NormalizeIp(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-            return null;
-
-        var s = raw.Trim().Trim('"').Trim();
-        if (s.Contains('.') && s.Count(c => c == ':') == 1)
-            s = s.Split(':', 2)[0];
-        if (s.StartsWith('[') && s.EndsWith(']') && s.Length > 2)
-            s = s[1..^1];
-
-        return System.Net.IPAddress.TryParse(s, out _) ? s : null;
-    }
-
     private static string BuildFileDisplay(FileInfo f)
     {
         var ts = $"{SafeCreationUtc(f):yyyy-MM-dd HH:mm:ss}Z";
@@ -1175,18 +1069,8 @@ renderSelected();
         catch { return f.LastWriteTimeUtc; }
     }
 
-    private static string FormatBytes(long bytes)
-    {
-        var suf = new[] { "B", "KB", "MB", "GB", "TB" };
-        double b = bytes;
-        var i = 0;
-        while (b >= 1024 && i < suf.Length - 1) { b /= 1024; i++; }
-        return $"{b:0.##} {suf[i]}";
-    }
-
     private sealed record DetailArtifact(string? Kind, string? Path);
     private sealed record FileChoice(string FullPath, string Display);
-    private sealed record IpChoice(string Ip, int Hits);
     private sealed record RequestedIpSet(string SourceLabel, List<string> Ips);
     private sealed record ChartSeriesPayload(string Name, double[] Values);
     private sealed record ChartPayload(long[] TimesUtc, ChartSeriesPayload[] Series);
