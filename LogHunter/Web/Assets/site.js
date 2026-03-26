@@ -1,3 +1,42 @@
+const THEME_KEY = 'loghunter.theme';
+
+function getPreferredTheme() {
+  const storedTheme = window.localStorage.getItem(THEME_KEY);
+  if (storedTheme === 'dark' || storedTheme === 'light') {
+    return storedTheme;
+  }
+
+  return 'dark';
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const toggle = document.getElementById('themeToggle');
+  if (toggle) {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    toggle.textContent = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
+    toggle.setAttribute('aria-label', `Switch to ${nextTheme} theme`);
+    toggle.dataset.theme = theme;
+  }
+}
+
+function initializeTheme() {
+  const theme = getPreferredTheme();
+  applyTheme(theme);
+
+  const toggle = document.getElementById('themeToggle');
+  if (!toggle) {
+    return;
+  }
+
+  toggle.addEventListener('click', () => {
+    const currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    const nextTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    window.localStorage.setItem(THEME_KEY, nextTheme);
+    applyTheme(nextTheme);
+  });
+}
+
 async function loadAppInfo() {
   const targets = Array.from(document.querySelectorAll('[data-app-info]'));
   if (!targets.length) {
@@ -28,10 +67,13 @@ async function loadAppInfo() {
   }
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    loadAppInfo().catch(() => {});
-  });
-} else {
+function initializeShell() {
+  initializeTheme();
   loadAppInfo().catch(() => {});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeShell);
+} else {
+  initializeShell();
 }

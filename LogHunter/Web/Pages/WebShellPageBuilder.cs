@@ -43,11 +43,10 @@ internal static class WebShellPageBuilder
         var nav = string.Join(Environment.NewLine, Pages.Select(x => BuildNavLink(x, page.Path)));
         var pills = string.Join(Environment.NewLine, Pages.Select(x => BuildTopbarLink(x, page.Path)));
         var title = Html(page.Path == "/" ? page.Title : $"{page.Title} | {context.AppName}");
-        var year = DateTime.UtcNow.Year;
 
         return $$"""
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -85,8 +84,11 @@ internal static class WebShellPageBuilder
           <h1>{{Html(page.Title)}}</h1>
           <div class="page-copy">{{Html(page.Description)}}</div>
         </div>
-        <div class="topbar-links">
+        <div class="topbar-actions">
+          <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to light theme">Switch to light</button>
+          <div class="topbar-links">
 {{pills}}
+          </div>
         </div>
       </div>
 
@@ -176,9 +178,9 @@ internal static class WebShellPageBuilder
             <div class="card-copy">Shared CSS and JavaScript are organized under the new web layer and embedded into the executable to preserve the local-app model.</div>
           </div>
           <div class="card">
-            <div class="card-title">Migration status</div>
-            <div class="card-value">Shell only</div>
-            <div class="card-copy">Business workflows still run through the existing console path. The web layer is ready for incremental feature migration.</div>
+            <div class="card-title">Theme</div>
+            <div class="card-value">Dark by default</div>
+            <div class="card-copy">Use the header toggle to switch between dark and light. The selected theme is saved locally in the browser.</div>
           </div>
         </div>
       </section>
