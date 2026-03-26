@@ -73,7 +73,7 @@ public sealed class AlbMenu : IMenu
                 return this;
 
             case 2:
-                await AlbOptions.IpSummaryAsync(_session.Root).ConfigureAwait(false);
+                await AlbOptions.IpSummaryAsync(_session).ConfigureAwait(false);
                 return this;
 
             case 3:
