@@ -52,7 +52,7 @@ internal static class Program
         string? rootOverride = null;
         string? viewerSqlitePath = null;
         string? viewerIp = null;
-        var webMode = false;
+        var consoleMode = false;
         var launchBrowser = true;
 
         for (var i = 0; i < args.Length; i++)
@@ -87,7 +87,12 @@ internal static class Program
 
             if (a == "--web")
             {
-                webMode = true;
+                continue;
+            }
+
+            if (a == "--console")
+            {
+                consoleMode = true;
                 continue;
             }
 
@@ -131,9 +136,15 @@ internal static class Program
             return;
         }
 
-        if (webMode && !string.IsNullOrWhiteSpace(viewerSqlitePath))
+        if (consoleMode && !string.IsNullOrWhiteSpace(viewerSqlitePath))
         {
-            Console.WriteLine("--web cannot be combined with --viewer-sqlite.");
+            Console.WriteLine("--console cannot be combined with --viewer-sqlite.");
+            return;
+        }
+
+        if (!consoleMode && !string.IsNullOrWhiteSpace(viewerSqlitePath))
+        {
+            Console.WriteLine("Web mode cannot be combined with --viewer-sqlite.");
             return;
         }
 
@@ -180,7 +191,7 @@ internal static class Program
 
             var session = new SessionState(root);
 
-            if (webMode)
+            if (!consoleMode)
             {
                 using var webHost = new WebAppHost(new WebAppContext("LogHunter", version, root, session));
                 await webHost.RunAsync(() => _ctrlCRequested, launchBrowser).ConfigureAwait(false);
@@ -231,11 +242,12 @@ internal static class Program
         Console.WriteLine($"LogHunter {version}");
         Console.WriteLine();
         Console.WriteLine("Usage:");
-        Console.WriteLine("  LogHunter [--root <path>] [--web [--no-browser]] [--viewer-sqlite <path> --viewer-ip <ip>] [--version] [--help]");
+        Console.WriteLine("  LogHunter [--root <path>] [--console] [--no-browser] [--viewer-sqlite <path> --viewer-ip <ip>] [--version] [--help]");
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --root <path>           Workspace path (defaults to the exe folder)");
-        Console.WriteLine("  --web                   Start the new local web shell on 127.0.0.1");
+        Console.WriteLine("  --console               Start the legacy console menu instead of the web shell");
+        Console.WriteLine("  --web                   Explicitly start the local web shell on 127.0.0.1 (default)");
         Console.WriteLine("  --no-browser            In web mode, do not auto-open the default browser");
         Console.WriteLine("  --viewer-sqlite <path>  Start the SQLite viewer for the specified database");
         Console.WriteLine("  --viewer-ip <ip>        Optional selected IP shown in viewer metadata");
