@@ -9,7 +9,7 @@
 /PlatformLogs/
 /platformlogs/   # keep both, just in case casing differs on some machines
 
-# --- Logs / data files (don’t share) ---
+# --- Logs / data files (don't share) ---
 *.log
 *.log.gz
 *.csv
@@ -26,11 +26,15 @@
 # --- Build outputs ---
 /bin/
 /obj/
+/src/
+**/bin/
+**/obj/
 artifacts/
 publish/
 
 # --- IDE / user files ---
 /.vs/
+**/.vs/
 /.idea/
 /.vscode/
 *.suo
