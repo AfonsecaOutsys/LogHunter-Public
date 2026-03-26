@@ -17,7 +17,7 @@ public static partial class AlbOptions
     private const string IpSummaryThresholdPrompt =
         "1M rows have been processed so far, continuing means there will be no Excel export only the Charts View and summary, proceed with SQLite for deep analysis?";
 
-    public static async Task IpSummaryAsync(string root)
+    public static async Task IpSummaryAsync(SessionState session)
     {
         var albFolder = AppFolders.ALB;
         var outputFolder = AppFolders.Output;
@@ -32,9 +32,10 @@ public static partial class AlbOptions
             return;
         }
 
-        var requestedIps = PromptForAlbIpSummaryIps();
-        if (requestedIps is null || requestedIps.Count == 0)
+        var requestedSet = PromptForAlbIpSet(session);
+        if (requestedSet is null || requestedSet.Ips.Count == 0)
             return;
+        var requestedIps = requestedSet.Ips;
 
         var files = AlbScanner.GetLogFiles();
         if (files.Count == 0)
@@ -59,6 +60,7 @@ public static partial class AlbOptions
         InfoPanel("Scan plan",
             ("Mode", "Multi-IP summary with one shared report and shared detail export behavior"),
             ("Requested IPs", string.Join(", ", requestedIps)),
+            ("IP source", requestedSet.SourceLabel),
             ("Files", files.Count.ToString("N0", CultureInfo.InvariantCulture)),
             ("Input", albFolder),
             ("Excel threshold", "Rows < 1,000,000 across the combined retained result set"),
