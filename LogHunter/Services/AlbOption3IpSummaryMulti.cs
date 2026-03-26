@@ -478,8 +478,18 @@ select { background:#0b0f14; color:#e6edf3; border:1px solid rgba(255,255,255,.1
 .seriesToggle { display:inline-flex; align-items:center; gap:8px; padding:5px 9px; border-radius:999px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.03); cursor:pointer; font-size:12px; user-select:none; }
 .seriesToggle.off { opacity:.45; }
 .sw { width:10px; height:10px; border-radius:3px; display:inline-block; }
+.chart-meta { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; margin-bottom:10px; }
+.hover-card { min-width:320px; flex:1 1 360px; background:#111827; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px 12px; }
+.hover-title { font-size:13px; font-weight:600; margin:0 0 6px 0; }
+.hover-subtitle { font-size:12px; opacity:.78; margin-bottom:8px; }
+.hover-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:8px; }
+.hover-item { border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:8px 10px; background:rgba(255,255,255,.025); }
+.hover-item .label { display:flex; align-items:center; gap:8px; font-size:12px; opacity:.86; }
+.hover-item .value { margin-top:4px; font-size:16px; font-weight:600; }
+.dot { width:10px; height:10px; border-radius:999px; display:inline-block; }
 canvas { width:100%; height:520px; display:block; background:#0b0f14; border-radius:12px; }
 .empty { opacity:.7; font-size:13px; }
+.note { font-size:12px; opacity:.8; line-height:1.45; }
 kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11px; padding:2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.15); background: rgba(255,255,255,.04); }
 </style>
 </head>
@@ -499,9 +509,15 @@ kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fon
       <div class="pill">Pan: <kbd>drag</kbd></div>
       <div class="pill">Zoom X: <kbd>wheel</kbd></div>
       <div class="pill">Reset: <kbd>double click</kbd></div>
+      <div class="pill">Hover: <kbd>inspect bucket</kbd></div>
       <button class="btn" id="btnResetZoom" type="button">Reset zoom</button>
+      <button class="btn" id="btnShowAllSeries" type="button">Show all series</button>
     </div>
     <div class="toggleRow" id="seriesToggles"></div>
+    <div class="chart-meta">
+      <div class="note" id="bucketMeta"></div>
+      <div class="hover-card" id="hoverInfo"></div>
+    </div>
     <canvas id="chart"></canvas>
   </div>
   <div id="summaryHost"></div>
@@ -512,6 +528,8 @@ const select = document.getElementById('ipSelect');
 const summaryHost = document.getElementById('summaryHost');
 const canvas = document.getElementById('chart');
 const toggleHost = document.getElementById('seriesToggles');
+const hoverInfo = document.getElementById('hoverInfo');
+const bucketMeta = document.getElementById('bucketMeta');
 const ctx = canvas.getContext('2d', { alpha: false });
 const colors = ['#7dd3fc','#a7f3d0','#fda4af','#fcd34d','#c4b5fd','#fb7185'];
 const chartStateByIp = new Map();
@@ -525,7 +543,16 @@ let dragStartMax = 0;
 
 function esc(s){ return String(s ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'); }
 function fmtNum(v){ return Number(v ?? 0).toLocaleString('en-US'); }
-function fmtUtc(ms){ const d = new Date(ms); const pad = n => String(n).padStart(2,'0'); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`; }
+function fmtUtc(ms){ const d = new Date(ms); const pad = n => String(n).padStart(2,'0'); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`; }
+function deriveBucketSeconds(times){
+  if(!times || times.length < 2) return 60;
+  const deltaMs = Math.max(1000, Math.round(times[1] - times[0]));
+  return Math.max(1, Math.round(deltaMs / 1000));
+}
+function fmtBucket(seconds){
+  if(seconds % 60 === 0) return `${seconds / 60} minute${seconds === 60 ? '' : 's'}`;
+  return `${seconds} seconds`;
+}
 function seriesShortName(name){
   const text = String(name || '');
   if (text.startsWith('ELB')) return text.replace(' Response ', ' ');
@@ -534,12 +561,37 @@ function seriesShortName(name){
 }
 function renderSummary(item){ summaryHost.innerHTML = item.summaryHtml || '<div class="card"><div class="empty">No summary available.</div></div>'; }
 
+function updateHoverInfo(item, hoveredMs, tooltipSeries){
+  if(!item){
+    hoverInfo.innerHTML = '<div class="hover-title">Chart inspection</div><div class="hover-subtitle">Hover the chart to inspect the nearest bucket.</div>';
+    return;
+  }
+
+  if(hoveredMs == null || !tooltipSeries || !tooltipSeries.length){
+    hoverInfo.innerHTML = `
+      <div class="hover-title">Chart inspection</div>
+      <div class="hover-subtitle">Bucket size: ${esc(fmtBucket(deriveBucketSeconds(item.chart.timesUtc || [])))}</div>
+      <div class="note">Hover the chart to inspect the nearest bucket, compare visible series, and read exact values.</div>`;
+    return;
+  }
+
+  hoverInfo.innerHTML = `
+    <div class="hover-title">Nearest bucket</div>
+    <div class="hover-subtitle">${esc(fmtUtc(hoveredMs))} | ${esc(fmtBucket(deriveBucketSeconds(item.chart.timesUtc || [])))}</div>
+    <div class="hover-grid">${tooltipSeries.map(entry => `
+      <div class="hover-item">
+        <div class="label"><span class="dot" style="background:${entry.s.color}"></span>${esc(entry.s.name)}</div>
+        <div class="value">${fmtNum(entry.v)}</div>
+      </div>`).join('')}
+    </div>`;
+}
+
 function getState(item){
   let state = chartStateByIp.get(item.ip);
   if(!state){
     const times = item.chart.timesUtc || [];
     const series = (item.chart.series || []).map((s, index) => ({ name: s.name, shortName: seriesShortName(s.name), values: s.values || [], color: colors[index % colors.length], visible: true }));
-    state = { xMin: times.length ? times[0] : 0, xMax: times.length ? times[times.length - 1] : 0, times, series };
+    state = { xMin: times.length ? times[0] : 0, xMax: times.length ? times[times.length - 1] : 0, times, bucketSeconds: deriveBucketSeconds(times), series };
     chartStateByIp.set(item.ip, state);
   }
   return state;
@@ -560,9 +612,16 @@ function buildSeriesToggles(item){
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `seriesToggle${series.visible ? '' : ' off'}`;
+    button.title = 'Click to show or hide. Double click to isolate this series.';
     button.innerHTML = `<span class="sw" style="background:${series.color}"></span><span>${esc(series.shortName)}</span>`;
     button.addEventListener('click', () => {
       series.visible = !series.visible;
+      buildSeriesToggles(item);
+      drawChart(item);
+    });
+    button.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      state.series.forEach(other => { other.visible = other === series; });
       buildSeriesToggles(item);
       drawChart(item);
     });
@@ -581,7 +640,7 @@ function clampX(state){
   if(!state.times.length) return;
   const globalMin = state.times[0];
   const globalMax = state.times[state.times.length - 1];
-  const minSpan = 60 * 1000;
+  const minSpan = Math.max(60 * 1000, state.bucketSeconds * 4 * 1000);
   if((state.xMax - state.xMin) < minSpan){
     const mid = (state.xMin + state.xMax) / 2;
     state.xMin = mid - minSpan / 2;
@@ -620,6 +679,7 @@ function drawChart(item){
     ctx.fillStyle = '#94a3b8';
     ctx.font = '14px ui-sans-serif, system-ui';
     ctx.fillText('No chart data for this IP.', 24, 32);
+    updateHoverInfo(item, null, null);
     return;
   }
 
@@ -685,14 +745,94 @@ function drawChart(item){
 
   ctx.strokeStyle = 'rgba(255,255,255,.22)';
   ctx.strokeRect(padL, padT, plotW, plotH);
+
+  if (mouseX != null && mouseY != null && mouseX >= padL && mouseX <= padL + plotW && mouseY >= padT && mouseY <= padT + plotH) {
+    const tx = xToTime(mouseX - padL, state, plotW);
+    let idx = lowerBound(times, tx);
+    if (idx <= 0) idx = 0;
+    else if (idx >= times.length) idx = times.length - 1;
+    else idx = Math.abs(tx - times[idx - 1]) <= Math.abs(tx - times[idx]) ? idx - 1 : idx;
+
+    const ms = times[idx];
+    const cx = padL + timeToX(ms, state, plotW);
+    ctx.strokeStyle = 'rgba(230,237,243,.35)';
+    ctx.beginPath();
+    ctx.moveTo(cx, padT);
+    ctx.lineTo(cx, padT + plotH);
+    ctx.stroke();
+
+    const tooltipSeries = visibleSeries
+      .map(s => ({ s, v: s.values[idx] }))
+      .sort((a,b) => b.v - a.v)
+      .slice(0, 8);
+
+    tooltipSeries.forEach(entry => {
+      const y = valToY(entry.v);
+      ctx.fillStyle = '#0b0f14';
+      ctx.beginPath();
+      ctx.arc(cx, y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = entry.s.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, y, 4, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+
+    const lines = [fmtUtc(ms), ...tooltipSeries.map(x => `${x.s.shortName}: ${fmtNum(x.v)}`)];
+    const padding = 10;
+    let w = 0;
+    lines.forEach(line => { w = Math.max(w, ctx.measureText(line).width); });
+    w += padding * 2;
+    const h = lines.length * 16 + padding * 2;
+    let bx = cx + 14;
+    let by = padT + 10;
+    if (bx + w > padL + plotW) bx = cx - 14 - w;
+
+    ctx.fillStyle = 'rgba(15,22,32,.94)';
+    ctx.strokeStyle = 'rgba(255,255,255,.18)';
+    ctx.beginPath();
+    roundRect(ctx, bx, by, w, h, 10);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#e6edf3';
+    let ty = by + padding + 12;
+    ctx.fillText(lines[0], bx + padding, ty);
+    ty += 18;
+    tooltipSeries.forEach(entry => {
+      ctx.fillStyle = entry.s.color;
+      ctx.fillRect(bx + padding, ty - 9, 8, 8);
+      ctx.fillStyle = '#e6edf3';
+      ctx.fillText(`${entry.s.shortName}: ${fmtNum(entry.v)}`, bx + padding + 14, ty);
+      ty += 16;
+    });
+
+    updateHoverInfo(item, ms, tooltipSeries);
+    return;
+  }
+
+  updateHoverInfo(item, null, null);
 }
 
 function renderSelected(){
   currentItem = DATA.find(x => x.ip === select.value) || DATA[0];
   const item = currentItem;
+  bucketMeta.textContent = `Bucket size: ${fmtBucket(deriveBucketSeconds(item.chart.timesUtc || []))}. Double click a legend chip to isolate one series.`;
   buildSeriesToggles(item);
   renderSummary(item);
+  updateHoverInfo(item, null, null);
   drawChart(item);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  const rr = Math.min(r, w/2, h/2);
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
 }
 
 DATA.forEach(item => {
@@ -757,6 +897,13 @@ canvas.addEventListener('dblclick', () => {
 document.getElementById('btnResetZoom').addEventListener('click', () => {
   if(!currentItem) return;
   resetZoom(currentItem);
+  drawChart(currentItem);
+});
+document.getElementById('btnShowAllSeries').addEventListener('click', () => {
+  if(!currentItem) return;
+  const state = getState(currentItem);
+  state.series.forEach(series => { series.visible = true; });
+  buildSeriesToggles(currentItem);
   drawChart(currentItem);
 });
 select.addEventListener('change', renderSelected);
