@@ -45,6 +45,14 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 1.4
+
+- Mainline release for the merged ALB and IIS IP Summary work.
+- Adds ALB IP Summary multi-IP workflow support with shared HTML reporting, shared workbook output, and aggregated SQLite handling for large detail sets.
+- Improves IIS IP Summary workbook presentation and chart inspection, including richer offline hover details and safer automatic bucket selection for shorter time windows.
+- Brings ALB chart interactivity up to parity with the IIS hover model, including nearest-point inspection, a dedicated hover info panel, series restore, and legend isolate-on-double-click.
+- Adds the application icon asset for the packaged executable and updates release metadata to `1.4`.
+
 ### 1.2
 
 - Merge-to-main release for the ALB IP Summary work.
