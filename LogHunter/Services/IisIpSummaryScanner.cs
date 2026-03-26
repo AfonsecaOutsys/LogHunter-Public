@@ -36,6 +36,7 @@ public static class IisIpSummaryScanner
         public string RequestedIp { get; }
         public bool HasRetainedRows => Rows.Count > 0;
         public List<IisIpSummaryRow> Rows { get; } = new();
+        public SortedDictionary<DateTime, StatusGroupCounts> BucketsBy15SecondUtc { get; } = new();
         public SortedDictionary<DateTime, StatusGroupCounts> BucketsByMinuteUtc { get; } = new();
         public HashSet<string> SourceFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
         public StatusGroupCounts StatusTotals { get; } = new();
@@ -177,14 +178,23 @@ public static class IisIpSummaryScanner
 
         private void AddBucket(IisIpSummaryRow row)
         {
-            var bucketUtc = FloorToMinuteUtc(row.TimestampUtc);
-            if (!BucketsByMinuteUtc.TryGetValue(bucketUtc, out var bucket))
+            var bucket15Utc = FloorToBucketUtc(row.TimestampUtc, 15);
+            if (!BucketsBy15SecondUtc.TryGetValue(bucket15Utc, out var quarterMinuteBucket))
             {
-                bucket = new StatusGroupCounts();
-                BucketsByMinuteUtc[bucketUtc] = bucket;
+                quarterMinuteBucket = new StatusGroupCounts();
+                BucketsBy15SecondUtc[bucket15Utc] = quarterMinuteBucket;
             }
 
-            IncrementStatusBucket(bucket, row.StatusCode);
+            IncrementStatusBucket(quarterMinuteBucket, row.StatusCode);
+
+            var bucketMinuteUtc = FloorToMinuteUtc(row.TimestampUtc);
+            if (!BucketsByMinuteUtc.TryGetValue(bucketMinuteUtc, out var minuteBucket))
+            {
+                minuteBucket = new StatusGroupCounts();
+                BucketsByMinuteUtc[bucketMinuteUtc] = minuteBucket;
+            }
+
+            IncrementStatusBucket(minuteBucket, row.StatusCode);
         }
 
         private void IncrementExactStatus(int? statusCode)
@@ -317,6 +327,16 @@ public static class IisIpSummaryScanner
 
     private static DateTime FloorToMinuteUtc(DateTime dtUtc)
         => new(dtUtc.Year, dtUtc.Month, dtUtc.Day, dtUtc.Hour, dtUtc.Minute, 0, DateTimeKind.Utc);
+
+    private static DateTime FloorToBucketUtc(DateTime dtUtc, int bucketSeconds)
+    {
+        if (bucketSeconds <= 0)
+            bucketSeconds = 60;
+
+        dtUtc = dtUtc.Kind == DateTimeKind.Utc ? dtUtc : dtUtc.ToUniversalTime();
+        var flooredSecond = (dtUtc.Second / bucketSeconds) * bucketSeconds;
+        return new DateTime(dtUtc.Year, dtUtc.Month, dtUtc.Day, dtUtc.Hour, dtUtc.Minute, flooredSecond, DateTimeKind.Utc);
+    }
 
     private static void IncrementStatusBucket(StatusGroupCounts counts, int? statusCode)
     {

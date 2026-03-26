@@ -25,6 +25,11 @@ public static class IisOption_IpSummary
     private const int MaxRequestedIps = 10;
     private const int TopListPickerCap = 20;
     private const int MaxChartPointsPerIp = 2400;
+    private const int ShortRangeBucketSeconds = 15;
+    private const int MediumRangeBucketSeconds = 30;
+    private const int LongRangeBucketSeconds = 60;
+    private static readonly TimeSpan ShortRangeMax = TimeSpan.FromHours(2);
+    private static readonly TimeSpan MediumRangeMax = TimeSpan.FromHours(8);
 
     public static async Task RunAsync(SessionState session, CancellationToken ct = default)
     {
@@ -612,6 +617,15 @@ select { background:#0b0f14; color:#e6edf3; border:1px solid rgba(255,255,255,.1
 .seriesToggle { display:inline-flex; align-items:center; gap:8px; padding:5px 9px; border-radius:999px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.03); cursor:pointer; font-size:12px; user-select:none; }
 .seriesToggle.off { opacity:.45; }
 .sw { width:10px; height:10px; border-radius:3px; display:inline-block; }
+.chart-meta { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; margin-bottom:10px; }
+.hover-card { min-width:320px; flex:1 1 360px; background:#111827; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px 12px; }
+.hover-title { font-size:13px; font-weight:600; margin:0 0 6px 0; }
+.hover-subtitle { font-size:12px; opacity:.78; margin-bottom:8px; }
+.hover-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:8px; }
+.hover-item { border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:8px 10px; background:rgba(255,255,255,.025); }
+.hover-item .label { display:flex; align-items:center; gap:8px; font-size:12px; opacity:.86; }
+.hover-item .value { margin-top:4px; font-size:16px; font-weight:600; }
+.dot { width:10px; height:10px; border-radius:999px; display:inline-block; }
 .summary-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; }
 .summary-card { background:#111827; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:12px; }
 .summary-title { font-size:14px; font-weight:600; margin:0 0 8px 0; }
@@ -643,9 +657,15 @@ kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fon
       <div class="pill">Pan: <kbd>drag</kbd></div>
       <div class="pill">Zoom X: <kbd>wheel</kbd></div>
       <div class="pill">Reset: <kbd>double click</kbd></div>
+      <div class="pill">Hover: <kbd>inspect bucket</kbd></div>
       <button class="btn" id="btnResetZoom" type="button">Reset zoom</button>
+      <button class="btn" id="btnShowAllSeries" type="button">Show all series</button>
     </div>
     <div class="toggleRow" id="seriesToggles"></div>
+    <div class="chart-meta">
+      <div class="note" id="bucketMeta"></div>
+      <div class="hover-card" id="hoverInfo"></div>
+    </div>
     <canvas id="chart"></canvas>
   </div>
   <div id="summaryHost"></div>
@@ -656,6 +676,8 @@ const select = document.getElementById('ipSelect');
 const summaryHost = document.getElementById('summaryHost');
 const canvas = document.getElementById('chart');
 const toggleHost = document.getElementById('seriesToggles');
+const hoverInfo = document.getElementById('hoverInfo');
+const bucketMeta = document.getElementById('bucketMeta');
 const ctx = canvas.getContext('2d', { alpha: false });
 const colors = ['#7dd3fc','#a7f3d0','#fda4af','#fcd34d'];
 const chartStateByIp = new Map();
@@ -675,7 +697,11 @@ function fmtMs(v){ return Number(v ?? 0).toLocaleString('en-US', { maximumFracti
 function fmtUtc(ms){
   const d = new Date(ms);
   const pad = n => String(n).padStart(2,'0');
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
+}
+function fmtBucket(seconds){
+  if(seconds % 60 === 0) return `${seconds / 60} minute${seconds === 60 ? '' : 's'}`;
+  return `${seconds} seconds`;
 }
 function buildRows(items, label){
   if(!items || !items.length) return `<tr><td>(none)</td><td>0</td></tr>`;
@@ -744,6 +770,31 @@ function renderSummary(item){
   </div>`;
 }
 
+function updateHoverInfo(item, hoveredMs, tooltipSeries){
+  if(!item){
+    hoverInfo.innerHTML = '<div class="hover-title">Chart inspection</div><div class="hover-subtitle">Hover the chart to inspect the nearest bucket.</div>';
+    return;
+  }
+
+  if(hoveredMs == null || !tooltipSeries || !tooltipSeries.length){
+    hoverInfo.innerHTML = `
+      <div class="hover-title">Chart inspection</div>
+      <div class="hover-subtitle">Bucket size: ${esc(fmtBucket(item.chart.bucketSeconds || 60))}</div>
+      <div class="note">Hover the chart to inspect the nearest bucket, compare visible series, and read exact values.</div>`;
+    return;
+  }
+
+  hoverInfo.innerHTML = `
+    <div class="hover-title">Nearest bucket</div>
+    <div class="hover-subtitle">${esc(fmtUtc(hoveredMs))} | ${esc(fmtBucket(item.chart.bucketSeconds || 60))}</div>
+    <div class="hover-grid">${tooltipSeries.map(entry => `
+      <div class="hover-item">
+        <div class="label"><span class="dot" style="background:${entry.s.color}"></span>${esc(entry.s.name)}</div>
+        <div class="value">${fmtNum(entry.v)}</div>
+      </div>`).join('')}
+    </div>`;
+}
+
 function getState(item){
   let state = chartStateByIp.get(item.ip);
   if(!state){
@@ -759,6 +810,7 @@ function getState(item){
       xMin: times.length ? times[0] : 0,
       xMax: times.length ? times[times.length - 1] : 0,
       times,
+      bucketSeconds: item.chart.bucketSeconds || 60,
       series
     };
     chartStateByIp.set(item.ip, state);
@@ -777,13 +829,20 @@ function resizeCanvas() {
 function buildSeriesToggles(item){
   const state = getState(item);
   toggleHost.innerHTML = '';
-  state.series.forEach((series, index) => {
+  state.series.forEach((series) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `seriesToggle${series.visible ? '' : ' off'}`;
+    button.title = 'Click to show or hide. Double click to isolate this series.';
     button.innerHTML = `<span class="sw" style="background:${series.color}"></span><span>${esc(series.shortName)}</span>`;
     button.addEventListener('click', () => {
       series.visible = !series.visible;
+      buildSeriesToggles(item);
+      drawChart(item);
+    });
+    button.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      state.series.forEach(other => { other.visible = other === series; });
       buildSeriesToggles(item);
       drawChart(item);
     });
@@ -802,7 +861,7 @@ function clampX(state){
   if(!state.times.length) return;
   const globalMin = state.times[0];
   const globalMax = state.times[state.times.length - 1];
-  const minSpan = 60 * 1000;
+  const minSpan = Math.max(60 * 1000, state.bucketSeconds * 4 * 1000);
   if((state.xMax - state.xMin) < minSpan){
     const mid = (state.xMin + state.xMax) / 2;
     state.xMin = mid - minSpan / 2;
@@ -841,6 +900,7 @@ function drawChart(item){
     ctx.fillStyle = '#94a3b8';
     ctx.font = '14px ui-sans-serif, system-ui';
     ctx.fillText('No chart data for this IP.', 24, 32);
+    updateHoverInfo(item, null, null);
     return;
   }
 
@@ -927,6 +987,19 @@ function drawChart(item){
       .sort((a,b) => b.v - a.v)
       .slice(0, 8);
 
+    tooltipSeries.forEach(entry => {
+      const y = valToY(entry.v);
+      ctx.fillStyle = '#0b0f14';
+      ctx.beginPath();
+      ctx.arc(cx, y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = entry.s.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, y, 4, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+
     const lines = [fmtUtc(ms), ...tooltipSeries.map(x => `${x.s.shortName}: ${fmtNum(x.v)}`)];
     const padding = 10;
     let w = 0;
@@ -950,19 +1023,25 @@ function drawChart(item){
     ty += 18;
     tooltipSeries.forEach(entry => {
       ctx.fillStyle = entry.s.color;
-      ctx.fillText('■', bx + padding, ty);
+      ctx.fillRect(bx + padding, ty - 9, 8, 8);
       ctx.fillStyle = '#e6edf3';
       ctx.fillText(`${entry.s.shortName}: ${fmtNum(entry.v)}`, bx + padding + 14, ty);
       ty += 16;
     });
+    updateHoverInfo(item, ms, tooltipSeries);
+    return;
   }
+
+  updateHoverInfo(item, null, null);
 }
 
 function renderSelected(){
   currentItem = DATA.find(x => x.ip === select.value) || DATA[0];
   const item = currentItem;
+  bucketMeta.textContent = `Bucket size: ${fmtBucket(item.chart.bucketSeconds || 60)}. Double click a legend chip to isolate one series.`;
   buildSeriesToggles(item);
   renderSummary(item);
+  updateHoverInfo(item, null, null);
   drawChart(item);
 }
 
@@ -1040,6 +1119,13 @@ document.getElementById('btnResetZoom').addEventListener('click', () => {
   resetZoom(currentItem);
   drawChart(currentItem);
 });
+document.getElementById('btnShowAllSeries').addEventListener('click', () => {
+  if(!currentItem) return;
+  const state = getState(currentItem);
+  state.series.forEach(series => { series.visible = true; });
+  buildSeriesToggles(currentItem);
+  drawChart(currentItem);
+});
 select.addEventListener('change', renderSelected);
 window.addEventListener('resize', () => { if (currentItem) drawChart(currentItem); });
 renderSelected();
@@ -1054,16 +1140,16 @@ renderSelected();
     private static ChartPayload BuildChartData(IisIpSummaryScanner.ScanResult result)
     {
         if (result.TotalRows == 0 || !result.FirstHitUtc.HasValue || !result.LastHitUtc.HasValue)
-            return new ChartPayload(Array.Empty<long>(), Array.Empty<ChartSeries>());
+            return new ChartPayload(Array.Empty<long>(), Array.Empty<ChartSeries>(), LongRangeBucketSeconds);
 
         var start = result.FirstHitUtc.Value;
         var end = result.LastHitUtc.Value;
-        start = new DateTime(start.Year, start.Month, start.Day, start.Hour, start.Minute, 0, DateTimeKind.Utc);
-        end = new DateTime(end.Year, end.Month, end.Day, end.Hour, end.Minute, 0, DateTimeKind.Utc);
+        var bucketSeconds = ChooseBucketSeconds(start, end);
+        start = FloorToBucketUtc(start, bucketSeconds);
+        end = FloorToBucketUtc(end, bucketSeconds);
 
-        var minuteCount = (int)Math.Max(1, (end - start).TotalMinutes + 1);
-        var bucketSizeMinutes = Math.Max(1, (int)Math.Ceiling(minuteCount / (double)MaxChartPointsPerIp));
-        var points = (int)Math.Ceiling(minuteCount / (double)bucketSizeMinutes);
+        var totalSeconds = Math.Max(bucketSeconds, (int)Math.Ceiling((end - start).TotalSeconds) + bucketSeconds);
+        var points = Math.Max(1, (int)Math.Ceiling(totalSeconds / (double)bucketSeconds));
         var times = new long[points];
         var s2xx = new double[points];
         var s3xx = new double[points];
@@ -1072,16 +1158,16 @@ renderSelected();
 
         for (int i = 0; i < points; i++)
         {
-            var bucketStartUtc = start.AddMinutes(i * bucketSizeMinutes);
+            var bucketStartUtc = start.AddSeconds(i * bucketSeconds);
             times[i] = new DateTimeOffset(bucketStartUtc).ToUnixTimeMilliseconds();
 
-            for (int minuteOffset = 0; minuteOffset < bucketSizeMinutes; minuteOffset++)
+            for (int secondOffset = 0; secondOffset < bucketSeconds; secondOffset += ShortRangeBucketSeconds)
             {
-                var minuteUtc = bucketStartUtc.AddMinutes(minuteOffset);
-                if (minuteUtc > end)
+                var bucketUtc = bucketStartUtc.AddSeconds(secondOffset);
+                if (bucketUtc > end)
                     break;
 
-                if (!result.BucketsByMinuteUtc.TryGetValue(minuteUtc, out var bucket))
+                if (!result.BucketsBy15SecondUtc.TryGetValue(bucketUtc, out var bucket))
                     continue;
 
                 s2xx[i] += bucket.S2xx;
@@ -1098,7 +1184,43 @@ renderSelected();
                 new ChartSeries("HTTP 3xx", s3xx),
                 new ChartSeries("HTTP 4xx", s4xx),
                 new ChartSeries("HTTP 5xx", s5xx)
-            ]);
+            ],
+            bucketSeconds);
+    }
+
+    private static int ChooseBucketSeconds(DateTime startUtc, DateTime endUtc)
+    {
+        var range = endUtc - startUtc;
+        var preferredBucketSeconds =
+            range <= ShortRangeMax ? ShortRangeBucketSeconds :
+            range <= MediumRangeMax ? MediumRangeBucketSeconds :
+            LongRangeBucketSeconds;
+
+        var guardrailBucketSeconds = RoundUpToMultiple(
+            (int)Math.Ceiling(Math.Max(1, range.TotalSeconds + 1) / MaxChartPointsPerIp),
+            ShortRangeBucketSeconds);
+
+        return Math.Max(preferredBucketSeconds, guardrailBucketSeconds);
+    }
+
+    private static int RoundUpToMultiple(int value, int multiple)
+    {
+        if (multiple <= 0)
+            return value;
+
+        var safeValue = Math.Max(value, multiple);
+        return ((safeValue + multiple - 1) / multiple) * multiple;
+    }
+
+    private static DateTime FloorToBucketUtc(DateTime dtUtc, int bucketSeconds)
+    {
+        if (bucketSeconds <= 0)
+            bucketSeconds = LongRangeBucketSeconds;
+
+        dtUtc = dtUtc.Kind == DateTimeKind.Utc ? dtUtc : dtUtc.ToUniversalTime();
+        var bucketTicks = TimeSpan.FromSeconds(bucketSeconds).Ticks;
+        var flooredTicks = dtUtc.Ticks - (dtUtc.Ticks % bucketTicks);
+        return new DateTime(flooredTicks, DateTimeKind.Utc);
     }
 
     private static void InfoPanel(string title, params (string Key, string Value)[] rows)
@@ -1480,7 +1602,7 @@ renderSelected();
     private sealed record DetailArtifact(string? Kind, string? Path);
     private sealed record SimpleCount(string Label, int Count);
     private sealed record ChartSeries(string Name, double[] Values);
-    private sealed record ChartPayload(long[] TimesUtc, ChartSeries[] Series);
+    private sealed record ChartPayload(long[] TimesUtc, ChartSeries[] Series, int BucketSeconds);
     private sealed record ReportPayload(
         string Ip,
         long TotalRows,
