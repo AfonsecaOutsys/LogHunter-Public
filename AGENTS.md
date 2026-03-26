@@ -6,4 +6,5 @@ At the end of a coding session:
 - Never merge to `main`.
 - Only merge into `main` when explicitly asked to do it.
 - Only produce a Release build to `C:\espaces` when explicitly asked to do it.
-- If asked to publish and `C:\espaces\LogHunter.exe` is in use and cannot be replaced, publish the executable as `C:\espaces\LogHunter-new.exe` instead.
+- If asked to publish, produce the executable as `C:\espaces\LogHunter2.0.exe`.
+- If asked to publish and `C:\espaces\LogHunter2.0.exe` is in use and cannot be replaced, publish the executable as `C:\espaces\LogHunter2.0-new.exe` instead.
