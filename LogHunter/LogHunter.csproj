@@ -30,12 +30,15 @@
 		<DebugSymbols>false</DebugSymbols>
 	</PropertyGroup>
 
-	<!-- Embed Tabulator assets (and make sure they are not copied as loose files) -->
 	<ItemGroup>
 		<EmbeddedResource Include="Resources\Tabulator\tabulator.min.js" />
 		<EmbeddedResource Include="Resources\Tabulator\tabulator.min.css" />
+		<EmbeddedResource Include="Web\Assets\site.css" />
+		<EmbeddedResource Include="Web\Assets\site.js" />
 		<None Update="Resources\Tabulator\tabulator.min.js" CopyToOutputDirectory="Never" />
 		<None Update="Resources\Tabulator\tabulator.min.css" CopyToOutputDirectory="Never" />
+		<None Update="Web\Assets\site.css" CopyToOutputDirectory="Never" />
+		<None Update="Web\Assets\site.js" CopyToOutputDirectory="Never" />
 	</ItemGroup>
 
 	<ItemGroup>

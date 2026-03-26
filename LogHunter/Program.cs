@@ -1,9 +1,9 @@
-﻿// Program.cs  (tidied, same behavior)
 using LogHunter.Menus;
 using LogHunter.Services;
 using LogHunter.Viewer;
-using Spectre.Console;
+using LogHunter.Web.Hosting;
 using Microsoft.Data.Sqlite;
+using Spectre.Console;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
@@ -52,6 +52,8 @@ internal static class Program
         string? rootOverride = null;
         string? viewerSqlitePath = null;
         string? viewerIp = null;
+        var webMode = false;
+        var launchBrowser = true;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -80,6 +82,18 @@ internal static class Program
                 }
 
                 rootOverride = args[++i];
+                continue;
+            }
+
+            if (a == "--web")
+            {
+                webMode = true;
+                continue;
+            }
+
+            if (a == "--no-browser")
+            {
+                launchBrowser = false;
                 continue;
             }
 
@@ -117,6 +131,12 @@ internal static class Program
             return;
         }
 
+        if (webMode && !string.IsNullOrWhiteSpace(viewerSqlitePath))
+        {
+            Console.WriteLine("--web cannot be combined with --viewer-sqlite.");
+            return;
+        }
+
         Console.CancelKeyPress += (_, e) =>
         {
             e.Cancel = true;
@@ -125,7 +145,6 @@ internal static class Program
 
         try
         {
-            // MUST be before any AnsiConsole output
             Console.SetOut(new BellDetectingWriter(Console.Out));
             Console.SetError(new BellDetectingWriter(Console.Error));
 
@@ -159,7 +178,15 @@ internal static class Program
             AppFolders.Ensure();
             EmbeddedAssets.EnsureTabulatorAssets(root);
 
-            //start part
+            var session = new SessionState(root);
+
+            if (webMode)
+            {
+                using var webHost = new WebAppHost(new WebAppContext("LogHunter", version, root, session));
+                await webHost.RunAsync(() => _ctrlCRequested, launchBrowser).ConfigureAwait(false);
+                return;
+            }
+
             var asm = Assembly.GetExecutingAssembly();
             var all = asm.GetManifestResourceNames();
 
@@ -174,13 +201,11 @@ internal static class Program
                 foreach (var n in hits)
                     AnsiConsole.MarkupLine("  [dim]" + Markup.Escape(n) + "[/]");
             }
-            AnsiConsole.WriteLine();//end part
+            AnsiConsole.WriteLine();
 
             AnsiConsole.MarkupLine($"[bold]LogHunter[/] [dim]{version}[/]");
             AnsiConsole.MarkupLine($"[dim]Workspace:[/] {Markup.Escape(root)}");
             AnsiConsole.MarkupLine("[dim]Tip:[/] Ctrl+C to exit");
-
-            var session = new SessionState(root);
 
             IMenu? menu = new MainMenu(session);
             while (menu is not null && !_ctrlCRequested)
@@ -206,14 +231,16 @@ internal static class Program
         Console.WriteLine($"LogHunter {version}");
         Console.WriteLine();
         Console.WriteLine("Usage:");
-        Console.WriteLine("  LogHunter [--root <path>] [--viewer-sqlite <path> --viewer-ip <ip>] [--version] [--help]");
+        Console.WriteLine("  LogHunter [--root <path>] [--web [--no-browser]] [--viewer-sqlite <path> --viewer-ip <ip>] [--version] [--help]");
         Console.WriteLine();
         Console.WriteLine("Options:");
-        Console.WriteLine("  --root <path>   Workspace path (defaults to the exe folder)");
-        Console.WriteLine("  --viewer-sqlite <path>  Start the ALB IP Summary SQLite viewer for the specified database");
+        Console.WriteLine("  --root <path>           Workspace path (defaults to the exe folder)");
+        Console.WriteLine("  --web                   Start the new local web shell on 127.0.0.1");
+        Console.WriteLine("  --no-browser            In web mode, do not auto-open the default browser");
+        Console.WriteLine("  --viewer-sqlite <path>  Start the SQLite viewer for the specified database");
         Console.WriteLine("  --viewer-ip <ip>        Optional selected IP shown in viewer metadata");
         Console.WriteLine("  --version, -v           Print version and exit");
-        Console.WriteLine("  --help, -h      Show this help");
+        Console.WriteLine("  --help, -h              Show this help");
     }
 
     private static bool TryDetectViewerKind(string dbPath, out string kind)
