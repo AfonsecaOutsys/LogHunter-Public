@@ -189,6 +189,10 @@ internal static class AlbIpSummarySqliteViewerPage
           </select>
         </div>
         <div class="field">
+          <label for="clientIpContains">Client IP contains</label>
+          <input id="clientIpContains" placeholder="185.23.44.10">
+        </div>
+        <div class="field">
           <label for="method">Method</label>
           <select id="method"><option value="">Any</option></select>
         </div>
@@ -330,6 +334,7 @@ internal static class AlbIpSummarySqliteViewerPage
 
     function filtersFromUi() {
       return {
+        clientIpContains: document.getElementById('clientIpContains').value.trim(),
         method: document.getElementById('method').value,
         startUtc: parseLocalInputToUtc(document.getElementById('startUtc').value, false),
         endUtc: parseLocalInputToUtc(document.getElementById('endUtc').value, true),
@@ -489,6 +494,7 @@ internal static class AlbIpSummarySqliteViewerPage
     });
 
     document.getElementById('resetFilters').addEventListener('click', () => {
+      document.getElementById('clientIpContains').value = '';
       document.getElementById('method').value = '';
       document.getElementById('elbClass').value = '';
       document.getElementById('elbCode').value = '';

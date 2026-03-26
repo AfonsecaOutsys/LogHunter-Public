@@ -139,7 +139,8 @@ SELECT
     COUNT(*),
     MIN(TimestampUtc),
     MAX(TimestampUtc),
-    MIN(ClientIp)
+    MIN(ClientIp),
+    COUNT(DISTINCT ClientIp)
 FROM Hits;";
 
         using var reader = cmd.ExecuteReader();
@@ -148,7 +149,9 @@ FROM Hits;";
         var totalRows = reader.IsDBNull(0) ? 0L : reader.GetInt64(0);
         var startUtc = reader.IsDBNull(1) ? null : reader.GetString(1);
         var endUtc = reader.IsDBNull(2) ? null : reader.GetString(2);
-        var clientIp = _requestedIp ?? (reader.IsDBNull(3) ? null : reader.GetString(3));
+        var fallbackIp = reader.IsDBNull(3) ? null : reader.GetString(3);
+        var distinctIps = reader.IsDBNull(4) ? 0 : reader.GetInt32(4);
+        var clientIp = _requestedIp ?? (distinctIps > 1 ? $"Multiple ({distinctIps})" : fallbackIp);
         var methods = LoadMethods();
 
         return new ViewerMetadata(
@@ -308,6 +311,7 @@ ORDER BY {MapSortField(request.SortField)} {MapSortDirection(request.SortDirecti
 
     private static void ApplyFilters(List<string> where, SqliteCommand cmd, ViewerQueryRequest request)
     {
+        AddContains(where, cmd, "ClientIp", "$clientIpContains", request.ClientIpContains);
         if (!string.IsNullOrWhiteSpace(request.Method))
         {
             where.Add("Method = $method");
@@ -500,6 +504,7 @@ ORDER BY {MapSortField(request.SortField)} {MapSortDirection(request.SortDirecti
         string SortField,
         string SortDirection,
         string Preset,
+        string? ClientIpContains,
         string? Method,
         string? StartUtc,
         string? EndUtc,
@@ -522,6 +527,7 @@ ORDER BY {MapSortField(request.SortField)} {MapSortDirection(request.SortDirecti
                 SortField: query["sortField"] ?? "timestampUtc",
                 SortDirection: query["sortDirection"] ?? "desc",
                 Preset: query["preset"] ?? "all",
+                ClientIpContains: query["clientIpContains"],
                 Method: query["method"],
                 StartUtc: query["startUtc"],
                 EndUtc: query["endUtc"],

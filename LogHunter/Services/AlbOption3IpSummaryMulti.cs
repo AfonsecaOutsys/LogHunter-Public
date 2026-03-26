@@ -6,170 +6,33 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
 using System.Threading.Tasks;
-using ClosedXML.Excel;
 using LogHunter.Utils;
 using Spectre.Console;
 
 namespace LogHunter.Services;
 
-public static class IisOption_IpSummary
+public static partial class AlbOptions
 {
-    private const string AggregateThresholdPrompt =
+    private const string AggregateIpSummaryThresholdPrompt =
         "1M rows have been processed across the selected IPs. Continue with one aggregated SQLite database for deep analysis instead of Excel?";
-    private const string IpSummaryThresholdPrompt =
-        "1M rows have been processed so far for this IP, continuing means there will be no Excel export for that IP, only the Charts View and summary. Proceed with SQLite for deep analysis?";
-
-    private const string SelectAllSentinel = "__ALL__";
     private const int MaxRequestedIps = 10;
     private const int TopListPickerCap = 20;
     private const int MaxChartPointsPerIp = 2400;
-    private const int ShortRangeBucketSeconds = 15;
-    private const int MediumRangeBucketSeconds = 30;
-    private const int LongRangeBucketSeconds = 60;
-    private static readonly TimeSpan ShortRangeMax = TimeSpan.FromHours(2);
-    private static readonly TimeSpan MediumRangeMax = TimeSpan.FromHours(8);
 
-    public static async Task RunAsync(SessionState session, CancellationToken ct = default)
+    private static RequestedIpSet? PromptForAlbIpSet(SessionState session)
     {
-        var iisFolder = AppFolders.IIS;
-        var outputFolder = AppFolders.Output;
-
-        ConsoleEx.Header("IIS: IP Summary", $"Reading logs from: {iisFolder}");
-
-        if (!Directory.Exists(iisFolder))
-        {
-            ConsoleEx.Error($"IIS folder not found: {iisFolder}");
-            ConsoleEx.Pause("Press Enter to return...");
-            return;
-        }
-
-        var requestedSet = PromptForIpSet(session);
-        if (requestedSet is null || requestedSet.Ips.Count == 0)
-            return;
-
-        var requestedIps = requestedSet.Ips;
-
-        var files = IisW3cReader.EnumerateLogFiles(iisFolder);
-        if (files.Count == 0)
-        {
-            ConsoleEx.Warn($"No IIS logs found in: {iisFolder}");
-            ConsoleEx.Pause("Press Enter to return...");
-            return;
-        }
-
-        Directory.CreateDirectory(outputFolder);
-        var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-        var htmlPath = Path.Combine(outputFolder, $"iis_ip_summary_multi_{stamp}.html");
-        var excelPath = Path.Combine(outputFolder, $"iis_ip_summary_multi_{stamp}.xlsx");
-        var sqlitePath = Path.Combine(outputFolder, $"iis_ip_summary_multi_{stamp}.db");
-
-        var resultsByIp = requestedIps.ToDictionary(
-            ip => ip,
-            ip => new IisIpSummaryScanner.ScanResult(ip, Path.Combine(outputFolder, $"iis_ip_summary_{SanitizeFileComponent(ip)}_{stamp}.db")),
-            StringComparer.OrdinalIgnoreCase);
-
-        IisIpSummaryExportSqlite.Writer? sharedSqliteWriter = null;
-        try
-        {
-            InfoPanel("Scan plan",
-                ("Mode", "Multi-IP summary with one HTML page and a shared Excel workbook"),
-                ("Requested IPs", string.Join(", ", requestedIps)),
-                ("IP source", requestedSet.SourceLabel),
-                ("Files", files.Count.ToString("N0", CultureInfo.InvariantCulture)),
-                ("Input", iisFolder),
-                ("IP cap", MaxRequestedIps.ToString(CultureInfo.InvariantCulture)),
-                ("Excel threshold", "Rows < 1,000,000 across the combined retained result set"),
-                ("1M-row behavior", "Prompt once, then use one aggregated SQLite database for all selected IPs if approved"),
-                ("HTML", "Single report with IP selector"),
-                ("Output", outputFolder));
-
-            sharedSqliteWriter = await ScanWithPhasedProgressAsync(files, resultsByIp, sqlitePath, ct).ConfigureAwait(false);
-
-            foreach (var result in resultsByIp.Values)
-                result.CompleteStreamingExports();
-            sharedSqliteWriter?.Complete();
-
-            var artifactsByIp = new Dictionary<string, DetailArtifact>(StringComparer.OrdinalIgnoreCase);
-            var anySqlite = resultsByIp.Values.Any(r => r.DetailMode == IisIpSummaryScanner.DetailRetentionMode.SqliteApproved);
-
-            var excelEligible = resultsByIp.Values
-                .Where(r => !anySqlite && r.TotalRows > 0 && r.HasRetainedRows)
-                .OrderBy(r => r.RequestedIp, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            foreach (var result in excelEligible)
-                result.Rows.Sort((a, b) => a.TimestampUtc.CompareTo(b.TimestampUtc));
-
-            if (excelEligible.Count > 0)
-                IisIpSummaryExportExcel.Export(excelPath, excelEligible);
-
-            foreach (var result in resultsByIp.Values)
-            {
-                if (result.TotalRows == 0)
-                    artifactsByIp[result.RequestedIp] = new DetailArtifact(null, null);
-                else if (result.DetailMode == IisIpSummaryScanner.DetailRetentionMode.SqliteApproved)
-                    artifactsByIp[result.RequestedIp] = new DetailArtifact("SQLite", sqlitePath);
-                else if (!anySqlite && result.HasRetainedRows)
-                    artifactsByIp[result.RequestedIp] = new DetailArtifact("Excel", excelPath);
-                else
-                    artifactsByIp[result.RequestedIp] = new DetailArtifact(null, null);
-            }
-
-            BuildMultiReport(htmlPath, resultsByIp.Values.OrderBy(r => r.RequestedIp, StringComparer.OrdinalIgnoreCase).ToList(), artifactsByIp);
-
-            if (TryOpenFile(htmlPath))
-                ConsoleEx.Success($"HTML report opened: {htmlPath}");
-            else
-                ConsoleEx.Success($"HTML report generated: {htmlPath}");
-
-            if (excelEligible.Count > 0)
-                ConsoleEx.Success($"Detailed Excel workbook generated: {excelPath}");
-
-            var sqliteApproved = resultsByIp.Values
-                .Where(r => artifactsByIp[r.RequestedIp].Kind == "SQLite")
-                .OrderBy(r => r.RequestedIp, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (sqliteApproved.Count > 0)
-            {
-                ConsoleEx.Success($"SQLite deep analysis database created for {sqliteApproved.Count} IPs: {sqlitePath}");
-                if (IisIpSummarySqliteViewerLauncher.Launch(sqlitePath, null))
-                    ConsoleEx.Success("Local SQLite viewer launched for the aggregated IIS IP summary database.");
-                else
-                    ConsoleEx.Warn("SQLite viewer could not be launched automatically for the aggregated IIS IP summary database.");
-            }
-
-            foreach (var result in resultsByIp.Values.OrderBy(r => r.RequestedIp, StringComparer.OrdinalIgnoreCase))
-            {
-                if (result.TotalRows == 0)
-                    ConsoleEx.Warn($"No IIS hits found for IP: {result.RequestedIp}");
-            }
-
-            ConsoleEx.Pause("Press Enter to return...");
-        }
-        finally
-        {
-            sharedSqliteWriter?.Dispose();
-            foreach (var result in resultsByIp.Values)
-                result.Dispose();
-        }
-    }
-
-    private static RequestedIpSet? PromptForIpSet(SessionState session)
-    {
-        var choice = ConsoleEx.Menu("IIS IP Summary: choose input mode", new[]
+        var choice = ConsoleEx.Menu("ALB IP Summary: choose input mode", new[]
         {
             new ConsoleEx.MenuItem(
                 "Manually enter IPs",
-                "Type one IP per prompt. Enter a blank line when the set is complete and the IIS scan should begin."),
+                "Type one IP per prompt. Enter a blank line when the set is complete and the ALB scan should begin."),
             new ConsoleEx.MenuItem(
                 "Use IP list",
-                "Pick a list source such as an output CSV/XLSX file, the IIS burst session cache, or the Platform suspicious cache. IIS IP Summary will analyze the full gathered set."),
+                "Pick a list source such as an output CSV/XLSX file, the IIS burst session cache, or the Platform suspicious cache. ALB IP Summary will analyze the full gathered set."),
             new ConsoleEx.MenuItem(
                 "Back",
-                "Return to the IIS menu.")
+                "Return to the ALB menu.")
         }, pageSize: 10);
 
         return choice switch
@@ -194,10 +57,7 @@ public static class IisOption_IpSummary
             if (string.IsNullOrWhiteSpace(input))
             {
                 if (ips.Count == 0)
-                {
-                    ConsoleEx.Warn("Enter at least one IP before starting the scan.");
-                    continue;
-                }
+                    return null;
 
                 break;
             }
@@ -211,16 +71,13 @@ public static class IisOption_IpSummary
 
             var normalized = parsedIp.ToString();
             if (ips.Contains(normalized, StringComparer.OrdinalIgnoreCase))
-            {
-                ConsoleEx.Warn("That IP is already in the set.");
                 continue;
-            }
 
             ips.Add(normalized);
         }
 
         if (ips.Count == MaxRequestedIps)
-            ConsoleEx.Warn($"Reached the current cap of {MaxRequestedIps} IPs for one IIS IP Summary run.");
+            ConsoleEx.Warn($"Reached the current cap of {MaxRequestedIps} IPs for one ALB IP Summary run.");
 
         return new RequestedIpSet("Manual entry", ips);
     }
@@ -229,7 +86,7 @@ public static class IisOption_IpSummary
     {
         while (true)
         {
-            ConsoleEx.Header("IIS: IP Summary - IP list source", $"Workspace: {session.Root}");
+            ConsoleEx.Header("ALB: IP Summary - IP list source", $"Workspace: {session.Root}");
 
             var burstCount = session.IisBurstIps.Count;
             var burstUpdated = session.IisBurstIpsUpdatedUtc is null
@@ -275,7 +132,7 @@ public static class IisOption_IpSummary
 
     private static RequestedIpSet? PromptForIisBurstSessionIps(SessionState session)
     {
-        ConsoleEx.Header("IIS: IP Summary - IIS burst session", $"Workspace: {session.Root}");
+        ConsoleEx.Header("ALB: IP Summary - IIS burst session", $"Workspace: {session.Root}");
 
         var set = session.IisBurstIps;
         var ipHits = session.IisBurstIpHits;
@@ -308,7 +165,7 @@ public static class IisOption_IpSummary
 
     private static RequestedIpSet? PromptForPlatformSuspiciousIps(SessionState session)
     {
-        ConsoleEx.Header("IIS: IP Summary - Platform suspicious cache", $"Workspace: {session.Root}");
+        ConsoleEx.Header("ALB: IP Summary - Platform suspicious cache", $"Workspace: {session.Root}");
 
         var dict = session.PlatformSuspiciousIpHits;
         var updated = session.PlatformSuspiciousIpHitsUpdatedUtc;
@@ -340,7 +197,7 @@ public static class IisOption_IpSummary
 
     private static RequestedIpSet? PromptForOutputFileIps()
     {
-        ConsoleEx.Header("IIS: IP Summary - select file", $"Output folder: {AppFolders.Output}");
+        ConsoleEx.Header("ALB: IP Summary - select file", $"Output folder: {AppFolders.Output}");
 
         var outDir = AppFolders.Output;
         if (!Directory.Exists(outDir))
@@ -373,9 +230,9 @@ public static class IisOption_IpSummary
                 .AddChoices(choices)
                 .UseConverter(x => x.Display));
 
-        ConsoleEx.Header("IIS: IP Summary - gather IPs", Path.GetFileName(picked.FullPath));
+        ConsoleEx.Header("ALB: IP Summary - gather IPs", Path.GetFileName(picked.FullPath));
 
-        if (!TryExtractIpCountsFromFile(
+        if (!TryExtractRequestedIpCountsFromFile(
                 filePath: picked.FullPath,
                 out var ipColumnName,
                 out var counts,
@@ -428,7 +285,7 @@ public static class IisOption_IpSummary
                 return null;
 
             ips = limited;
-            sourceLabel += $" (top selection)";
+            sourceLabel += " (top selection)";
         }
 
         if (!ConsoleEx.ReadYesNo($"Analyze {ips.Count} IPs from {sourceLabel}?", defaultYes: true))
@@ -475,24 +332,23 @@ public static class IisOption_IpSummary
         }
     }
 
-    private static IisIpSummaryScanner.DetailRetentionMode PromptForDetailMode(string ip)
-        => ConsoleEx.ReadYesNo($"{ip}: {IpSummaryThresholdPrompt}", defaultYes: true)
-            ? IisIpSummaryScanner.DetailRetentionMode.SqliteApproved
-            : IisIpSummaryScanner.DetailRetentionMode.SummaryOnly;
+    private static AlbIpSummaryScanner.DetailRetentionMode PromptForAggregateIpSummaryDetailMode()
+        => ConsoleEx.ReadYesNo(AggregateIpSummaryThresholdPrompt, defaultYes: true)
+            ? AlbIpSummaryScanner.DetailRetentionMode.SqliteApproved
+            : AlbIpSummaryScanner.DetailRetentionMode.SummaryOnly;
 
-    private static IisIpSummaryScanner.DetailRetentionMode PromptForAggregateDetailMode()
-        => ConsoleEx.ReadYesNo(AggregateThresholdPrompt, defaultYes: true)
-            ? IisIpSummaryScanner.DetailRetentionMode.SqliteApproved
-            : IisIpSummaryScanner.DetailRetentionMode.SummaryOnly;
-
-    private static async Task<IisIpSummaryExportSqlite.Writer?> ScanWithPhasedProgressAsync(List<string> files, IReadOnlyDictionary<string, IisIpSummaryScanner.ScanResult> resultsByIp, string sharedSqlitePath, CancellationToken ct)
+    private static async Task<AlbIpSummaryExportSqlite.Writer?> ScanIpSummaryMultiWithPhasedProgressAsync(
+        List<string> files,
+        IReadOnlyDictionary<string, AlbIpSummaryScanner.ScanResult> resultsByIp,
+        string sharedSqlitePath)
     {
         int nextFileIndex = 0;
-        IisIpSummaryScanner.DetailRetentionMode? rememberedMode = null;
-        IisIpSummaryExportSqlite.Writer? sharedSqliteWriter = null;
+        AlbIpSummaryScanner.DetailRetentionMode? rememberedMode = null;
+        AlbIpSummaryExportSqlite.Writer? sharedSqliteWriter = null;
+
         while (nextFileIndex < files.Count)
         {
-            nextFileIndex = await RunScanPhaseAsync(files, nextFileIndex, resultsByIp, ct).ConfigureAwait(false);
+            nextFileIndex = await RunIpSummaryScanPhaseAsyncMulti(files, nextFileIndex, resultsByIp).ConfigureAwait(false);
 
             var pending = resultsByIp.Values
                 .Where(r => r.ThresholdPromptPending)
@@ -500,9 +356,9 @@ public static class IisOption_IpSummary
                 .ToList();
 
             var aggregateRows = resultsByIp.Values
-                .Where(r => r.DetailMode == IisIpSummaryScanner.DetailRetentionMode.BelowThreshold)
+                .Where(r => r.DetailMode == AlbIpSummaryScanner.DetailRetentionMode.BelowThreshold)
                 .Sum(r => r.TotalRows);
-            var aggregateThresholdReached = aggregateRows >= IisIpSummaryScanner.ExcelRowThreshold;
+            var aggregateThresholdReached = aggregateRows >= AlbIpSummaryScanner.ExcelRowThreshold;
 
             if (pending.Count == 0 && !aggregateThresholdReached)
                 continue;
@@ -510,12 +366,12 @@ public static class IisOption_IpSummary
             if (!rememberedMode.HasValue)
             {
                 rememberedMode = aggregateThresholdReached
-                    ? PromptForAggregateDetailMode()
-                    : PromptForDetailMode(pending[0].RequestedIp);
+                    ? PromptForAggregateIpSummaryDetailMode()
+                    : PromptForIpSummaryDetailMode();
             }
 
-            if (rememberedMode == IisIpSummaryScanner.DetailRetentionMode.SqliteApproved && sharedSqliteWriter is null)
-                sharedSqliteWriter = IisIpSummaryExportSqlite.Open(sharedSqlitePath);
+            if (rememberedMode == AlbIpSummaryScanner.DetailRetentionMode.SqliteApproved && sharedSqliteWriter is null)
+                sharedSqliteWriter = AlbIpSummaryExportSqlite.Open(sharedSqlitePath);
 
             if (aggregateThresholdReached)
             {
@@ -532,60 +388,65 @@ public static class IisOption_IpSummary
         return sharedSqliteWriter;
     }
 
-    private static async Task<int> RunScanPhaseAsync(List<string> files, int startIndex, IReadOnlyDictionary<string, IisIpSummaryScanner.ScanResult> resultsByIp, CancellationToken ct)
+    private static async Task<int> RunIpSummaryScanPhaseAsyncMulti(
+        List<string> files,
+        int startIndex,
+        IReadOnlyDictionary<string, AlbIpSummaryScanner.ScanResult> resultsByIp)
     {
         int nextFileIndex = startIndex;
 
-        await AnsiConsole.Status().AutoRefresh(true).Spinner(Spinner.Known.Dots).StartAsync(
-            BuildStatusText(startIndex + 1, files.Count, files[startIndex], resultsByIp.Values),
-            async ctx =>
-            {
-                for (int i = startIndex; i < files.Count; i++)
+        await AnsiConsole.Status()
+            .AutoRefresh(true)
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync(
+                BuildIpSummaryStatusTextMulti(startIndex + 1, files.Count, files[startIndex], resultsByIp.Values),
+                async ctx =>
                 {
-                    ct.ThrowIfCancellationRequested();
-                    ctx.Status(BuildStatusText(i + 1, files.Count, files[i], resultsByIp.Values));
-                    await IisIpSummaryScanner.ScanFileAsync(files[i], resultsByIp, ct).ConfigureAwait(false);
-                    nextFileIndex = i + 1;
-                    if (resultsByIp.Values.Any(r => r.ThresholdPromptPending))
-                        break;
-                }
-            }).ConfigureAwait(false);
+                    for (int i = startIndex; i < files.Count; i++)
+                    {
+                        ctx.Status(BuildIpSummaryStatusTextMulti(i + 1, files.Count, files[i], resultsByIp.Values));
+
+                        await AlbIpSummaryScanner.ScanFileAsync(
+                            filePath: files[i],
+                            resultsByIp: resultsByIp,
+                            reportBytesDelta: _ => { }).ConfigureAwait(false);
+
+                        nextFileIndex = i + 1;
+                        if (resultsByIp.Values.Any(r => r.ThresholdPromptPending) ||
+                            resultsByIp.Values.Where(r => r.DetailMode == AlbIpSummaryScanner.DetailRetentionMode.BelowThreshold).Sum(r => r.TotalRows) >= AlbIpSummaryScanner.ExcelRowThreshold)
+                        {
+                            break;
+                        }
+                    }
+                }).ConfigureAwait(false);
 
         AnsiConsole.WriteLine();
         return nextFileIndex;
     }
 
-    private static string BuildStatusText(int currentFileIndex, int totalFiles, string filePath, IEnumerable<IisIpSummaryScanner.ScanResult> results)
+    private static string BuildIpSummaryStatusTextMulti(
+        int currentFileIndex,
+        int totalFiles,
+        string filePath,
+        IEnumerable<AlbIpSummaryScanner.ScanResult> results)
     {
-        var sqliteCount = results.Count(r => r.DetailMode == IisIpSummaryScanner.DetailRetentionMode.SqliteApproved);
-        var summaryOnlyCount = results.Count(r => r.DetailMode == IisIpSummaryScanner.DetailRetentionMode.SummaryOnly);
+        var sqliteCount = results.Count(r => r.DetailMode == AlbIpSummaryScanner.DetailRetentionMode.SqliteApproved);
+        var summaryOnlyCount = results.Count(r => r.DetailMode == AlbIpSummaryScanner.DetailRetentionMode.SummaryOnly);
         var fileName = TruncateProgressText(Path.GetFileName(filePath), 48);
 
-        return $"Scanning IIS logs (IP summary): file {currentFileIndex.ToString(CultureInfo.InvariantCulture)} of {totalFiles.ToString(CultureInfo.InvariantCulture)} | SQLite:{sqliteCount} Summary-only:{summaryOnlyCount} | {Markup.Escape(fileName)}";
+        return $"Scanning ALB logs (IP summary): file {currentFileIndex.ToString(CultureInfo.InvariantCulture)} of {totalFiles.ToString(CultureInfo.InvariantCulture)} | SQLite:{sqliteCount} Summary-only:{summaryOnlyCount} | {Markup.Escape(fileName)}";
     }
 
-    private static void BuildMultiReport(string htmlPath, IReadOnlyList<IisIpSummaryScanner.ScanResult> results, IReadOnlyDictionary<string, DetailArtifact> artifactsByIp)
+    private static void BuildMultiIpSummaryReport(
+        string htmlPath,
+        IReadOnlyList<AlbIpSummaryScanner.ScanResult> results,
+        IReadOnlyDictionary<string, DetailArtifact> artifactsByIp)
     {
         var payload = results.Select(r => new ReportPayload(
             Ip: r.RequestedIp,
             TotalRows: r.TotalRows,
-            FilesWithHits: r.SourceFiles.Count,
-            FirstHitUtc: r.FirstHitUtc?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC",
-            LastHitUtc: r.LastHitUtc?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC",
-            AverageTimeTakenMs: r.AverageTimeTakenMs,
-            MaxTimeTakenMs: r.MaxTimeTakenMs,
-            TotalCsBytes: r.TotalCsBytes,
-            TotalScBytes: r.TotalScBytes,
-            Status2xx3xx: r.StatusTotals.S2xx + r.StatusTotals.S3xx,
-            Status4xx: r.StatusTotals.S4xx,
-            Status5xx: r.StatusTotals.S5xx,
-            TopUris: r.TopUris(10).Select(x => new SimpleCount(x.Key, x.Value)).ToList(),
-            TopMethods: r.TopMethods(10).Select(x => new SimpleCount(x.Key, x.Value)).ToList(),
-            TopStatuses: r.TopExactStatuses(10).Select(x => new SimpleCount(x.Key, x.Value)).ToList(),
-            DetailKind: artifactsByIp[r.RequestedIp].Kind,
-            DetailPath: artifactsByIp[r.RequestedIp].Path,
-            DetailUrl: ToFileUrl(artifactsByIp[r.RequestedIp].Path),
-            Chart: BuildChartData(r)))
+            SummaryHtml: BuildPerIpSummaryHtml(r, artifactsByIp[r.RequestedIp]),
+            Chart: BuildMultiChartData(r)))
             .ToList();
 
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
@@ -599,7 +460,7 @@ public static class IisOption_IpSummary
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>IIS Multi-IP Summary</title>
+<title>ALB Multi-IP Summary</title>
 <style>
 :root { color-scheme: dark; }
 body { margin:0; background:#0b0f14; color:#e6edf3; font-family: ui-sans-serif, system-ui, Segoe UI, Roboto, Arial; }
@@ -626,18 +487,9 @@ select { background:#0b0f14; color:#e6edf3; border:1px solid rgba(255,255,255,.1
 .hover-item .label { display:flex; align-items:center; gap:8px; font-size:12px; opacity:.86; }
 .hover-item .value { margin-top:4px; font-size:16px; font-weight:600; }
 .dot { width:10px; height:10px; border-radius:999px; display:inline-block; }
-.summary-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; }
-.summary-card { background:#111827; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:12px; }
-.summary-title { font-size:14px; font-weight:600; margin:0 0 8px 0; }
-.summary-table { width:100%; border-collapse:collapse; font-size:12px; }
-.summary-table th,.summary-table td { padding:6px 8px; border-bottom:1px solid rgba(255,255,255,.07); text-align:left; vertical-align:top; }
-.summary-table th:last-child,.summary-table td:last-child { text-align:right; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break:break-word; }
-.note { font-size:12px; opacity:.8; line-height:1.45; }
-.link { color:#7dd3fc; text-decoration:none; }
-.link:hover { text-decoration:underline; }
 canvas { width:100%; height:520px; display:block; background:#0b0f14; border-radius:12px; }
 .empty { opacity:.7; font-size:13px; }
+.note { font-size:12px; opacity:.8; line-height:1.45; }
 kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11px; padding:2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.15); background: rgba(255,255,255,.04); }
 </style>
 </head>
@@ -679,7 +531,7 @@ const toggleHost = document.getElementById('seriesToggles');
 const hoverInfo = document.getElementById('hoverInfo');
 const bucketMeta = document.getElementById('bucketMeta');
 const ctx = canvas.getContext('2d', { alpha: false });
-const colors = ['#7dd3fc','#a7f3d0','#fda4af','#fcd34d'];
+const colors = ['#7dd3fc','#a7f3d0','#fda4af','#fcd34d','#c4b5fd','#fb7185'];
 const chartStateByIp = new Map();
 let currentItem = null;
 let mouseX = null;
@@ -689,86 +541,25 @@ let dragStartX = 0;
 let dragStartMin = 0;
 let dragStartMax = 0;
 
-function esc(s){
-  return String(s ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
-}
+function esc(s){ return String(s ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'); }
 function fmtNum(v){ return Number(v ?? 0).toLocaleString('en-US'); }
-function fmtMs(v){ return Number(v ?? 0).toLocaleString('en-US', { maximumFractionDigits: 1 }); }
-function fmtUtc(ms){
-  const d = new Date(ms);
-  const pad = n => String(n).padStart(2,'0');
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
+function fmtUtc(ms){ const d = new Date(ms); const pad = n => String(n).padStart(2,'0'); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`; }
+function deriveBucketSeconds(times){
+  if(!times || times.length < 2) return 60;
+  const deltaMs = Math.max(1000, Math.round(times[1] - times[0]));
+  return Math.max(1, Math.round(deltaMs / 1000));
 }
 function fmtBucket(seconds){
   if(seconds % 60 === 0) return `${seconds / 60} minute${seconds === 60 ? '' : 's'}`;
   return `${seconds} seconds`;
 }
-function buildRows(items, label){
-  if(!items || !items.length) return `<tr><td>(none)</td><td>0</td></tr>`;
-  return items.map(x => `<tr><td class="mono">${esc(x.label)}</td><td>${fmtNum(x.count)}</td></tr>`).join('');
-}
 function seriesShortName(name){
-  const m = String(name || '').match(/(\dxx)/i);
-  return m ? m[1].toUpperCase() : String(name || '');
+  const text = String(name || '');
+  if (text.startsWith('ELB')) return text.replace(' Response ', ' ');
+  if (text.startsWith('FE')) return text.replace(' Response ', ' ');
+  return text;
 }
-function detailBlock(item){
-  if(!item.detailKind || !item.detailPath){
-    if(item.totalRows >= 1000000) return '<div class="note">Detailed export was skipped after the threshold prompt for this IP.</div>';
-    if(item.totalRows === 0) return '<div class="note">No detailed export exists because there were no hits for this IP.</div>';
-    return '<div class="note">No detailed export was generated.</div>';
-  }
-  const openLink = item.detailUrl
-    ? `<div class="note" style="margin-top:8px"><a class="link" href="${esc(item.detailUrl)}">Open ${esc(item.detailKind)}</a></div>`
-    : '';
-  return `<div class="note">Detailed export: <strong>${esc(item.detailKind)}</strong></div><div class="note mono" style="margin-top:8px">${esc(item.detailPath)}</div>${openLink}`;
-}
-function renderSummary(item){
-  summaryHost.innerHTML = `
-  <div class="card">
-    <div>
-      <span class="pill">Requested IP: ${esc(item.ip)}</span>
-      <span class="pill">Total matching requests: ${fmtNum(item.totalRows)}</span>
-      <span class="pill">Files with hits: ${fmtNum(item.filesWithHits)}</span>
-      <span class="pill">Time range: ${esc(item.firstHitUtc || '-')} -> ${esc(item.lastHitUtc || '-')}</span>
-    </div>
-    <div class="summary-grid">
-      <div class="summary-card">
-        <div class="summary-title">HTTP status totals</div>
-        <table class="summary-table">
-          <tr><th>Class</th><th>Hits</th></tr>
-          <tr><td>2xx/3xx</td><td>${fmtNum(item.status2xx3xx)}</td></tr>
-          <tr><td>4xx</td><td>${fmtNum(item.status4xx)}</td></tr>
-          <tr><td>5xx</td><td>${fmtNum(item.status5xx)}</td></tr>
-        </table>
-      </div>
-      <div class="summary-card">
-        <div class="summary-title">Latency and bytes</div>
-        <table class="summary-table">
-          <tr><td>Average time-taken</td><td>${fmtMs(item.averageTimeTakenMs)} ms</td></tr>
-          <tr><td>Max time-taken</td><td>${fmtNum(item.maxTimeTakenMs)} ms</td></tr>
-          <tr><td>Total cs-bytes</td><td>${fmtNum(item.totalCsBytes)}</td></tr>
-          <tr><td>Total sc-bytes</td><td>${fmtNum(item.totalScBytes)}</td></tr>
-        </table>
-      </div>
-      <div class="summary-card">
-        <div class="summary-title">Detailed export</div>
-        ${detailBlock(item)}
-      </div>
-      <div class="summary-card">
-        <div class="summary-title">Top 10 URIs</div>
-        <table class="summary-table"><tr><th>URI</th><th>Hits</th></tr>${buildRows(item.topUris, 'URI')}</table>
-      </div>
-      <div class="summary-card">
-        <div class="summary-title">Top 10 methods</div>
-        <table class="summary-table"><tr><th>Method</th><th>Hits</th></tr>${buildRows(item.topMethods, 'Method')}</table>
-      </div>
-      <div class="summary-card">
-        <div class="summary-title">Top exact status codes</div>
-        <table class="summary-table"><tr><th>Status</th><th>Hits</th></tr>${buildRows(item.topStatuses, 'Status')}</table>
-      </div>
-    </div>
-  </div>`;
-}
+function renderSummary(item){ summaryHost.innerHTML = item.summaryHtml || '<div class="card"><div class="empty">No summary available.</div></div>'; }
 
 function updateHoverInfo(item, hoveredMs, tooltipSeries){
   if(!item){
@@ -779,14 +570,14 @@ function updateHoverInfo(item, hoveredMs, tooltipSeries){
   if(hoveredMs == null || !tooltipSeries || !tooltipSeries.length){
     hoverInfo.innerHTML = `
       <div class="hover-title">Chart inspection</div>
-      <div class="hover-subtitle">Bucket size: ${esc(fmtBucket(item.chart.bucketSeconds || 60))}</div>
+      <div class="hover-subtitle">Bucket size: ${esc(fmtBucket(deriveBucketSeconds(item.chart.timesUtc || [])))}</div>
       <div class="note">Hover the chart to inspect the nearest bucket, compare visible series, and read exact values.</div>`;
     return;
   }
 
   hoverInfo.innerHTML = `
     <div class="hover-title">Nearest bucket</div>
-    <div class="hover-subtitle">${esc(fmtUtc(hoveredMs))} | ${esc(fmtBucket(item.chart.bucketSeconds || 60))}</div>
+    <div class="hover-subtitle">${esc(fmtUtc(hoveredMs))} | ${esc(fmtBucket(deriveBucketSeconds(item.chart.timesUtc || [])))}</div>
     <div class="hover-grid">${tooltipSeries.map(entry => `
       <div class="hover-item">
         <div class="label"><span class="dot" style="background:${entry.s.color}"></span>${esc(entry.s.name)}</div>
@@ -799,20 +590,8 @@ function getState(item){
   let state = chartStateByIp.get(item.ip);
   if(!state){
     const times = item.chart.timesUtc || [];
-    const series = (item.chart.series || []).map((s, index) => ({
-      name: s.name,
-      shortName: seriesShortName(s.name),
-      values: s.values || [],
-      color: colors[index % colors.length],
-      visible: true
-    }));
-    state = {
-      xMin: times.length ? times[0] : 0,
-      xMax: times.length ? times[times.length - 1] : 0,
-      times,
-      bucketSeconds: item.chart.bucketSeconds || 60,
-      series
-    };
+    const series = (item.chart.series || []).map((s, index) => ({ name: s.name, shortName: seriesShortName(s.name), values: s.values || [], color: colors[index % colors.length], visible: true }));
+    state = { xMin: times.length ? times[0] : 0, xMax: times.length ? times[times.length - 1] : 0, times, bucketSeconds: deriveBucketSeconds(times), series };
     chartStateByIp.set(item.ip, state);
   }
   return state;
@@ -1028,6 +807,7 @@ function drawChart(item){
       ctx.fillText(`${entry.s.shortName}: ${fmtNum(entry.v)}`, bx + padding + 14, ty);
       ty += 16;
     });
+
     updateHoverInfo(item, ms, tooltipSeries);
     return;
   }
@@ -1038,7 +818,7 @@ function drawChart(item){
 function renderSelected(){
   currentItem = DATA.find(x => x.ip === select.value) || DATA[0];
   const item = currentItem;
-  bucketMeta.textContent = `Bucket size: ${fmtBucket(item.chart.bucketSeconds || 60)}. Double click a legend chip to isolate one series.`;
+  bucketMeta.textContent = `Bucket size: ${fmtBucket(deriveBucketSeconds(item.chart.timesUtc || []))}. Double click a legend chip to isolate one series.`;
   buildSeriesToggles(item);
   renderSummary(item);
   updateHoverInfo(item, null, null);
@@ -1137,176 +917,94 @@ renderSelected();
         File.WriteAllText(htmlPath, html, Encoding.UTF8);
     }
 
-    private static ChartPayload BuildChartData(IisIpSummaryScanner.ScanResult result)
+    private static string BuildPerIpSummaryHtml(AlbIpSummaryScanner.ScanResult result, DetailArtifact artifact)
+    {
+        if (result.TotalRows == 0)
+        {
+            return $$"""
+<div class="card">
+  <div class="pill">Requested IP: {{Html(result.RequestedIp)}}</div>
+  <div class="pill">Total matching requests: 0</div>
+  <div class="summary-card" style="margin-top:12px;">
+    <div class="summary-title">No hits</div>
+    <div class="note">No ALB hits were found for this IP in the scanned logs.</div>
+  </div>
+</div>
+""";
+        }
+
+        return BuildSummarySectionHtml(result, artifact.Kind, artifact.Path);
+    }
+
+    private static ChartPayload BuildMultiChartData(AlbIpSummaryScanner.ScanResult result)
     {
         if (result.TotalRows == 0 || !result.FirstHitUtc.HasValue || !result.LastHitUtc.HasValue)
-            return new ChartPayload(Array.Empty<long>(), Array.Empty<ChartSeries>(), LongRangeBucketSeconds);
+            return new ChartPayload(Array.Empty<long>(), Array.Empty<ChartSeriesPayload>());
 
         var start = result.FirstHitUtc.Value;
         var end = result.LastHitUtc.Value;
-        var bucketSeconds = ChooseBucketSeconds(start, end);
-        start = FloorToBucketUtc(start, bucketSeconds);
-        end = FloorToBucketUtc(end, bucketSeconds);
+        start = new DateTime(start.Year, start.Month, start.Day, start.Hour, start.Minute, 0, DateTimeKind.Utc);
+        end = new DateTime(end.Year, end.Month, end.Day, end.Hour, end.Minute, 0, DateTimeKind.Utc);
 
-        var totalSeconds = Math.Max(bucketSeconds, (int)Math.Ceiling((end - start).TotalSeconds) + bucketSeconds);
-        var points = Math.Max(1, (int)Math.Ceiling(totalSeconds / (double)bucketSeconds));
+        var minuteCount = (int)Math.Max(1, (end - start).TotalMinutes + 1);
+        var bucketSizeMinutes = Math.Max(1, (int)Math.Ceiling(minuteCount / (double)MaxChartPointsPerIp));
+        var points = (int)Math.Ceiling(minuteCount / (double)bucketSizeMinutes);
         var times = new long[points];
-        var s2xx = new double[points];
-        var s3xx = new double[points];
-        var s4xx = new double[points];
-        var s5xx = new double[points];
+        var elb2xx3xx = new double[points];
+        var elb4xx = new double[points];
+        var elb5xx = new double[points];
+        var fe2xx3xx = new double[points];
+        var fe4xx = new double[points];
+        var fe5xx = new double[points];
 
         for (int i = 0; i < points; i++)
         {
-            var bucketStartUtc = start.AddSeconds(i * bucketSeconds);
+            var bucketStartUtc = start.AddMinutes(i * bucketSizeMinutes);
             times[i] = new DateTimeOffset(bucketStartUtc).ToUnixTimeMilliseconds();
 
-            for (int secondOffset = 0; secondOffset < bucketSeconds; secondOffset += ShortRangeBucketSeconds)
+            for (int minuteOffset = 0; minuteOffset < bucketSizeMinutes; minuteOffset++)
             {
-                var bucketUtc = bucketStartUtc.AddSeconds(secondOffset);
-                if (bucketUtc > end)
+                var minuteUtc = bucketStartUtc.AddMinutes(minuteOffset);
+                if (minuteUtc > end)
                     break;
 
-                if (!result.BucketsBy15SecondUtc.TryGetValue(bucketUtc, out var bucket))
+                if (!result.BucketsByMinuteUtc.TryGetValue(minuteUtc, out var bucket))
                     continue;
 
-                s2xx[i] += bucket.S2xx;
-                s3xx[i] += bucket.S3xx;
-                s4xx[i] += bucket.S4xx;
-                s5xx[i] += bucket.S5xx;
+                elb2xx3xx[i] += bucket.Elb.S2xx + bucket.Elb.S3xx;
+                elb4xx[i] += bucket.Elb.S4xx;
+                elb5xx[i] += bucket.Elb.S5xx;
+                fe2xx3xx[i] += bucket.Fe.S2xx + bucket.Fe.S3xx;
+                fe4xx[i] += bucket.Fe.S4xx;
+                fe5xx[i] += bucket.Fe.S5xx;
             }
         }
 
         return new ChartPayload(
             times,
             [
-                new ChartSeries("HTTP 2xx", s2xx),
-                new ChartSeries("HTTP 3xx", s3xx),
-                new ChartSeries("HTTP 4xx", s4xx),
-                new ChartSeries("HTTP 5xx", s5xx)
-            ],
-            bucketSeconds);
+                new ChartSeriesPayload("ELB Response 2xx/3xx", elb2xx3xx),
+                new ChartSeriesPayload("ELB Response 4xx", elb4xx),
+                new ChartSeriesPayload("ELB Response 5xx", elb5xx),
+                new ChartSeriesPayload("FE Response 2xx/3xx", fe2xx3xx),
+                new ChartSeriesPayload("FE Response 4xx", fe4xx),
+                new ChartSeriesPayload("FE Response 5xx", fe5xx)
+            ]);
     }
 
-    private static int ChooseBucketSeconds(DateTime startUtc, DateTime endUtc)
+    private static string? ToFileUrl(string? path)
     {
-        var range = endUtc - startUtc;
-        var preferredBucketSeconds =
-            range <= ShortRangeMax ? ShortRangeBucketSeconds :
-            range <= MediumRangeMax ? MediumRangeBucketSeconds :
-            LongRangeBucketSeconds;
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
 
-        var guardrailBucketSeconds = RoundUpToMultiple(
-            (int)Math.Ceiling(Math.Max(1, range.TotalSeconds + 1) / MaxChartPointsPerIp),
-            ShortRangeBucketSeconds);
-
-        return Math.Max(preferredBucketSeconds, guardrailBucketSeconds);
-    }
-
-    private static int RoundUpToMultiple(int value, int multiple)
-    {
-        if (multiple <= 0)
-            return value;
-
-        var safeValue = Math.Max(value, multiple);
-        return ((safeValue + multiple - 1) / multiple) * multiple;
-    }
-
-    private static DateTime FloorToBucketUtc(DateTime dtUtc, int bucketSeconds)
-    {
-        if (bucketSeconds <= 0)
-            bucketSeconds = LongRangeBucketSeconds;
-
-        dtUtc = dtUtc.Kind == DateTimeKind.Utc ? dtUtc : dtUtc.ToUniversalTime();
-        var bucketTicks = TimeSpan.FromSeconds(bucketSeconds).Ticks;
-        var flooredTicks = dtUtc.Ticks - (dtUtc.Ticks % bucketTicks);
-        return new DateTime(flooredTicks, DateTimeKind.Utc);
-    }
-
-    private static void InfoPanel(string title, params (string Key, string Value)[] rows)
-    {
-        var t = new Table().RoundedBorder().AddColumn("Field").AddColumn("Value");
-        foreach (var (k, v) in rows)
-            t.AddRow(Markup.Escape(k), Markup.Escape(v));
-        AnsiConsole.Write(new Panel(t) { Header = new PanelHeader(Markup.Escape(title)), Border = BoxBorder.Rounded });
-        AnsiConsole.WriteLine();
-    }
-
-    private static string TruncateProgressText(string value, int maxLength)
-        => string.IsNullOrEmpty(value) || value.Length <= maxLength ? value : maxLength <= 3 ? value[..maxLength] : value[..(maxLength - 3)] + "...";
-
-    private static bool TryOpenFile(string filePath)
-    {
         try
         {
-            Process.Start(new ProcessStartInfo { FileName = filePath, UseShellExecute = true });
-            return true;
+            return new Uri(Path.GetFullPath(path)).AbsoluteUri;
         }
         catch
         {
-            return false;
+            return null;
         }
-    }
-
-    private static string SanitizeFileComponent(string value)
-    {
-        var invalid = Path.GetInvalidFileNameChars();
-        var sb = new StringBuilder(value.Length);
-        foreach (var c in value)
-            sb.Append(Array.IndexOf(invalid, c) >= 0 ? '_' : c);
-        return sb.ToString();
-    }
-
-    private static string BuildFileDisplay(FileInfo f)
-    {
-        var ts = $"{SafeCreationUtc(f):yyyy-MM-dd HH:mm:ss}Z";
-        var size = $"({FormatBytes(f.Length)})";
-        var name = f.Name;
-
-        var width = GetConsoleWidthSafe();
-        var reserve = ts.Length + 3 + 1 + size.Length;
-        var maxName = Math.Max(20, width - reserve);
-        name = TrimMiddle(name, maxName);
-        return $"{ts} - {name} {size}";
-    }
-
-    private static int GetConsoleWidthSafe()
-    {
-        try
-        {
-            var w = Console.WindowWidth;
-            return w > 0 ? w : 120;
-        }
-        catch
-        {
-            return 120;
-        }
-    }
-
-    private static string TrimMiddle(string s, int max)
-    {
-        if (string.IsNullOrEmpty(s) || s.Length <= max) return s;
-        if (max <= 3) return s[..max];
-
-        var cut = max - 3;
-        var head = cut / 2;
-        var tail = cut - head;
-        return s[..head] + "..." + s[^tail..];
-    }
-
-    private static DateTime SafeCreationUtc(FileInfo f)
-    {
-        try { return f.CreationTimeUtc; }
-        catch { return f.LastWriteTimeUtc; }
-    }
-
-    private static string FormatBytes(long bytes)
-    {
-        var suf = new[] { "B", "KB", "MB", "GB", "TB" };
-        double b = bytes;
-        var i = 0;
-        while (b >= 1024 && i < suf.Length - 1) { b /= 1024; i++; }
-        return $"{b:0.##} {suf[i]}";
     }
 
     private static void RenderTopIpTable(IReadOnlyList<IpChoice> choices, int top, bool includeHits)
@@ -1331,7 +1029,7 @@ renderSelected();
         AnsiConsole.WriteLine();
     }
 
-    private static bool TryExtractIpCountsFromFile(
+    private static bool TryExtractRequestedIpCountsFromFile(
         string filePath,
         out string ipColumnName,
         out Dictionary<string, int> counts,
@@ -1342,79 +1040,7 @@ renderSelected();
         if (ext.Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
             return TryExtractIpCountsFromXlsxFirstTable(filePath, out ipColumnName, out counts, out orderedChoices, out error);
 
-        return TryExtractIpCountsFromCsv(filePath, out ipColumnName, out counts, out orderedChoices, out error);
-    }
-
-    private static bool TryExtractIpCountsFromCsv(
-        string csvPath,
-        out string ipColumnName,
-        out Dictionary<string, int> counts,
-        out List<IpChoice> orderedChoices,
-        out string error)
-    {
-        ipColumnName = "";
-        counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        orderedChoices = new List<IpChoice>();
-        error = "";
-
-        try
-        {
-            using var fs = File.OpenRead(csvPath);
-            using var sr = new StreamReader(fs);
-            var headerLine = sr.ReadLine();
-            if (string.IsNullOrWhiteSpace(headerLine))
-            {
-                error = "CSV is empty.";
-                return false;
-            }
-
-            var delimiter = CsvLite.DetectDelimiter(headerLine);
-            var headers = CsvLite.Split(headerLine, delimiter);
-            var ipIndex = FindIpColumnIndex(headers);
-            if (ipIndex < 0)
-            {
-                error = $"Could not detect an IP column. Headers: {string.Join(", ", headers)}";
-                return false;
-            }
-
-            ipColumnName = headers[ipIndex];
-            string? line;
-            while ((line = sr.ReadLine()) is not null)
-            {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-
-                var cols = CsvLite.Split(line, delimiter);
-                if (ipIndex >= cols.Count)
-                    continue;
-
-                var ip = NormalizeIp(cols[ipIndex]);
-                if (ip is null)
-                    continue;
-
-                counts.TryGetValue(ip, out var cur);
-                counts[ip] = cur + 1;
-            }
-
-            if (counts.Count == 0)
-            {
-                error = $"Detected IP column '{ipColumnName}', but no valid IPs were found in that column.";
-                return false;
-            }
-
-            orderedChoices = counts
-                .OrderByDescending(kvp => kvp.Value)
-                .ThenBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(kvp => new IpChoice(kvp.Key, kvp.Value))
-                .ToList();
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            error = ex.Message;
-            return false;
-        }
+        return TryExtractIpCountsFromFile(filePath, out ipColumnName, out counts, out orderedChoices, out error);
     }
 
     private static bool TryExtractIpCountsFromXlsxFirstTable(
@@ -1432,7 +1058,7 @@ renderSelected();
         try
         {
             using var fs = new FileStream(xlsxPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var wb = new XLWorkbook(fs);
+            using var wb = new ClosedXML.Excel.XLWorkbook(fs);
             var ws = wb.Worksheets.FirstOrDefault();
             if (ws is null)
             {
@@ -1547,80 +1173,53 @@ renderSelected();
         }
     }
 
-    private static int FindIpColumnIndex(IReadOnlyList<string> headers)
+    private static string BuildFileDisplay(FileInfo f)
     {
-        var preferred = new[] { "ip", "ipaddress", "ip_address", "clientip", "client_ip", "client ip", "sourceip", "source_ip", "source ip" };
-        for (var i = 0; i < headers.Count; i++)
-        {
-            var h = headers[i].Trim().ToLowerInvariant();
-            if (preferred.Contains(h))
-                return i;
-        }
+        var ts = $"{SafeCreationUtc(f):yyyy-MM-dd HH:mm:ss}Z";
+        var size = $"({FormatBytes(f.Length)})";
+        var name = f.Name;
 
-        for (var i = 0; i < headers.Count; i++)
-        {
-            var h = headers[i].Trim().ToLowerInvariant();
-            if (h.Contains("ip") && !h.Contains("zip") && !h.Contains("ship"))
-                return i;
-        }
-
-        return -1;
+        var width = GetConsoleWidthSafe();
+        var reserve = ts.Length + 3 + 1 + size.Length;
+        var maxName = Math.Max(20, width - reserve);
+        name = TrimMiddle(name, maxName);
+        return $"{ts} - {name} {size}";
     }
 
-    private static string? NormalizeIp(string? raw)
+    private static int GetConsoleWidthSafe()
     {
-        if (string.IsNullOrWhiteSpace(raw))
-            return null;
-
-        var s = raw.Trim().Trim('"').Trim();
-        if (s.Contains('.') && s.Count(c => c == ':') == 1)
-            s = s.Split(':', 2)[0];
-        if (s.StartsWith('[') && s.EndsWith(']') && s.Length > 2)
-            s = s[1..^1];
-
-        return System.Net.IPAddress.TryParse(s, out _) ? s : null;
-    }
-
-    private static string? ToFileUrl(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            return null;
-
         try
         {
-            return new Uri(Path.GetFullPath(path)).AbsoluteUri;
+            var w = Console.WindowWidth;
+            return w > 0 ? w : 120;
         }
         catch
         {
-            return null;
+            return 120;
         }
     }
 
-    private sealed record FileChoice(string FullPath, string Display);
-    private sealed record IpChoice(string Ip, int Hits);
-    private sealed record RequestedIpSet(string SourceLabel, List<string> Ips);
+    private static string TrimMiddle(string s, int max)
+    {
+        if (string.IsNullOrEmpty(s) || s.Length <= max) return s;
+        if (max <= 3) return s[..max];
+
+        var cut = max - 3;
+        var head = cut / 2;
+        var tail = cut - head;
+        return s[..head] + "..." + s[^tail..];
+    }
+
+    private static DateTime SafeCreationUtc(FileInfo f)
+    {
+        try { return f.CreationTimeUtc; }
+        catch { return f.LastWriteTimeUtc; }
+    }
+
     private sealed record DetailArtifact(string? Kind, string? Path);
-    private sealed record SimpleCount(string Label, int Count);
-    private sealed record ChartSeries(string Name, double[] Values);
-    private sealed record ChartPayload(long[] TimesUtc, ChartSeries[] Series, int BucketSeconds);
-    private sealed record ReportPayload(
-        string Ip,
-        long TotalRows,
-        int FilesWithHits,
-        string? FirstHitUtc,
-        string? LastHitUtc,
-        double AverageTimeTakenMs,
-        long MaxTimeTakenMs,
-        long TotalCsBytes,
-        long TotalScBytes,
-        int Status2xx3xx,
-        int Status4xx,
-        int Status5xx,
-        List<SimpleCount> TopUris,
-        List<SimpleCount> TopMethods,
-        List<SimpleCount> TopStatuses,
-        string? DetailKind,
-        string? DetailPath,
-        string? DetailUrl,
-        ChartPayload Chart);
+    private sealed record FileChoice(string FullPath, string Display);
+    private sealed record RequestedIpSet(string SourceLabel, List<string> Ips);
+    private sealed record ChartSeriesPayload(string Name, double[] Values);
+    private sealed record ChartPayload(long[] TimesUtc, ChartSeriesPayload[] Series);
+    private sealed record ReportPayload(string Ip, long TotalRows, string SummaryHtml, ChartPayload Chart);
 }

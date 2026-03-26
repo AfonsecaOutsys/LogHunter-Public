@@ -54,7 +54,7 @@ public sealed class IisMenu : IMenu
         switch (selected.Value)
         {
             case 0:
-                await IisOption_IpSummary.RunAsync(_session.Root, ct).ConfigureAwait(false);
+                await IisOption_IpSummary.RunAsync(_session, ct).ConfigureAwait(false);
                 return this;
 
             case 1:

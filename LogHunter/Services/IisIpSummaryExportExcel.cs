@@ -35,31 +35,36 @@ public static class IisIpSummaryExportExcel
 
     private static void WriteOverviewSheet(IXLWorksheet ws, IReadOnlyList<IisIpSummaryScanner.ScanResult> results)
     {
+        var orderedResults = results
+            .OrderByDescending(r => r.TotalRows)
+            .ThenBy(r => r.RequestedIp, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         ws.Cell(1, 1).Value = "IIS Multi-IP Summary";
-        ws.Cell(1, 1).Style.Font.Bold = true;
-        ws.Cell(1, 1).Style.Font.FontSize = 14;
-        ws.Cell(1, 1).Style.Fill.BackgroundColor = HeaderFill;
-        ws.Cell(1, 1).Style.Font.FontColor = XLColor.White;
-        ws.Range(1, 1, 1, 4).Merge();
+        StyleTitle(ws.Range(1, 1, 1, 12));
+
+        var metaStartRow = 3;
+        WriteMetricRow(ws, metaStartRow++, "Requested IPs", orderedResults.Count);
+        WriteMetricRow(ws, metaStartRow++, "IPs with retained detail rows", orderedResults.Count(r => r.HasRetainedRows));
+        WriteMetricRow(ws, metaStartRow++, "Total matching requests", orderedResults.Sum(r => r.TotalRows));
+        WriteMetricRow(ws, metaStartRow++, "Generated UTC", DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+        StyleMetricBlock(ws.Range(3, 1, metaStartRow - 1, 2));
 
         var headers = new[]
         {
             "IP","TotalRequests","FilesWithHits","FirstHitUtc","LastHitUtc","AvgTimeTakenMs","MaxTimeTakenMs","TotalCsBytes","TotalScBytes","Status2xx3xx","Status4xx","Status5xx"
         };
 
+        var headerRow = metaStartRow + 1;
+
         for (int i = 0; i < headers.Length; i++)
-            ws.Cell(3, i + 1).Value = headers[i];
+            ws.Cell(headerRow, i + 1).Value = headers[i];
 
-        var headerRange = ws.Range(3, 1, 3, headers.Length);
-        headerRange.Style.Font.Bold = true;
-        headerRange.Style.Fill.BackgroundColor = HeaderFill;
-        headerRange.Style.Font.FontColor = XLColor.White;
-        ws.SheetView.FreezeRows(3);
+        StyleHeaderRow(ws.Range(headerRow, 1, headerRow, headers.Length));
+        ws.SheetView.FreezeRows(headerRow);
 
-        var row = 4;
-        foreach (var result in results
-            .OrderByDescending(r => r.TotalRows)
-            .ThenBy(r => r.RequestedIp, StringComparer.OrdinalIgnoreCase))
+        var row = headerRow + 1;
+        foreach (var result in orderedResults)
         {
             ws.Cell(row, 1).Value = result.RequestedIp;
             ws.Cell(row, 2).Value = result.TotalRows;
@@ -76,9 +81,9 @@ public static class IisIpSummaryExportExcel
             row++;
         }
 
-        if (row > 4)
+        if (row > headerRow + 1)
         {
-            var dataRange = ws.Range(3, 1, row - 1, headers.Length);
+            var dataRange = ws.Range(headerRow, 1, row - 1, headers.Length);
             var table = dataRange.CreateTable("IisIpSummaryOverview");
             table.Theme = XLTableTheme.TableStyleMedium2;
             table.ShowAutoFilter = true;
@@ -96,7 +101,7 @@ public static class IisIpSummaryExportExcel
         ws.Column(10).Style.NumberFormat.Format = "#,##0";
         ws.Column(11).Style.NumberFormat.Format = "#,##0";
         ws.Column(12).Style.NumberFormat.Format = "#,##0";
-        ws.Columns().AdjustToContents();
+        ws.Columns(1, headers.Length).AdjustToContents(10, 80);
     }
 
     private static void WriteIpSheet(IXLWorksheet ws, IisIpSummaryScanner.ScanResult result)
@@ -104,11 +109,7 @@ public static class IisIpSummaryExportExcel
         int row = 1;
 
         ws.Cell(row, 1).Value = $"IIS IP Summary - {result.RequestedIp}";
-        ws.Cell(row, 1).Style.Font.Bold = true;
-        ws.Cell(row, 1).Style.Font.FontSize = 14;
-        ws.Cell(row, 1).Style.Fill.BackgroundColor = HeaderFill;
-        ws.Cell(row, 1).Style.Font.FontColor = XLColor.White;
-        ws.Range(row, 1, row, 4).Merge();
+        StyleTitle(ws.Range(row, 1, row, 6));
         row += 2;
 
         var summaryStartRow = row;
@@ -135,7 +136,7 @@ public static class IisIpSummaryExportExcel
         var usedRange = ws.RangeUsed();
         if (usedRange is not null)
             usedRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
-        ws.Columns().AdjustToContents();
+        ws.Columns().AdjustToContents(10, 80);
     }
 
     private static void WriteHitsSheets(XLWorkbook wb, IReadOnlyList<IisIpSummaryScanner.ScanResult> results)
@@ -203,10 +204,7 @@ public static class IisIpSummaryExportExcel
         for (int i = 0; i < headers.Count; i++)
             ws.Cell(HitsHeaderRow, i + 1).Value = headers[i];
 
-        var headerRange = ws.Range(HitsHeaderRow, 1, HitsHeaderRow, headers.Count);
-        headerRange.Style.Font.Bold = true;
-        headerRange.Style.Fill.BackgroundColor = HeaderFill;
-        headerRange.Style.Font.FontColor = XLColor.White;
+        StyleHeaderRow(ws.Range(HitsHeaderRow, 1, HitsHeaderRow, headers.Count));
         ws.SheetView.FreezeRows(HitsHeaderRow);
 
         return ws;
@@ -311,6 +309,24 @@ public static class IisIpSummaryExportExcel
         ws.Cell(row, 2).Value = XLCellValue.FromObject(value);
         if (!string.IsNullOrWhiteSpace(numberFormat))
             ws.Cell(row, 2).Style.NumberFormat.Format = numberFormat;
+    }
+
+    private static void StyleTitle(IXLRange range)
+    {
+        range.Merge();
+        range.Style.Font.Bold = true;
+        range.Style.Font.FontSize = 14;
+        range.Style.Fill.BackgroundColor = HeaderFill;
+        range.Style.Font.FontColor = XLColor.White;
+        range.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+    }
+
+    private static void StyleHeaderRow(IXLRange range)
+    {
+        range.Style.Font.Bold = true;
+        range.Style.Fill.BackgroundColor = HeaderFill;
+        range.Style.Font.FontColor = XLColor.White;
+        range.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
     }
 
     private static void StyleMetricBlock(IXLRange range)

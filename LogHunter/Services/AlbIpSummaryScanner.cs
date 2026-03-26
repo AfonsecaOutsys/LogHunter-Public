@@ -21,8 +21,9 @@ public static class AlbIpSummaryScanner
 
     public sealed class ScanResult : IDisposable
     {
-        private readonly string _sqlitePath;
+        private string _sqlitePath;
         private AlbIpSummaryExportSqlite.Writer? _sqliteWriter;
+        private bool _ownsSqliteWriter;
 
         public ScanResult(string requestedIp, string sqlitePath)
         {
@@ -31,6 +32,7 @@ public static class AlbIpSummaryScanner
         }
 
         public string RequestedIp { get; }
+        public bool HasRetainedRows => Rows.Count > 0;
         public List<AlbIpSummaryRow> Rows { get; } = new();
         public SortedDictionary<DateTime, BucketCounts> BucketsByMinuteUtc { get; } = new();
         public HashSet<string> SourceFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -87,29 +89,57 @@ public static class AlbIpSummaryScanner
 
         public void CompleteStreamingExports()
         {
-            _sqliteWriter?.Complete();
+            if (_ownsSqliteWriter)
+                _sqliteWriter?.Complete();
         }
 
         public List<KeyValuePair<string, int>> TopTargetEndpoints(int take) => TopCounts(TargetEndpointCounts, take);
 
         public void Dispose()
         {
-            _sqliteWriter?.Dispose();
+            if (_ownsSqliteWriter)
+                _sqliteWriter?.Dispose();
         }
 
-        public void ApplyThresholdDecision(DetailRetentionMode mode)
+        public void ApplyThresholdDecision(DetailRetentionMode mode, AlbIpSummaryExportSqlite.Writer? sharedWriter = null, string? sharedSqlitePath = null)
         {
             if (!ThresholdPromptPending || DetailMode != DetailRetentionMode.BelowThreshold)
                 return;
 
+            ApplyDetailMode(mode, sharedWriter, sharedSqlitePath);
+        }
+
+        public void ApplyGlobalDetailMode(DetailRetentionMode mode, AlbIpSummaryExportSqlite.Writer? sharedWriter = null, string? sharedSqlitePath = null)
+        {
+            if (DetailMode != DetailRetentionMode.BelowThreshold)
+                return;
+
+            ApplyDetailMode(mode, sharedWriter, sharedSqlitePath);
+        }
+
+        private void ApplyDetailMode(DetailRetentionMode mode, AlbIpSummaryExportSqlite.Writer? sharedWriter, string? sharedSqlitePath)
+        {
             ThresholdPromptPending = false;
+            ThresholdReached = ThresholdReached || TotalRows >= ExcelRowThreshold;
             DetailMode = mode == DetailRetentionMode.SummaryOnly
                 ? DetailRetentionMode.SummaryOnly
                 : DetailRetentionMode.SqliteApproved;
 
             if (DetailMode == DetailRetentionMode.SqliteApproved)
             {
-                _sqliteWriter = AlbIpSummaryExportSqlite.Open(_sqlitePath);
+                if (sharedWriter is not null)
+                {
+                    _sqliteWriter = sharedWriter;
+                    _ownsSqliteWriter = false;
+                    if (!string.IsNullOrWhiteSpace(sharedSqlitePath))
+                        _sqlitePath = sharedSqlitePath;
+                }
+                else
+                {
+                    _sqliteWriter = AlbIpSummaryExportSqlite.Open(_sqlitePath);
+                    _ownsSqliteWriter = true;
+                }
+
                 _sqliteWriter.WriteRows(Rows);
             }
 
@@ -238,6 +268,48 @@ public static class AlbIpSummaryScanner
             reportBytesDelta(remaining);
     }
 
+    public static async Task ScanFileAsync(
+        string filePath,
+        IReadOnlyDictionary<string, ScanResult> resultsByIp,
+        Action<long> reportBytesDelta)
+    {
+        if (resultsByIp.Count == 0)
+            return;
+
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 1 << 20, FileOptions.SequentialScan);
+        using var sr = new StreamReader(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1 << 20);
+
+        long lastReportedPos = 0;
+        const long chunk = 64L * 1024 * 1024;
+        var sourceFile = SafeSourceFile(filePath);
+
+        while (true)
+        {
+            var line = await sr.ReadLineAsync().ConfigureAwait(false);
+            if (line is null)
+                break;
+
+            if (line.Length == 0)
+                continue;
+
+            if (!TryParseMatchedRow(line, resultsByIp, out var result, out var row))
+                continue;
+
+            result!.AddRow(row!, sourceFile);
+
+            var pos = fs.Position;
+            if (pos - lastReportedPos >= chunk)
+            {
+                reportBytesDelta(pos - lastReportedPos);
+                lastReportedPos = pos;
+            }
+        }
+
+        var remaining = fs.Length - lastReportedPos;
+        if (remaining > 0)
+            reportBytesDelta(remaining);
+    }
+
     private static bool TryParseMatchedRow(string line, IPAddress requestedIp, out AlbIpSummaryRow? row)
     {
         row = null;
@@ -280,6 +352,62 @@ public static class AlbIpSummaryScanner
         row = new AlbIpSummaryRow(
             TimestampUtc: DateTime.SpecifyKind(timestampUtc, DateTimeKind.Utc),
             ClientIp: clientIp.ToString(),
+            Method: method,
+            RawRequest: rawRequest,
+            ElbStatusCode: ParseNullableInt(elbStatusToken),
+            FeStatusCode: ParseNullableInt(targetStatusToken),
+            TargetEndpoint: NormalizeToken(targetToken),
+            TargetProcessingTimeSeconds: ParseNullableDouble(targetProcToken),
+            RequestProcessingTimeSeconds: ParseNullableDouble(requestProcToken),
+            ResponseProcessingTimeSeconds: ParseNullableDouble(responseProcToken),
+            ActionsExecuted: NormalizeToken(actionsToken),
+            UserAgent: NormalizeToken(userAgentToken));
+
+        return true;
+    }
+
+    private static bool TryParseMatchedRow(string line, IReadOnlyDictionary<string, ScanResult> resultsByIp, out ScanResult? result, out AlbIpSummaryRow? row)
+    {
+        result = null;
+        row = null;
+
+        var span = line.AsSpan();
+        if (!TryGetToken(span, 1, out var timestampToken))
+            return false;
+
+        if (!DateTime.TryParse(timestampToken, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var timestampUtc))
+        {
+            return false;
+        }
+
+        if (!TryGetToken(span, 3, out var clientToken))
+            return false;
+
+        SplitEndpoint(clientToken, out var clientIpToken, out _);
+        if (clientIpToken.Length == 0)
+            return false;
+
+        var clientIp = clientIpToken.ToString();
+        if (!resultsByIp.TryGetValue(clientIp, out result))
+            return false;
+
+        TryGetToken(span, 4, out var targetToken);
+        TryGetToken(span, 5, out var requestProcToken);
+        TryGetToken(span, 6, out var targetProcToken);
+        TryGetToken(span, 7, out var responseProcToken);
+        TryGetToken(span, 8, out var elbStatusToken);
+        TryGetToken(span, 9, out var targetStatusToken);
+        TryGetToken(span, 12, out var requestToken);
+        TryGetToken(span, 13, out var userAgentToken);
+        TryGetToken(span, 22, out var actionsToken);
+
+        ParseRequest(requestToken, out var method, out var rawRequest);
+
+        row = new AlbIpSummaryRow(
+            TimestampUtc: DateTime.SpecifyKind(timestampUtc, DateTimeKind.Utc),
+            ClientIp: clientIp,
             Method: method,
             RawRequest: rawRequest,
             ElbStatusCode: ParseNullableInt(elbStatusToken),
