@@ -9,6 +9,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using LogHunter.Web.Api;
 using LogHunter.Web.Pages;
 
 namespace LogHunter.Web.Hosting;
@@ -97,6 +98,11 @@ internal sealed class WebAppHost : IDisposable
             return;
         }
 
+        if (await AlbApi.TryHandleAsync(_context, context).ConfigureAwait(false))
+        {
+            return;
+        }
+
         if (TryServeAsset(path, context.Response))
         {
             return;
@@ -150,6 +156,11 @@ internal sealed class WebAppHost : IDisposable
         else if (string.Equals(path, "/assets/site.js", StringComparison.OrdinalIgnoreCase))
         {
             suffix = ".Web.Assets.site.js";
+            contentType = "application/javascript; charset=utf-8";
+        }
+        else if (string.Equals(path, "/assets/alb.js", StringComparison.OrdinalIgnoreCase))
+        {
+            suffix = ".Web.Assets.alb.js";
             contentType = "application/javascript; charset=utf-8";
         }
         else

@@ -1,4 +1,5 @@
 const THEME_KEY = 'loghunter.theme';
+const APP_INFO_POLL_MS = 4000;
 
 function getPreferredTheme() {
   const storedTheme = window.localStorage.getItem(THEME_KEY);
@@ -37,10 +38,29 @@ function initializeTheme() {
   });
 }
 
+function setRuntimeHealth(isOnline, title) {
+  const light = document.querySelector('[data-runtime-light="status"]');
+  const runtimeButton = document.getElementById('runtimeButton');
+  const status = document.querySelector('[data-app-info="status"]');
+
+  if (light) {
+    light.classList.toggle('is-online', isOnline);
+    light.classList.toggle('is-offline', !isOnline);
+  }
+
+  if (status && !isOnline) {
+    status.textContent = 'offline';
+  }
+
+  if (runtimeButton && title) {
+    runtimeButton.title = title;
+  }
+}
+
 async function loadAppInfo() {
   const targets = Array.from(document.querySelectorAll('[data-app-info]'));
   if (!targets.length) {
-    return;
+    return false;
   }
 
   try {
@@ -59,17 +79,33 @@ async function loadAppInfo() {
       const value = payload[key];
       element.textContent = value === null || value === undefined || value === '' ? 'n/a' : String(value);
     }
+
+    const runtimeButton = document.getElementById('runtimeButton');
+    if (runtimeButton) {
+      runtimeButton.title = `Local web host status: ${payload.status || 'n/a'} | mode: ${payload.mode || 'n/a'} | started: ${payload.startedUtc || 'n/a'}`;
+    }
+    setRuntimeHealth(true, `Local web host status: ${payload.status || 'n/a'} | mode: ${payload.mode || 'n/a'} | started: ${payload.startedUtc || 'n/a'}`);
+    return true;
   } catch (error) {
     const status = document.querySelector('[data-app-info="status"]');
     if (status) {
-      status.textContent = `error: ${error}`;
+      status.textContent = 'offline';
     }
+    setRuntimeHealth(false, `Local web host unreachable: ${error}`);
+    return false;
   }
+}
+
+function startAppInfoPolling() {
+  window.setInterval(() => {
+    loadAppInfo().catch(() => {});
+  }, APP_INFO_POLL_MS);
 }
 
 function initializeShell() {
   initializeTheme();
   loadAppInfo().catch(() => {});
+  startAppInfoPolling();
 }
 
 if (document.readyState === 'loading') {

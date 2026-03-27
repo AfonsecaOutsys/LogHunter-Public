@@ -1,5 +1,6 @@
 using System;
 using LogHunter.Services;
+using LogHunter.Web.Orchestration;
 
 namespace LogHunter.Web.Hosting;
 
@@ -12,6 +13,7 @@ internal sealed class WebAppContext
         RootPath = rootPath;
         Session = session;
         StartedUtc = DateTime.UtcNow;
+        AlbDownloads = new AlbDownloadJobManager(rootPath, Directory.GetCurrentDirectory());
     }
 
     public string AppName { get; }
@@ -23,4 +25,6 @@ internal sealed class WebAppContext
     public SessionState Session { get; }
 
     public DateTime StartedUtc { get; }
+
+    public AlbDownloadJobManager AlbDownloads { get; }
 }

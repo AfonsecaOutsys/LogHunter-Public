@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 
 namespace LogHunter;
 
@@ -52,6 +53,7 @@ internal static class Program
         string? rootOverride = null;
         string? viewerSqlitePath = null;
         string? viewerIp = null;
+        string? albDownloadJobPath = null;
         var consoleMode = false;
         var launchBrowser = true;
 
@@ -130,6 +132,18 @@ internal static class Program
                 continue;
             }
 
+            if (a == "--run-alb-download-job")
+            {
+                if (i + 1 >= args.Length)
+                {
+                    Console.WriteLine("Missing value for --run-alb-download-job");
+                    return;
+                }
+
+                albDownloadJobPath = args[++i];
+                continue;
+            }
+
             Console.WriteLine($"Unknown argument: {a}");
             Console.WriteLine();
             ShowHelp(version);
@@ -162,6 +176,12 @@ internal static class Program
             var root = string.IsNullOrWhiteSpace(rootOverride)
                 ? AppContext.BaseDirectory
                 : Path.GetFullPath(rootOverride);
+
+            if (!string.IsNullOrWhiteSpace(albDownloadJobPath))
+            {
+                await RunAlbDownloadJobAsync(albDownloadJobPath).ConfigureAwait(false);
+                return;
+            }
 
             if (!string.IsNullOrWhiteSpace(viewerSqlitePath))
             {
@@ -292,5 +312,43 @@ internal static class Program
         }
 
         return false;
+    }
+
+    private static async Task RunAlbDownloadJobAsync(string requestFilePath)
+    {
+        try
+        {
+            if (!File.Exists(requestFilePath))
+            {
+                Console.Error.WriteLine($"ALB download job request file was not found: {requestFilePath}");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            var json = await File.ReadAllTextAsync(requestFilePath).ConfigureAwait(false);
+            var request = JsonSerializer.Deserialize<AlbDownloadRequest>(json);
+            if (request is null)
+            {
+                Console.Error.WriteLine("ALB download job request file was invalid.");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            var result = await AlbDownload.RunDownloadAsync(
+                request,
+                progress =>
+                {
+                    Console.WriteLine("__LHJOB_PROGRESS__" + JsonSerializer.Serialize(progress));
+                }).ConfigureAwait(false);
+
+            Console.WriteLine(result.Success ? "ALB download completed." : $"ALB download failed: {result.Message}");
+            Console.WriteLine("__LHJOB_RESULT__" + JsonSerializer.Serialize(result));
+            Environment.ExitCode = result.Success ? 0 : 1;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex.ToString());
+            Environment.ExitCode = 1;
+        }
     }
 }
