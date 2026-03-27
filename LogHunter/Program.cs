@@ -1,13 +1,14 @@
-﻿// Program.cs  (tidied, same behavior)
 using LogHunter.Menus;
 using LogHunter.Services;
 using LogHunter.Viewer;
-using Spectre.Console;
+using LogHunter.Web.Hosting;
 using Microsoft.Data.Sqlite;
+using Spectre.Console;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 
 namespace LogHunter;
 
@@ -40,6 +41,7 @@ sealed class BellDetectingWriter : TextWriter
 internal static class Program
 {
     private static volatile bool _ctrlCRequested;
+    private const bool DefaultToWebMode = false;
 
     private static async Task Main(string[] args)
     {
@@ -52,6 +54,9 @@ internal static class Program
         string? rootOverride = null;
         string? viewerSqlitePath = null;
         string? viewerIp = null;
+        string? albDownloadJobPath = null;
+        var consoleMode = !DefaultToWebMode;
+        var launchBrowser = true;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -83,6 +88,23 @@ internal static class Program
                 continue;
             }
 
+            if (a == "--web")
+            {
+                continue;
+            }
+
+            if (a == "--console")
+            {
+                consoleMode = true;
+                continue;
+            }
+
+            if (a == "--no-browser")
+            {
+                launchBrowser = false;
+                continue;
+            }
+
             if (a == "--viewer-sqlite")
             {
                 if (i + 1 >= args.Length)
@@ -111,6 +133,18 @@ internal static class Program
                 continue;
             }
 
+            if (a == "--run-alb-download-job")
+            {
+                if (i + 1 >= args.Length)
+                {
+                    Console.WriteLine("Missing value for --run-alb-download-job");
+                    return;
+                }
+
+                albDownloadJobPath = args[++i];
+                continue;
+            }
+
             Console.WriteLine($"Unknown argument: {a}");
             Console.WriteLine();
             ShowHelp(version);
@@ -125,13 +159,18 @@ internal static class Program
 
         try
         {
-            // MUST be before any AnsiConsole output
             Console.SetOut(new BellDetectingWriter(Console.Out));
             Console.SetError(new BellDetectingWriter(Console.Error));
 
             var root = string.IsNullOrWhiteSpace(rootOverride)
                 ? AppContext.BaseDirectory
                 : Path.GetFullPath(rootOverride);
+
+            if (!string.IsNullOrWhiteSpace(albDownloadJobPath))
+            {
+                await RunAlbDownloadJobAsync(albDownloadJobPath).ConfigureAwait(false);
+                return;
+            }
 
             if (!string.IsNullOrWhiteSpace(viewerSqlitePath))
             {
@@ -159,7 +198,15 @@ internal static class Program
             AppFolders.Ensure();
             EmbeddedAssets.EnsureTabulatorAssets(root);
 
-            //start part
+            var session = new SessionState(root);
+
+            if (!consoleMode)
+            {
+                using var webHost = new WebAppHost(new WebAppContext("LogHunter", version, root, session));
+                await webHost.RunAsync(() => _ctrlCRequested, launchBrowser).ConfigureAwait(false);
+                return;
+            }
+
             var asm = Assembly.GetExecutingAssembly();
             var all = asm.GetManifestResourceNames();
 
@@ -174,13 +221,11 @@ internal static class Program
                 foreach (var n in hits)
                     AnsiConsole.MarkupLine("  [dim]" + Markup.Escape(n) + "[/]");
             }
-            AnsiConsole.WriteLine();//end part
+            AnsiConsole.WriteLine();
 
             AnsiConsole.MarkupLine($"[bold]LogHunter[/] [dim]{version}[/]");
             AnsiConsole.MarkupLine($"[dim]Workspace:[/] {Markup.Escape(root)}");
             AnsiConsole.MarkupLine("[dim]Tip:[/] Ctrl+C to exit");
-
-            var session = new SessionState(root);
 
             IMenu? menu = new MainMenu(session);
             while (menu is not null && !_ctrlCRequested)
@@ -206,14 +251,17 @@ internal static class Program
         Console.WriteLine($"LogHunter {version}");
         Console.WriteLine();
         Console.WriteLine("Usage:");
-        Console.WriteLine("  LogHunter [--root <path>] [--viewer-sqlite <path> --viewer-ip <ip>] [--version] [--help]");
+        Console.WriteLine("  LogHunter [--root <path>] [--console] [--no-browser] [--viewer-sqlite <path> --viewer-ip <ip>] [--version] [--help]");
         Console.WriteLine();
         Console.WriteLine("Options:");
-        Console.WriteLine("  --root <path>   Workspace path (defaults to the exe folder)");
-        Console.WriteLine("  --viewer-sqlite <path>  Start the ALB IP Summary SQLite viewer for the specified database");
+        Console.WriteLine("  --root <path>           Workspace path (defaults to the exe folder)");
+        Console.WriteLine("  --console               Start the legacy console menu instead of the web shell");
+        Console.WriteLine("  --web                   Explicitly start the local web shell on 127.0.0.1 (default)");
+        Console.WriteLine("  --no-browser            In web mode, do not auto-open the default browser");
+        Console.WriteLine("  --viewer-sqlite <path>  Start the SQLite viewer for the specified database");
         Console.WriteLine("  --viewer-ip <ip>        Optional selected IP shown in viewer metadata");
         Console.WriteLine("  --version, -v           Print version and exit");
-        Console.WriteLine("  --help, -h      Show this help");
+        Console.WriteLine("  --help, -h              Show this help");
     }
 
     private static bool TryDetectViewerKind(string dbPath, out string kind)
@@ -253,5 +301,43 @@ internal static class Program
         }
 
         return false;
+    }
+
+    private static async Task RunAlbDownloadJobAsync(string requestFilePath)
+    {
+        try
+        {
+            if (!File.Exists(requestFilePath))
+            {
+                Console.Error.WriteLine($"ALB download job request file was not found: {requestFilePath}");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            var json = await File.ReadAllTextAsync(requestFilePath).ConfigureAwait(false);
+            var request = JsonSerializer.Deserialize<AlbDownloadRequest>(json);
+            if (request is null)
+            {
+                Console.Error.WriteLine("ALB download job request file was invalid.");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            var result = await AlbDownload.RunDownloadAsync(
+                request,
+                progress =>
+                {
+                    Console.WriteLine("__LHJOB_PROGRESS__" + JsonSerializer.Serialize(progress));
+                }).ConfigureAwait(false);
+
+            Console.WriteLine(result.Success ? "ALB download completed." : $"ALB download failed: {result.Message}");
+            Console.WriteLine("__LHJOB_RESULT__" + JsonSerializer.Serialize(result));
+            Environment.ExitCode = result.Success ? 0 : 1;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex.ToString());
+            Environment.ExitCode = 1;
+        }
     }
 }

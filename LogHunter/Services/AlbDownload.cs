@@ -191,10 +191,7 @@ public static class AlbDownload
         // -----------------------------
         // Run folder under ALB
         // -----------------------------
-        var runFolderName = $"{cfg.Name}_{startUtc:yyyyMMdd_HHmm}Z_to_{endUtc:yyyyMMdd_HHmm}Z";
-        runFolderName = SanitizeFileName(runFolderName);
-
-        var runFolder = Path.Combine(AppFolders.ALB, runFolderName);
+        var runFolder = BuildRunFolder(cfg.Name, startUtc, endUtc);
         Directory.CreateDirectory(runFolder);
 
         ConsoleEx.Info($"Run folder: {runFolder}");
@@ -362,6 +359,312 @@ public static class AlbDownload
         ConsoleEx.Pause("Press Enter to return...");
     }
 
+    internal static IReadOnlyList<AlbDownloadConfigSummary> GetSavedConfigSummaries()
+        => LoadSavedConfigs()
+            .Select(c => new AlbDownloadConfigSummary(
+                c.Name,
+                c.Bucket,
+                c.AlbId,
+                c.Scope == AlbScope.Internal ? "Internal" : "External",
+                c.AccountId,
+                c.Region,
+                c.IsSentry,
+                c.LastUsedUtc))
+            .ToList();
+
+    internal static async Task<AlbDownloadRunResult> RunDownloadAsync(
+        AlbDownloadRequest request,
+        Action<AlbDownloadRunProgress>? reportProgress = null,
+        CancellationToken cancellationToken = default)
+    {
+        AppFolders.Ensure();
+        EnsureConfigsFolder();
+
+        var awsExe = ResolveAwsExePath();
+        if (string.IsNullOrWhiteSpace(awsExe))
+        {
+            return new AlbDownloadRunResult(
+                Success: false,
+                Message: "AWS CLI (aws.exe) was not found. Install AWS CLI v2 or ensure it is available on PATH.",
+                ConfigName: string.Empty,
+                PrefixRoot: string.Empty,
+                AlbKey: string.Empty,
+                RunFolder: AppFolders.ALB,
+                DaysRequested: 0,
+                DaySyncFailures: 0,
+                DownloadedGzipFiles: 0,
+                PrunedFiles: 0,
+                UnknownTimestampFilesKept: 0,
+                KeptForExtraction: 0,
+                ExtractedLogFiles: 0,
+                ExtractFailedCount: 0,
+                FinalLogFileCount: 0,
+                SampleLogFiles: Array.Empty<string>());
+        }
+
+        var credsParsed = ParseAwsEnvVars(request.AwsEnvironmentText ?? string.Empty);
+        if (!credsParsed.IsValid ||
+            string.IsNullOrWhiteSpace(credsParsed.AccessKeyId) ||
+            string.IsNullOrWhiteSpace(credsParsed.SecretAccessKey) ||
+            string.IsNullOrWhiteSpace(credsParsed.SessionToken))
+        {
+            return new AlbDownloadRunResult(
+                Success: false,
+                Message: "AWS credentials could not be parsed. Paste the 3 AWS environment lines for access key, secret key, and session token.",
+                ConfigName: string.Empty,
+                PrefixRoot: string.Empty,
+                AlbKey: string.Empty,
+                RunFolder: AppFolders.ALB,
+                DaysRequested: 0,
+                DaySyncFailures: 0,
+                DownloadedGzipFiles: 0,
+                PrunedFiles: 0,
+                UnknownTimestampFilesKept: 0,
+                KeptForExtraction: 0,
+                ExtractedLogFiles: 0,
+                ExtractFailedCount: 0,
+                FinalLogFileCount: 0,
+                SampleLogFiles: Array.Empty<string>());
+        }
+
+        if (request.EndUtc < request.StartUtc)
+        {
+            return new AlbDownloadRunResult(
+                Success: false,
+                Message: "End time must be greater than or equal to start time.",
+                ConfigName: string.Empty,
+                PrefixRoot: string.Empty,
+                AlbKey: string.Empty,
+                RunFolder: AppFolders.ALB,
+                DaysRequested: 0,
+                DaySyncFailures: 0,
+                DownloadedGzipFiles: 0,
+                PrunedFiles: 0,
+                UnknownTimestampFilesKept: 0,
+                KeptForExtraction: 0,
+                ExtractedLogFiles: 0,
+                ExtractFailedCount: 0,
+                FinalLogFileCount: 0,
+                SampleLogFiles: Array.Empty<string>());
+        }
+
+        if (!TryResolveConfigForRequest(request, out var cfg, out var configError) || cfg is null)
+        {
+            return new AlbDownloadRunResult(
+                Success: false,
+                Message: configError ?? "Unable to resolve the ALB configuration.",
+                ConfigName: string.Empty,
+                PrefixRoot: string.Empty,
+                AlbKey: string.Empty,
+                RunFolder: AppFolders.ALB,
+                DaysRequested: 0,
+                DaySyncFailures: 0,
+                DownloadedGzipFiles: 0,
+                PrunedFiles: 0,
+                UnknownTimestampFilesKept: 0,
+                KeptForExtraction: 0,
+                ExtractedLogFiles: 0,
+                ExtractFailedCount: 0,
+                FinalLogFileCount: 0,
+                SampleLogFiles: Array.Empty<string>());
+        }
+
+        try
+        {
+            cfg.LastUsedUtc = DateTime.UtcNow;
+            SaveConfig(cfg);
+        }
+        catch
+        {
+            // Keep the download flow running even if the last-used stamp cannot be persisted.
+        }
+
+        var creds = new AwsCreds(
+            credsParsed.AccessKeyId!,
+            credsParsed.SecretAccessKey!,
+            credsParsed.SessionToken!);
+
+        var prefixRoot = cfg.IsSentry ? "sentry" : "standard";
+        var albKey = cfg.Scope == AlbScope.Internal ? $"{cfg.AlbId}-internal" : cfg.AlbId;
+        var runFolder = BuildRunFolder(cfg.Name, request.StartUtc, request.EndUtc);
+        Directory.CreateDirectory(runFolder);
+
+        var days = EachDayUtc(request.StartUtc.Date, request.EndUtc.Date).ToList();
+        reportProgress?.Invoke(new AlbDownloadRunProgress("planning", $"Prepared download plan for {days.Count} day(s).", 0, days.Count));
+
+        var daySyncFailures = 0;
+        for (var i = 0; i < days.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var day = days[i];
+            var dayPrefix =
+                $"{prefixRoot}/{albKey}/AWSLogs/{cfg.AccountId}/elasticloadbalancing/{cfg.Region}/{day:yyyy}/{day:MM}/{day:dd}/";
+
+            var s3Uri = $"s3://{cfg.Bucket}/{dayPrefix}";
+            reportProgress?.Invoke(new AlbDownloadRunProgress(
+                "downloading",
+                $"Downloading {day:yyyy-MM-dd} from {cfg.Bucket}.",
+                i + 1,
+                days.Count));
+
+            var ok = await AwsSyncPrefixAsync(
+                awsExePath: awsExe,
+                s3Uri: s3Uri,
+                destFolder: runFolder,
+                creds: creds).ConfigureAwait(false);
+
+            if (!ok)
+                daySyncFailures++;
+        }
+
+        var allGz = Directory.Exists(runFolder)
+            ? Directory.EnumerateFiles(runFolder, "*.gz", SearchOption.AllDirectories).ToList()
+            : new List<string>();
+
+        if (allGz.Count == 0)
+        {
+            return new AlbDownloadRunResult(
+                Success: false,
+                Message: "No .gz files were downloaded for the selected timeframe.",
+                ConfigName: cfg.Name,
+                PrefixRoot: prefixRoot,
+                AlbKey: albKey,
+                RunFolder: runFolder,
+                DaysRequested: days.Count,
+                DaySyncFailures: daySyncFailures,
+                DownloadedGzipFiles: 0,
+                PrunedFiles: 0,
+                UnknownTimestampFilesKept: 0,
+                KeptForExtraction: 0,
+                ExtractedLogFiles: 0,
+                ExtractFailedCount: 0,
+                FinalLogFileCount: 0,
+                SampleLogFiles: Array.Empty<string>());
+        }
+
+        reportProgress?.Invoke(new AlbDownloadRunProgress(
+            "pruning",
+            $"Pruning {allGz.Count} downloaded file(s) to the selected UTC range."));
+
+        var kept = 0;
+        var deleted = 0;
+        var unknown = 0;
+
+        foreach (var gz in allGz)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var stamp = TryParseAlbTimestampUtc(Path.GetFileName(gz));
+            if (!stamp.HasValue)
+            {
+                unknown++;
+                kept++;
+                continue;
+            }
+
+            var intervalEnd = stamp.Value;
+            var intervalStart = intervalEnd.AddMinutes(-5);
+            var overlaps = intervalStart <= request.EndUtc && intervalEnd >= request.StartUtc;
+
+            if (!overlaps)
+            {
+                try
+                {
+                    File.Delete(gz);
+                    deleted++;
+                }
+                catch
+                {
+                    kept++;
+                }
+            }
+            else
+            {
+                kept++;
+            }
+        }
+
+        var gzFiles = Directory.EnumerateFiles(runFolder, "*.gz", SearchOption.AllDirectories).ToList();
+        if (gzFiles.Count == 0)
+        {
+            return new AlbDownloadRunResult(
+                Success: false,
+                Message: "After pruning, no downloaded files remain within the selected UTC window.",
+                ConfigName: cfg.Name,
+                PrefixRoot: prefixRoot,
+                AlbKey: albKey,
+                RunFolder: runFolder,
+                DaysRequested: days.Count,
+                DaySyncFailures: daySyncFailures,
+                DownloadedGzipFiles: allGz.Count,
+                PrunedFiles: deleted,
+                UnknownTimestampFilesKept: unknown,
+                KeptForExtraction: 0,
+                ExtractedLogFiles: 0,
+                ExtractFailedCount: 0,
+                FinalLogFileCount: 0,
+                SampleLogFiles: Array.Empty<string>());
+        }
+
+        reportProgress?.Invoke(new AlbDownloadRunProgress(
+            "extracting",
+            $"Extracting {gzFiles.Count} compressed file(s)."));
+
+        var extracted = 0;
+        var extractFailed = 0;
+
+        foreach (var gzPath in gzFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                var outPath = gzPath[..^3];
+                await ExtractGzipAsync(gzPath, outPath).ConfigureAwait(false);
+                File.Delete(gzPath);
+                extracted++;
+            }
+            catch
+            {
+                extractFailed++;
+            }
+        }
+
+        var finalLogs = Directory.EnumerateFiles(runFolder, "*.log", SearchOption.AllDirectories)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        reportProgress?.Invoke(new AlbDownloadRunProgress(
+            "completed",
+            $"Download completed with {finalLogs.Count} log file(s) ready in {runFolder}.",
+            days.Count,
+            days.Count));
+
+        return new AlbDownloadRunResult(
+            true,
+            "Download completed.",
+            cfg.Name,
+            prefixRoot,
+            albKey,
+            runFolder,
+            days.Count,
+            daySyncFailures,
+            allGz.Count,
+            deleted,
+            unknown,
+            gzFiles.Count,
+            extracted,
+            extractFailed,
+            finalLogs.Count,
+            finalLogs
+                .Select(Path.GetFileName)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Take(20)
+                .Cast<string>()
+                .ToList());
+    }
+
     // =========================
     // Config Flow
     // =========================
@@ -374,37 +677,9 @@ public static class AlbDownload
 
     private static AlbConfig? PickExistingConfig()
     {
-        EnsureConfigsFolder();
-
-        var files = Directory.EnumerateFiles(GetConfigsFolder(), "*.json", SearchOption.TopDirectoryOnly)
-            .OrderByDescending(File.GetLastWriteTimeUtc)
-            .ToList();
-
-        if (files.Count == 0)
+        var ordered = LoadSavedConfigs();
+        if (ordered.Count == 0)
             return null;
-
-        var loaded = new List<AlbConfig>();
-        foreach (var f in files)
-        {
-            try
-            {
-                var json = File.ReadAllText(f, Encoding.UTF8);
-                var c = JsonSerializer.Deserialize<AlbConfig>(json, JsonOpts);
-                if (c is not null && !string.IsNullOrWhiteSpace(c.Name))
-                    loaded.Add(c);
-            }
-            catch
-            {
-                // ignore unreadable configs
-            }
-        }
-
-        if (loaded.Count == 0)
-            return null;
-
-        var ordered = loaded
-            .OrderByDescending(c => c.LastUsedUtc)
-            .ToList();
 
         var items = ordered
             .Select(c =>
@@ -436,6 +711,114 @@ public static class AlbDownload
             return null; // cancel
 
         return ordered[idx];
+    }
+
+    private static List<AlbConfig> LoadSavedConfigs()
+    {
+        EnsureConfigsFolder();
+
+        var files = Directory.EnumerateFiles(GetConfigsFolder(), "*.json", SearchOption.TopDirectoryOnly)
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .ToList();
+
+        if (files.Count == 0)
+            return new List<AlbConfig>();
+
+        var loaded = new List<AlbConfig>();
+        foreach (var f in files)
+        {
+            try
+            {
+                var json = File.ReadAllText(f, Encoding.UTF8);
+                var c = JsonSerializer.Deserialize<AlbConfig>(json, JsonOpts);
+                if (c is not null && !string.IsNullOrWhiteSpace(c.Name))
+                    loaded.Add(c);
+            }
+            catch
+            {
+                // ignore unreadable configs
+            }
+        }
+
+        return loaded
+            .OrderByDescending(c => c.LastUsedUtc)
+            .ToList();
+    }
+
+    private static bool TryResolveConfigForRequest(AlbDownloadRequest request, out AlbConfig? cfg, out string? error)
+    {
+        cfg = null;
+        error = null;
+
+        if (request.UseSavedConfig)
+        {
+            if (string.IsNullOrWhiteSpace(request.SavedConfigName))
+            {
+                error = "Select a saved configuration or switch to creating a new one.";
+                return false;
+            }
+
+            cfg = LoadSavedConfigs()
+                .FirstOrDefault(x => string.Equals(x.Name, request.SavedConfigName.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            if (cfg is null)
+            {
+                error = $"Saved configuration '{request.SavedConfigName}' was not found.";
+                return false;
+            }
+
+            return true;
+        }
+
+        var bucket = request.Bucket?.Trim();
+        var albId = request.AlbId?.Trim();
+        var accountId = request.AccountId?.Trim();
+        var region = request.Region?.Trim();
+
+        if (string.IsNullOrWhiteSpace(bucket))
+        {
+            error = "Bucket is required for a new configuration.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(albId))
+        {
+            error = "ALB identifier is required for a new configuration.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(accountId))
+        {
+            error = "AWS account ID is required for a new configuration.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(region))
+            region = TryDeriveRegionFromBucket(bucket);
+
+        if (string.IsNullOrWhiteSpace(region))
+        {
+            error = "Region is required when it cannot be derived from the bucket name.";
+            return false;
+        }
+
+        var scope = request.UseInternalScope ? AlbScope.Internal : AlbScope.Normal;
+        var defaultName = scope == AlbScope.Internal ? $"{albId}-internal" : albId;
+        var configName = string.IsNullOrWhiteSpace(request.ConfigName) ? defaultName : request.ConfigName.Trim();
+
+        cfg = new AlbConfig
+        {
+            Name = SanitizeFileName(configName),
+            Bucket = bucket,
+            AlbId = albId,
+            Scope = scope,
+            AccountId = accountId,
+            Region = region,
+            IsSentry = request.IsSentry,
+            LastUsedUtc = DateTime.UtcNow
+        };
+
+        return true;
     }
 
     private static AlbConfig? CreateNewConfig()
@@ -530,6 +913,13 @@ public static class AlbDownload
 
     private static string GetConfigPath(string name)
         => Path.Combine(GetConfigsFolder(), $"{SanitizeFileName(name)}.json");
+
+    internal static string BuildRunFolder(string configName, DateTime startUtc, DateTime endUtc)
+    {
+        var profileFolder = Path.Combine(AppFolders.ALB, SanitizeFileName(configName));
+        var rangeFolder = SanitizeFileName($"{startUtc:yyyyMMdd_HHmm}Z_to_{endUtc:yyyyMMdd_HHmm}Z");
+        return Path.Combine(profileFolder, rangeFolder);
+    }
 
     private static string SanitizeFileName(string s)
     {
