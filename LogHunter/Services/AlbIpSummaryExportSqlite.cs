@@ -28,7 +28,11 @@ public static class AlbIpSummaryExportSqlite
 
             using (var pragma = _connection.CreateCommand())
             {
-                pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
+                pragma.CommandText = @"
+PRAGMA journal_mode=MEMORY;
+PRAGMA synchronous=OFF;
+PRAGMA temp_store=MEMORY;
+PRAGMA locking_mode=EXCLUSIVE;";
                 pragma.ExecuteNonQuery();
             }
 
@@ -36,7 +40,7 @@ public static class AlbIpSummaryExportSqlite
             {
                 create.CommandText = @"
 CREATE TABLE Hits (
-    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    Id INTEGER PRIMARY KEY,
     TimestampUtc TEXT NOT NULL,
     ClientIp TEXT NOT NULL,
     Method TEXT,
@@ -97,6 +101,7 @@ INSERT INTO Hits (
             AddParameter("$ResponseProcessingTimeSeconds");
             AddParameter("$ActionsExecuted");
             AddParameter("$UserAgent");
+            _insert.Prepare();
         }
 
         public void WriteRows(IEnumerable<AlbIpSummaryScanner.AlbIpSummaryRow> rows)
@@ -138,6 +143,10 @@ CREATE INDEX idx_hits_target_endpoint ON Hits(TargetEndpoint);
 CREATE INDEX idx_hits_method ON Hits(Method);
 CREATE INDEX idx_hits_timestamp_elb_fe ON Hits(TimestampUtc, ElbResponseCode, FeResponseCode);";
             idx.ExecuteNonQuery();
+
+            using var analyze = _connection.CreateCommand();
+            analyze.CommandText = "ANALYZE;";
+            analyze.ExecuteNonQuery();
 
             _completed = true;
         }
