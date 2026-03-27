@@ -6,8 +6,20 @@ At the end of a coding session:
 - Never merge to `main`.
 - Only merge into `main` when explicitly asked to do it.
 - Only produce a Release build to `C:\espaces` when explicitly asked to do it.
-- If asked to publish, produce the executable as `C:\espaces\LogHunter2.0.exe`.
-- If asked to publish and `C:\espaces\LogHunter2.0.exe` is in use and cannot be replaced, publish the executable as `C:\espaces\LogHunter2.0-new.exe` instead.
+
+## Release Publish Rules
+
+- The executable naming and publish behavior must follow the current branch family.
+- If the working branch is `main`, or a branch derived from `main`, the Release executable name is `LogHunter.exe`.
+- If the working branch is `LogHunter-2.0`, or a branch derived from `LogHunter-2.0`, the Release executable name is `LogHunter2.0.exe`.
+- Release publishes only happen when explicitly requested by the user.
+- The publish flow itself must produce the correct final executable name for that branch line.
+- Do NOT solve naming by publishing one executable and then copying or renaming it afterward.
+- Do NOT leave two equivalent executables in `C:\espaces`.
+- There must be exactly one final deliverable artifact in `C:\espaces` for the requested publish.
+- If the target executable for the current branch line is in use and cannot be replaced, publish a single fallback artifact using the same branch line naming with a `-new` suffix:
+  - `LogHunter-new.exe` for `main` / `main`-derived branches
+  - `LogHunter2.0-new.exe` for `LogHunter-2.0` / `LogHunter-2.0`-derived branches
 
 ## UI / UX Design Guardrails (LogHunter 2.0)
 
