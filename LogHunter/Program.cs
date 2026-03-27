@@ -41,7 +41,7 @@ sealed class BellDetectingWriter : TextWriter
 internal static class Program
 {
     private static volatile bool _ctrlCRequested;
-    private const bool DefaultToWebMode = true;
+    private const bool DefaultToWebMode = false;
 
     private static async Task Main(string[] args)
     {
