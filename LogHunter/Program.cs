@@ -150,18 +150,6 @@ internal static class Program
             return;
         }
 
-        if (consoleMode && !string.IsNullOrWhiteSpace(viewerSqlitePath))
-        {
-            Console.WriteLine("--console cannot be combined with --viewer-sqlite.");
-            return;
-        }
-
-        if (!consoleMode && !string.IsNullOrWhiteSpace(viewerSqlitePath))
-        {
-            Console.WriteLine("Web mode cannot be combined with --viewer-sqlite.");
-            return;
-        }
-
         Console.CancelKeyPress += (_, e) =>
         {
             e.Cancel = true;
