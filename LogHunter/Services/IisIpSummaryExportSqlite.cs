@@ -28,7 +28,11 @@ public static class IisIpSummaryExportSqlite
 
             using (var pragma = _connection.CreateCommand())
             {
-                pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
+                pragma.CommandText = @"
+PRAGMA journal_mode=MEMORY;
+PRAGMA synchronous=OFF;
+PRAGMA temp_store=MEMORY;
+PRAGMA locking_mode=EXCLUSIVE;";
                 pragma.ExecuteNonQuery();
             }
 
@@ -36,7 +40,7 @@ public static class IisIpSummaryExportSqlite
             {
                 create.CommandText = @"
 CREATE TABLE Hits (
-    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    Id INTEGER PRIMARY KEY,
     TimestampUtc TEXT NOT NULL,
     ClientIp TEXT NOT NULL,
     Method TEXT,
@@ -105,6 +109,7 @@ INSERT INTO Hits (
             AddParameter("$ScBytes");
             AddParameter("$UserAgent");
             AddParameter("$Referer");
+            _insert.Prepare();
         }
 
         public void WriteRows(IEnumerable<IisIpSummaryScanner.IisIpSummaryRow> rows)
@@ -147,6 +152,10 @@ CREATE INDEX idx_hits_uri_stem ON Hits(UriStem);
 CREATE INDEX idx_hits_method ON Hits(Method);
 CREATE INDEX idx_hits_timestamp_status ON Hits(TimestampUtc, ScStatusCode);";
             idx.ExecuteNonQuery();
+
+            using var analyze = _connection.CreateCommand();
+            analyze.CommandText = "ANALYZE;";
+            analyze.ExecuteNonQuery();
 
             _completed = true;
         }
