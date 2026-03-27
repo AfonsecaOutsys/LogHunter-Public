@@ -33,7 +33,7 @@ internal static class AlbPageBuilder
 
         if (string.Equals(path, "/alb/download-logs", StringComparison.OrdinalIgnoreCase))
         {
-            page = new WebPageDefinition("/alb/download-logs", "/alb", "ALB", "ALB / Download logs from S3", "Option 1", "Run the existing ALB S3 download workflow from the browser and monitor its progress.");
+            page = new WebPageDefinition("/alb/download-logs", "/alb", "ALB", "ALB / Download logs from S3", "Download Workflow", "Run the ALB S3 download workflow from the browser and monitor its progress.");
             mainContent = BuildDownloadContent(context);
             extraScriptPath = "/assets/alb.js";
             return true;
@@ -48,7 +48,7 @@ internal static class AlbPageBuilder
             return false;
         }
 
-        page = new WebPageDefinition(option.Path, "/alb", "ALB", $"ALB / {option.Title}", $"Option {option.Number}", option.Description);
+        page = new WebPageDefinition(option.Path, "/alb", "ALB", $"ALB / {option.Title}", "Workflow", option.Description);
         mainContent = BuildPlaceholderContent(option);
         extraScriptPath = null;
         return true;
@@ -105,7 +105,7 @@ internal static class AlbPageBuilder
         <section class="hero">
           <div class="hero-grid">
             <div>
-              <div class="eyebrow">ALB Option 1</div>
+              <div class="eyebrow">Download Workflow</div>
               <h1>Download logs from S3</h1>
               <p>This page wraps the existing ALB download flow for the browser. It reuses the same ALB workspace structure, config persistence, AWS CLI usage, automatic region derivation from the bucket, pruning, and extraction behavior as the console workflow.</p>
             </div>
@@ -123,7 +123,7 @@ internal static class AlbPageBuilder
 
         <section class="module-two-column">
           <section class="panel form-panel">
-            <h2>Run option 1</h2>
+            <h2>Download logs from S3</h2>
             <div id="albDownloadError" class="inline-error" hidden></div>
 
             <div class="field-group">
@@ -228,7 +228,7 @@ internal static class AlbPageBuilder
             </div>
 
             <div class="button-row">
-              <button id="albDownloadStart" class="button-link primary button-like" type="button">Run option 1</button>
+              <button id="albDownloadStart" class="button-link primary button-like" type="button">Start download</button>
             </div>
           </section>
 
@@ -306,29 +306,28 @@ internal static class AlbPageBuilder
       <section class="stack">
         <section class="hero">
           <div class="page-header">
-            <div class="eyebrow">Option {{option.Number}}</div>
+            <div class="eyebrow">Workflow</div>
             <h1>{{Html(option.Title)}}</h1>
             <p class="page-copy">{{Html(option.Description)}}</p>
             <div class="kicker-row">
-              <div class="kicker">Coming next</div>
-              <div class="kicker">Structure preserved</div>
-              <div class="kicker">Console workflow still available</div>
+              <div class="kicker">Web route ready</div>
+              <div class="kicker">Console workflow available</div>
             </div>
           </div>
         </section>
 
         <section class="placeholder-grid">
           <div class="placeholder-card">
-            <h3>Current status</h3>
-            <p>This ALB option is intentionally still a placeholder in the web UI. The route exists now so future migration can plug into a stable module structure.</p>
+            <h3>Web page</h3>
+            <p>This workflow route is in place so the ALB module can keep a stable structure as each workflow is wired into the browser UI.</p>
           </div>
           <div class="placeholder-card">
-            <h3>Why it is visible already</h3>
-            <p>Keeping the full submenu visible prevents the ALB module from fragmenting as each workflow is ported one at a time.</p>
+            <h3>Current path</h3>
+            <p>The browser page is not wired yet, but the existing console implementation is still available for this workflow.</p>
           </div>
           <div class="placeholder-card">
-            <h3>What remains available</h3>
-            <p>The console ALB menu still exposes the original implementation for this option until the matching web flow is ready.</p>
+            <h3>Next step</h3>
+            <p>When this workflow is migrated, the route and layout are already in place for the actual inputs, progress, and results.</p>
           </div>
         </section>
       </section>
@@ -342,7 +341,7 @@ internal static class AlbPageBuilder
             return $$"""
             <a class="option-card option-card--action" href="{{Html(option.Path)}}">
               <div class="option-card-head">
-                <span class="option-number">Option {{option.Number}}</span>
+                <span class="option-number">Workflow</span>
               </div>
               <h3>{{Html(option.Title)}}</h3>
               <p>{{Html(option.Description)}}</p>
@@ -353,7 +352,7 @@ internal static class AlbPageBuilder
         return $$"""
             <div class="option-card option-card--disabled" aria-disabled="true">
               <div class="option-card-head">
-                <span class="option-number">Option {{option.Number}}</span>
+                <span class="option-number">Workflow</span>
               </div>
               <h3>{{Html(option.Title)}}</h3>
               <p>{{Html(option.Description)}}</p>
