@@ -28,6 +28,10 @@ public sealed class AlbMenu : IMenu
                 "Enter one or more client IPs, chart per-minute ELB/FE response activity per IP, and review all results in one shared HTML report."),
 
             new ConsoleEx.MenuItem(
+                "5xx while backend succeeded",
+                "Find ALB requests where the customer-facing response was 5xx but the backend/target returned 2xx/3xx.\nExports a console summary plus Excel hits/details."),
+
+            new ConsoleEx.MenuItem(
                 "Top 50 IPs overall",
                 "Scan logs and show the top 50 client IPs across the selected time range."),
 
@@ -77,30 +81,34 @@ public sealed class AlbMenu : IMenu
                 return this;
 
             case 3:
-                await AlbOptions.Top50IpsOverallAsync(_session.Root).ConfigureAwait(false);
+                await AlbOptions.Alb5xxWhileBackendSucceededAsync(_session.Root).ConfigureAwait(false);
                 return this;
 
             case 4:
-                await AlbOptions.Top50IpUriNoQueryAsync(_session.Root).ConfigureAwait(false);
+                await AlbOptions.Top50IpsOverallAsync(_session.Root).ConfigureAwait(false);
                 return this;
 
             case 5:
-                await AlbOptions.Top50RequestsByAvgDurationNoQueryAsync(_session.Root).ConfigureAwait(false);
+                await AlbOptions.Top50IpUriNoQueryAsync(_session.Root).ConfigureAwait(false);
                 return this;
 
             case 6:
-                await AlbOptions.TrackRequestsPerIpPer5MinAsync(_session.Root).ConfigureAwait(false);
+                await AlbOptions.Top50RequestsByAvgDurationNoQueryAsync(_session.Root).ConfigureAwait(false);
                 return this;
 
             case 7:
-                await AlbOptions.WafBlockedSummaryAsync(_session.Root).ConfigureAwait(false);
+                await AlbOptions.TrackRequestsPerIpPer5MinAsync(_session.Root).ConfigureAwait(false);
                 return this;
 
             case 8:
-                await AlbOptions.WafBlockedPerMinuteChartAsync(_session.Root).ConfigureAwait(false);
+                await AlbOptions.WafBlockedSummaryAsync(_session.Root).ConfigureAwait(false);
                 return this;
 
             case 9:
+                await AlbOptions.WafBlockedPerMinuteChartAsync(_session.Root).ConfigureAwait(false);
+                return this;
+
+            case 10:
                 return new MainMenu(_session);
 
             default:
