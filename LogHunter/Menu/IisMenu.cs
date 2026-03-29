@@ -25,8 +25,8 @@ public sealed class IisMenu : IMenu
                 "Enter one client IP, chart per-minute IIS response activity, and review matching requests in a detailed HTML report."),
 
             new ConsoleEx.MenuItem(
-                "4xx -> pick suspicious IPs -> pivot to 2xx/3xx",
-                "Scan 4xx responses, show top IPs, select suspicious entries,\nthen export and summarize their 2xx/3xx traffic."),
+                "Status Pivot",
+                "Filter error responses by status/range, narrow to an app if needed,\nthen pivot the selected IPs into 2xx/3xx traffic."),
 
             new ConsoleEx.MenuItem(
                 $"Burst patterns (saved IPs: {savedBurstIps})",
