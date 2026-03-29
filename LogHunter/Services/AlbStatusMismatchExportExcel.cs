@@ -11,6 +11,7 @@ public static class AlbStatusMismatchExportExcel
     private static readonly XLColor HeaderFill = XLColor.FromHtml("#17324D");
     private static readonly XLColor SectionFill = XLColor.FromHtml("#DCEAF7");
     private static readonly XLColor CardFill = XLColor.FromHtml("#F7FAFC");
+    private static readonly XLColor BorderColor = XLColor.FromHtml("#C7D6E5");
 
     public static void Export(string outFile, AlbStatusMismatchScanner.ScanResult result)
     {
@@ -41,10 +42,11 @@ public static class AlbStatusMismatchExportExcel
         StyleMetricBlock(ws.Range(summaryStartRow, 1, row - 1, 2));
         row += 1;
 
-        row = WriteCountTable(ws, row, 1, "Top status pairs", "StatusPair", result.TopStatusPairs(15)) + 1;
-        row = WriteCountTable(ws, row, 1, "Top URIs", "URI", result.TopUris(25)) + 1;
-        row = WriteCountTable(ws, row, 1, "Top target endpoints", "TargetEndpoint", result.TopTargetEndpoints(25)) + 1;
-        _ = WriteCountTable(ws, row, 1, "Top client IPs", "ClientIp", result.TopClientIps(25));
+        row = WriteStatusBreakdownTable(ws, row, 1, result) + 2;
+        row = WriteCountTable(ws, row, 1, "Top status pairs", "StatusPair", "AlbStatusMismatchTopStatusPairs", result.TopStatusPairs(15)) + 2;
+        row = WriteCountTable(ws, row, 1, "Top URIs", "URI", "AlbStatusMismatchTopUris", result.TopUris(25)) + 2;
+        row = WriteCountTable(ws, row, 1, "Top target endpoints", "TargetEndpoint", "AlbStatusMismatchTopTargetEndpoints", result.TopTargetEndpoints(25)) + 2;
+        _ = WriteCountTable(ws, row, 1, "Top client IPs", "ClientIp", "AlbStatusMismatchTopClientIps", result.TopClientIps(25));
 
         ws.Columns().AdjustToContents(10, 110);
     }
@@ -105,10 +107,51 @@ public static class AlbStatusMismatchExportExcel
             table.ShowAutoFilter = true;
         }
 
+        ws.Column(1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+        ws.Column(6).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        ws.Column(7).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        ws.Columns(9, 11).Style.NumberFormat.Format = "0.000";
         ws.Columns(1, headers.Length).AdjustToContents(10, 110);
     }
 
-    private static int WriteCountTable(IXLWorksheet ws, int row, int col, string title, string keyHeader, IReadOnlyList<KeyValuePair<string, int>> items)
+    private static int WriteStatusBreakdownTable(IXLWorksheet ws, int row, int col, AlbStatusMismatchScanner.ScanResult result)
+    {
+        ws.Cell(row, col).Value = "Status breakdown";
+        ws.Cell(row, col).Style.Font.Bold = true;
+        ws.Range(row, col, row, col + 1).Style.Fill.BackgroundColor = SectionFill;
+        row++;
+
+        ws.Cell(row, col).Value = "Status";
+        ws.Cell(row, col + 1).Value = "Hits";
+        var headerRange = ws.Range(row, col, row, col + 1);
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Fill.BackgroundColor = HeaderFill;
+        headerRange.Style.Font.FontColor = XLColor.White;
+        row++;
+
+        foreach (var pair in result.TopElbStatuses())
+        {
+            ws.Cell(row, col).Value = $"ELB {pair.Key}";
+            ws.Cell(row, col + 1).Value = pair.Value;
+            row++;
+        }
+
+        foreach (var pair in result.TopTargetStatuses())
+        {
+            ws.Cell(row, col).Value = $"Target {pair.Key}";
+            ws.Cell(row, col + 1).Value = pair.Value;
+            row++;
+        }
+
+        var table = ws.Range(row - (result.TopElbStatuses().Count + result.TopTargetStatuses().Count), col, row - 1, col + 1)
+            .CreateTable("AlbStatusMismatchStatusBreakdown");
+        table.Theme = XLTableTheme.TableStyleMedium2;
+        table.ShowAutoFilter = false;
+        StyleDataBlock(table.DataRange);
+        return row - 1;
+    }
+
+    private static int WriteCountTable(IXLWorksheet ws, int row, int col, string title, string keyHeader, string tableName, IReadOnlyList<KeyValuePair<string, int>> items)
     {
         ws.Cell(row, col).Value = title;
         ws.Cell(row, col).Style.Font.Bold = true;
@@ -117,16 +160,24 @@ public static class AlbStatusMismatchExportExcel
 
         ws.Cell(row, col).Value = keyHeader;
         ws.Cell(row, col + 1).Value = "Hits";
-        ws.Range(row, col, row, col + 1).Style.Font.Bold = true;
+        var headerRange = ws.Range(row, col, row, col + 1);
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Fill.BackgroundColor = HeaderFill;
+        headerRange.Style.Font.FontColor = XLColor.White;
         row++;
 
         if (items.Count == 0)
         {
             ws.Cell(row, col).Value = "(none)";
             ws.Cell(row, col + 1).Value = 0;
+            var emptyTable = ws.Range(row - 1, col, row, col + 1).CreateTable(tableName);
+            emptyTable.Theme = XLTableTheme.TableStyleMedium2;
+            emptyTable.ShowAutoFilter = false;
+            StyleDataBlock(emptyTable.DataRange);
             return row;
         }
 
+        var dataStartRow = row;
         foreach (var item in items)
         {
             ws.Cell(row, col).Value = item.Key;
@@ -134,6 +185,10 @@ public static class AlbStatusMismatchExportExcel
             row++;
         }
 
+        var table = ws.Range(dataStartRow - 1, col, row - 1, col + 1).CreateTable(tableName);
+        table.Theme = XLTableTheme.TableStyleMedium2;
+        table.ShowAutoFilter = true;
+        StyleDataBlock(table.DataRange);
         return row - 1;
     }
 
@@ -148,5 +203,20 @@ public static class AlbStatusMismatchExportExcel
         range.Style.Fill.BackgroundColor = CardFill;
         range.Column(1).Style.Font.Bold = true;
         range.Column(1).Style.Fill.BackgroundColor = SectionFill;
+        range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        range.Style.Border.OutsideBorderColor = BorderColor;
+        range.Style.Border.InsideBorderColor = BorderColor;
+    }
+
+    private static void StyleDataBlock(IXLTableRange? range)
+    {
+        if (range is null)
+            return;
+
+        range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        range.Style.Border.OutsideBorderColor = BorderColor;
+        range.Style.Border.InsideBorderColor = BorderColor;
     }
 }
