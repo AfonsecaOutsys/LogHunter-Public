@@ -90,6 +90,7 @@ internal static class Program
 
             if (a == "--web")
             {
+                consoleMode = false;
                 continue;
             }
 
@@ -251,12 +252,12 @@ internal static class Program
         Console.WriteLine($"LogHunter {version}");
         Console.WriteLine();
         Console.WriteLine("Usage:");
-        Console.WriteLine("  LogHunter [--root <path>] [--console] [--no-browser] [--viewer-sqlite <path> --viewer-ip <ip>] [--version] [--help]");
+        Console.WriteLine("  LogHunter [--root <path>] [--web] [--console] [--no-browser] [--viewer-sqlite <path> --viewer-ip <ip>] [--version] [--help]");
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --root <path>           Workspace path (defaults to the exe folder)");
-        Console.WriteLine("  --console               Start the legacy console menu instead of the web shell");
-        Console.WriteLine("  --web                   Explicitly start the local web shell on 127.0.0.1 (default)");
+        Console.WriteLine("  --console               Start the legacy console menu");
+        Console.WriteLine("  --web                   Explicitly start the local web shell on 127.0.0.1");
         Console.WriteLine("  --no-browser            In web mode, do not auto-open the default browser");
         Console.WriteLine("  --viewer-sqlite <path>  Start the SQLite viewer for the specified database");
         Console.WriteLine("  --viewer-ip <ip>        Optional selected IP shown in viewer metadata");
