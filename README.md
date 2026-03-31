@@ -45,6 +45,15 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 1.5
+
+- Refines the dark web-shell theme with stronger hierarchy for glossy/OLED and glare-prone viewing conditions.
+- Improves ALB download workflow affordance with clearer panel separation, stronger control contrast, and more obvious form boundaries.
+- Adds client-side required-field validation for the ALB download form, including inline missing-input warnings and red field highlighting before submission.
+- Renames the ALB action to `Open logs folder`, clarifies that `Config name` is optional, and updates the Sentry toggle copy to `Sentry Infrastructure`.
+- Improves ALB IP Summary Excel workbook formatting with stronger section structure and clearer summary treatment.
+- Updates release metadata to `1.5`.
+
 ### 1.4
 
 - Mainline release for the merged ALB and IIS IP Summary work.
