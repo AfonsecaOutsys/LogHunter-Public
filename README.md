@@ -3,7 +3,6 @@
 Download-only repository for the packaged `LogHunter.exe` releases.
 
 This repo is intended for colleagues who only need the executable build.
-Source code, development history, and internal implementation details stay in the main `LogHunter` repository.
 
 ## What to download
 
