@@ -21,6 +21,14 @@ At the end of a coding session:
   - `LogHunter-new.exe` for `main` / `main`-derived branches
   - `LogHunter2.0-new.exe` for `LogHunter-2.0` / `LogHunter-2.0`-derived branches
 
+## Release Notes Workflow
+
+- When a version is bumped or a release is prepared, update the main `README.md` release notes summary for the shipped version.
+- Keep a detailed internal patch note file under `LogHunter/docs/patch-notes/` for the shipped version when the release contains material operator-facing changes.
+- After shipping a patch or hotfix release, also add or update a carry-forward backnote for the next planned minor release under `LogHunter/docs/patch-notes/`.
+- The backnote should capture what shipped in the patch release so it can be folded into the next minor-release notes without the user needing to restate it.
+- Unless the user says otherwise, keep these backnotes internal-only and do not mirror them to `LogHunter-Public`.
+
 ## UI / UX Design Guardrails (LogHunter 2.0)
 
 LogHunter is an operator-focused tool, not a marketing/product UI. All UI decisions must prioritize speed, clarity, and action over explanation.

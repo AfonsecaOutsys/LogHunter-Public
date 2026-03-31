@@ -46,6 +46,12 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 1.5.0.1
+
+- Tightens IIS Burst detection so it is less broad and less noisy on normal clustered traffic.
+- Adds startup update checking against the `LogHunter-Public` releases repo, with a 6-hour snooze when the operator declines the prompt.
+- Keeps the release line on `1.5` while shipping these focused operator-facing improvements as `1.5.0.1`.
+
 ### 1.5
 
 - Refines the dark web-shell theme with stronger hierarchy for glossy/OLED and glare-prone viewing conditions.
