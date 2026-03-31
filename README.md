@@ -54,7 +54,6 @@ Useful options:
 LogHunter.exe --help
 LogHunter.exe --version
 LogHunter.exe --console
-LogHunter.exe --web
 ```
 
 ## Workspace folders
