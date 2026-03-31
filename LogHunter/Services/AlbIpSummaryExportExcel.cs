@@ -9,8 +9,9 @@ namespace LogHunter.Services;
 public static class AlbIpSummaryExportExcel
 {
     private static readonly XLColor HeaderFill = XLColor.FromHtml("#17324D");
-    private static readonly XLColor SectionFill = XLColor.FromHtml("#DCEAF7");
-    private static readonly XLColor CardFill = XLColor.FromHtml("#F7FAFC");
+    private static readonly XLColor TitleFill = XLColor.FromHtml("#DCEAF7");
+    private static readonly XLColor LabelFill = XLColor.FromHtml("#F7FAFC");
+    private static readonly XLColor BorderColor = XLColor.FromHtml("#C7D2E2");
 
     public static void Export(string outFile, IReadOnlyList<AlbIpSummaryScanner.ScanResult> results)
     {
@@ -30,22 +31,17 @@ public static class AlbIpSummaryExportExcel
         ws.Cell(1, 1).Value = "ALB Multi-IP Summary";
         ws.Cell(1, 1).Style.Font.Bold = true;
         ws.Cell(1, 1).Style.Font.FontSize = 14;
-        ws.Cell(1, 1).Style.Fill.BackgroundColor = HeaderFill;
-        ws.Cell(1, 1).Style.Font.FontColor = XLColor.White;
-        ws.Range(1, 1, 1, 8).Merge();
+        var titleRange = ws.Range(1, 1, 1, 8);
+        titleRange.Merge();
+        titleRange.Style.Fill.BackgroundColor = TitleFill;
+        titleRange.Style.Font.FontColor = XLColor.Black;
 
         var headers = new[]
         {
             "IP", "TotalRequests", "FilesWithHits", "FirstHitUtc", "LastHitUtc", "ELB 2xx/3xx", "ELB 4xx/5xx", "FE 4xx/5xx"
         };
 
-        for (int i = 0; i < headers.Length; i++)
-            ws.Cell(3, i + 1).Value = headers[i];
-
-        var headerRange = ws.Range(3, 1, 3, headers.Length);
-        headerRange.Style.Font.Bold = true;
-        headerRange.Style.Fill.BackgroundColor = HeaderFill;
-        headerRange.Style.Font.FontColor = XLColor.White;
+        WriteHeaderRow(ws, 3, headers);
         ws.SheetView.FreezeRows(3);
 
         var row = 4;
@@ -69,6 +65,7 @@ public static class AlbIpSummaryExportExcel
             table.ShowAutoFilter = true;
         }
 
+        ApplyOuterBorder(ws.RangeUsed());
         ws.Columns().AdjustToContents();
     }
 
@@ -79,9 +76,10 @@ public static class AlbIpSummaryExportExcel
         ws.Cell(row, 1).Value = $"ALB IP Summary - {result.RequestedIp}";
         ws.Cell(row, 1).Style.Font.Bold = true;
         ws.Cell(row, 1).Style.Font.FontSize = 14;
-        ws.Cell(row, 1).Style.Fill.BackgroundColor = HeaderFill;
-        ws.Cell(row, 1).Style.Font.FontColor = XLColor.White;
-        ws.Range(row, 1, row, 4).Merge();
+        var titleRange = ws.Range(row, 1, row, 4);
+        titleRange.Merge();
+        titleRange.Style.Fill.BackgroundColor = TitleFill;
+        titleRange.Style.Font.FontColor = XLColor.Black;
         row += 2;
 
         var summaryStartRow = row;
@@ -102,6 +100,7 @@ public static class AlbIpSummaryExportExcel
 
         _ = WriteTopCounts(ws, row, 1, "Top 10 target endpoints", result.TopTargetEndpoints(10));
 
+        ws.SheetView.FreezeRows(1);
         ws.Columns().AdjustToContents(10, 80);
     }
 
@@ -124,13 +123,7 @@ public static class AlbIpSummaryExportExcel
             "UserAgent"
         };
 
-        for (int i = 0; i < headers.Length; i++)
-            ws.Cell(1, i + 1).Value = headers[i];
-
-        var headerRange = ws.Range(1, 1, 1, headers.Length);
-        headerRange.Style.Font.Bold = true;
-        headerRange.Style.Fill.BackgroundColor = HeaderFill;
-        headerRange.Style.Font.FontColor = XLColor.White;
+        WriteHeaderRow(ws, 1, headers);
         ws.SheetView.FreezeRows(1);
 
         int row = 2;
@@ -162,14 +155,25 @@ public static class AlbIpSummaryExportExcel
             table.ShowAutoFilter = true;
         }
 
+        ApplyOuterBorder(ws.RangeUsed());
         ws.Columns(1, headers.Length).AdjustToContents(10, 80);
     }
 
     private static void WriteStatusTable(IXLWorksheet ws, int row, int col, string title, AlbIpSummaryScanner.StatusGroupCounts counts)
     {
         ws.Cell(row, col).Value = title;
-        ws.Cell(row, col).Style.Font.Bold = true;
-        ws.Range(row, col, row, col + 1).Style.Fill.BackgroundColor = SectionFill;
+        var titleRange = ws.Range(row, col, row, col + 1);
+        titleRange.Merge();
+        titleRange.Style.Font.Bold = true;
+        titleRange.Style.Fill.BackgroundColor = TitleFill;
+        row++;
+
+        ws.Cell(row, col).Value = "Class";
+        ws.Cell(row, col + 1).Value = "Hits";
+        var headerRange = ws.Range(row, col, row, col + 1);
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Fill.BackgroundColor = HeaderFill;
+        headerRange.Style.Font.FontColor = XLColor.White;
         row++;
 
         ws.Cell(row, col).Value = "2xx/3xx";
@@ -180,17 +184,25 @@ public static class AlbIpSummaryExportExcel
         row++;
         ws.Cell(row, col).Value = "5xx";
         ws.Cell(row, col + 1).Value = counts.S5xx;
+
+        ApplySectionBorder(ws.Range(row - 4, col, row, col + 1));
     }
 
     private static void WriteMismatchTable(IXLWorksheet ws, int row, int col, AlbIpSummaryScanner.ScanResult result)
     {
         ws.Cell(row, col).Value = "Interesting Mismatches";
-        ws.Cell(row, col).Style.Font.Bold = true;
+        var titleRange = ws.Range(row, col, row, col + 1);
+        titleRange.Merge();
+        titleRange.Style.Font.Bold = true;
+        titleRange.Style.Fill.BackgroundColor = TitleFill;
         row++;
 
         ws.Cell(row, col).Value = "Signal";
         ws.Cell(row, col + 1).Value = "Hits";
-        ws.Range(row, col, row, col + 1).Style.Font.Bold = true;
+        var headerRange = ws.Range(row, col, row, col + 1);
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Fill.BackgroundColor = HeaderFill;
+        headerRange.Style.Font.FontColor = XLColor.White;
         row++;
 
         ws.Cell(row, col).Value = "FE Response 5xx while ELB Response is 2xx/3xx";
@@ -204,23 +216,32 @@ public static class AlbIpSummaryExportExcel
         row++;
         ws.Cell(row, col).Value = "ELB Response 4xx while FE Response is 2xx/3xx";
         ws.Cell(row, col + 1).Value = result.Elb4xxWhileFe2xx3xx;
+
+        ApplySectionBorder(ws.Range(row - 5, col, row, col + 1));
     }
 
     private static int WriteTopCounts(IXLWorksheet ws, int row, int col, string title, IReadOnlyList<KeyValuePair<string, int>> items)
     {
         ws.Cell(row, col).Value = title;
-        ws.Cell(row, col).Style.Font.Bold = true;
+        var titleRange = ws.Range(row, col, row, col + 1);
+        titleRange.Merge();
+        titleRange.Style.Font.Bold = true;
+        titleRange.Style.Fill.BackgroundColor = TitleFill;
         row++;
 
         ws.Cell(row, col).Value = "Value";
         ws.Cell(row, col + 1).Value = "Hits";
-        ws.Range(row, col, row, col + 1).Style.Font.Bold = true;
+        var headerRange = ws.Range(row, col, row, col + 1);
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Fill.BackgroundColor = HeaderFill;
+        headerRange.Style.Font.FontColor = XLColor.White;
         row++;
 
         if (items.Count == 0)
         {
             ws.Cell(row, col).Value = "(none)";
             ws.Cell(row, col + 1).Value = 0;
+            ApplySectionBorder(ws.Range(row - 1, col, row, col + 1));
             return row + 1;
         }
 
@@ -231,20 +252,50 @@ public static class AlbIpSummaryExportExcel
             row++;
         }
 
+        ApplySectionBorder(ws.Range(row - items.Count - 1, col, row - 1, col + 1));
         return row + 1;
     }
 
     private static void WriteMetricRow(IXLWorksheet ws, int row, string label, object value)
     {
         ws.Cell(row, 1).Value = label;
+        ws.Cell(row, 1).Style.Font.Bold = true;
+        ws.Cell(row, 1).Style.Fill.BackgroundColor = LabelFill;
         ws.Cell(row, 2).Value = XLCellValue.FromObject(value);
     }
 
     private static void StyleMetricBlock(IXLRange range)
     {
-        range.Style.Fill.BackgroundColor = CardFill;
-        range.Column(1).Style.Font.Bold = true;
-        range.Column(1).Style.Fill.BackgroundColor = SectionFill;
+        ApplySectionBorder(range);
+        range.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+    }
+
+    private static void WriteHeaderRow(IXLWorksheet ws, int row, IReadOnlyList<string> headers)
+    {
+        for (var i = 0; i < headers.Count; i++)
+            ws.Cell(row, i + 1).Value = headers[i];
+
+        var headerRange = ws.Range(row, 1, row, headers.Count);
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Fill.BackgroundColor = HeaderFill;
+        headerRange.Style.Font.FontColor = XLColor.White;
+    }
+
+    private static void ApplySectionBorder(IXLRange range)
+    {
+        range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        range.Style.Border.OutsideBorderColor = BorderColor;
+        range.Style.Border.InsideBorderColor = BorderColor;
+    }
+
+    private static void ApplyOuterBorder(IXLRange? range)
+    {
+        if (range is null)
+            return;
+
+        range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        range.Style.Border.OutsideBorderColor = BorderColor;
     }
 
     private static string BuildSheetName(string ip)
