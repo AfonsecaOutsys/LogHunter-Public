@@ -7,6 +7,7 @@ public static class AppFolders
 {
     // Next to the running EXE (stable for Debug/Release/publish/single-file).
     public static readonly string Base = Path.GetFullPath(AppContext.BaseDirectory);
+    public static readonly string Config = Path.Combine(Base, "config");
 
     public static readonly string ALB = Path.Combine(Base, "ALB");
     public static readonly string ALBConfigs = Path.Combine(ALB, "configs");
@@ -21,6 +22,7 @@ public static class AppFolders
 
     public static void Ensure()
     {
+        Directory.CreateDirectory(Config);
         Directory.CreateDirectory(ALB);
         Directory.CreateDirectory(ALBConfigs);
 

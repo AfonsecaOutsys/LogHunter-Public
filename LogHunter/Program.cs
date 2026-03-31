@@ -200,6 +200,8 @@ internal static class Program
             EmbeddedAssets.EnsureTabulatorAssets(root);
 
             var session = new SessionState(root);
+            var updateCheck = await ReleaseUpdateChecker.CheckAsync(version).ConfigureAwait(false);
+            ReleaseUpdateChecker.ShowStartupNotice(updateCheck, consoleMode);
 
             if (!consoleMode)
             {
