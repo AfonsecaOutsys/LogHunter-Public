@@ -129,6 +129,87 @@ internal static class AlbApi
             return true;
         }
 
+        if (string.Equals(path, "/api/alb/top-ips-top-paths/run", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            AlbTopIpsTopPathsRequest? body;
+            try
+            {
+                body = await ReadJsonAsync<AlbTopIpsTopPathsRequest>(context.Request).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = ex.Message }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            var endpointFragment = body?.EndpointFragment?.Trim();
+            if (string.IsNullOrWhiteSpace(endpointFragment))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = "Endpoint/path fragment is required." }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            var files = AlbScanner.GetLogFiles();
+            if (files.Count == 0)
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = $"No .log files found in: {AppFolders.ALB}" }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            var endpointIpCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            await AlbTopIpsForEndpointWorkflow.ScanEndpointIpCountsAsync(files, endpointFragment, endpointIpCounts).ConfigureAwait(false);
+
+            if (endpointIpCounts.Count == 0)
+            {
+                await WriteJsonAsync(context.Response, new
+                {
+                    ok = true,
+                    result = new
+                    {
+                        endpointFragment,
+                        filesScanned = files.Count,
+                        totalMatchingIps = 0,
+                        topIps = Array.Empty<object>()
+                    },
+                    exportPath = ""
+                }).ConfigureAwait(false);
+                return true;
+            }
+
+            var selectedIps = endpointIpCounts
+                .OrderByDescending(kvp => kvp.Value)
+                .ThenBy(kvp => kvp.Key, StringComparer.Ordinal)
+                .Take(AlbTopIpsForEndpointWorkflow.DefaultTopIpCount)
+                .Select(kvp => kvp.Key)
+                .ToHashSet(StringComparer.Ordinal);
+
+            var uriCountsByIp = new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
+            await AlbTopIpsForEndpointWorkflow.ScanEndpointUriCountsBySelectedIpsAsync(
+                files,
+                endpointFragment,
+                selectedIps,
+                uriCountsByIp).ConfigureAwait(false);
+
+            var result = AlbTopIpsForEndpointWorkflow.BuildResult(
+                endpointFragment,
+                files.Count,
+                endpointIpCounts,
+                uriCountsByIp);
+
+            string? exportPath = null;
+            if (body?.ExportXlsx == true)
+                exportPath = AlbTopIpsForEndpointWorkflow.ExportXlsx(AppFolders.Output, result);
+
+            await WriteJsonAsync(context.Response, new { ok = true, result, exportPath = exportPath ?? string.Empty }).ConfigureAwait(false);
+            return true;
+        }
+
         return false;
     }
 
@@ -206,4 +287,5 @@ internal static class AlbApi
         string? EndUtc);
 
     private sealed record AlbOpenFolderRequest(string? JobId);
+    private sealed record AlbTopIpsTopPathsRequest(string? EndpointFragment, bool ExportXlsx);
 }

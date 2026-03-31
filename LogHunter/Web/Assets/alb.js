@@ -34,6 +34,22 @@
     node.hidden = false;
   }
 
+  function setAlbOption2Error(message) {
+    const node = byId('albOption2Error');
+    if (!node) {
+      return;
+    }
+
+    if (!message) {
+      node.textContent = '';
+      node.hidden = true;
+      return;
+    }
+
+    node.textContent = message;
+    node.hidden = false;
+  }
+
   function setFieldInvalid(id, invalid) {
     const node = byId(id);
     if (!node) {
@@ -530,6 +546,80 @@
     }
   }
 
+  function renderOption2Result(result, exportPath) {
+    const results = byId('albOption2Results');
+    const topIps = byId('albOption2TopIps');
+    const topUris = byId('albOption2TopUris');
+    if (!results || !topIps || !topUris) {
+      return;
+    }
+
+    const items = Array.isArray(result?.topIps) ? result.topIps : [];
+    setText('albOption2State', items.length ? 'completed' : 'no matches');
+    setText('albOption2Matches', String(result?.totalMatchingIps || 0));
+    setText('albOption2Message', items.length
+      ? `Scan completed for fragment "${result.endpointFragment}".`
+      : `No ALB hits matched fragment "${result.endpointFragment}".`);
+    setText('albOption2Meta', `Files scanned: ${result?.filesScanned || 0}`);
+    setText('albOption2ExportPath', exportPath ? `Exported workbook: ${exportPath}` : '');
+
+    if (!items.length) {
+      results.hidden = false;
+      topIps.innerHTML = '<div class="footer-note">No matching IPs found.</div>';
+      topUris.innerHTML = '';
+      return;
+    }
+
+    results.hidden = false;
+    topIps.innerHTML = `
+      <div class="result-lines">
+        ${items.map((item) => `<div>#${escapeHtml(item.rank)} ${escapeHtml(item.ip)} <strong>${escapeHtml(formatValue(item.hits))}</strong> hits</div>`).join('')}
+      </div>
+    `;
+
+    topUris.innerHTML = items.map((item) => `
+      <div class="result-card">
+        <div class="info-label">IP #${escapeHtml(item.rank)}</div>
+        <div class="info-value">${escapeHtml(item.ip)} <span class="footer-note">(${escapeHtml(formatValue(item.hits))} hits)</span></div>
+        <ul class="list-clean">
+          ${(Array.isArray(item.topUris) && item.topUris.length
+            ? item.topUris.map((uri) => `<li><span class="footer-note">#${escapeHtml(uri.rank)}</span> <strong>${escapeHtml(formatValue(uri.hits))}</strong> ${escapeHtml(uri.uri)}</li>`).join('')
+            : '<li class="footer-note">(no URI matches)</li>')}
+        </ul>
+      </div>
+    `).join('');
+  }
+
+  async function runAlbOption2() {
+    setAlbOption2Error('');
+    setText('albOption2State', 'running');
+    setText('albOption2Message', 'Scanning ALB logs...');
+    setText('albOption2Meta', '');
+    setText('albOption2ExportPath', '');
+
+    const endpoint = byId('albOption2Endpoint')?.value?.trim() || '';
+    if (!endpoint) {
+      setText('albOption2State', 'idle');
+      setAlbOption2Error('Endpoint/path fragment is required.');
+      return;
+    }
+
+    try {
+      const payload = await fetchJson('/api/alb/top-ips-top-paths/run', {
+        method: 'POST',
+        body: JSON.stringify({
+          endpointFragment: endpoint,
+          exportXlsx: Boolean(byId('albOption2Export')?.checked)
+        })
+      });
+
+      renderOption2Result(payload.result || {}, payload.exportPath || '');
+    } catch (error) {
+      setText('albOption2State', 'failed');
+      setAlbOption2Error(String(error));
+    }
+  }
+
   function startPollingLoop() {
     setInterval(async () => {
       await pollStatus();
@@ -589,9 +679,24 @@
     startPollingLoop();
   }
 
+  function initializeAlbOption2Page() {
+    if (!document.querySelector('[data-alb-option2-page="true"]')) {
+      return;
+    }
+
+    byId('albOption2Run')?.addEventListener('click', runAlbOption2);
+    byId('albOption2Endpoint')?.addEventListener('input', () => {
+      setAlbOption2Error('');
+    });
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeAlbPage);
+    document.addEventListener('DOMContentLoaded', () => {
+      initializeAlbPage();
+      initializeAlbOption2Page();
+    });
   } else {
     initializeAlbPage();
+    initializeAlbOption2Page();
   }
 })();
