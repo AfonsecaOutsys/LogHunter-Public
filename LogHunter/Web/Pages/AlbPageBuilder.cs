@@ -146,7 +146,7 @@ internal static class AlbPageBuilder
             <div id="newConfigFields" class="field-group" hidden>
               <div class="form-grid">
                 <div class="field">
-                  <label for="configName">Config name</label>
+                  <label for="configName">Config name (optional)</label>
                   <input id="configName" placeholder="Defaults from ALB id if blank">
                 </div>
                 <div class="field">
@@ -169,9 +169,9 @@ internal static class AlbPageBuilder
                   </select>
                 </div>
               </div>
-              <p class="footer-note">Region is derived automatically from the S3 bucket name on this page.</p>
+              <p class="footer-note">Config name is optional. Leave it blank to default from the ALB identifier. Region is derived automatically from the S3 bucket name on this page.</p>
               <div class="field-row">
-                <label class="choice-pill"><input id="isSentry" type="checkbox"> Sentry logs</label>
+                <label class="choice-pill"><input id="isSentry" type="checkbox"> Sentry Infrastructure</label>
               </div>
             </div>
 
@@ -251,7 +251,7 @@ internal static class AlbPageBuilder
                 <div class="progress-track"><div id="albPrimaryBar" class="progress-fill" style="width:0%"></div></div>
                 <div id="albPrimaryMeta" class="footer-note">No ALB job is running.</div>
                 <div class="button-row">
-                  <button id="albOpenRunFolder" class="button-link button-like" type="button">Open run folder</button>
+                  <button id="albOpenRunFolder" class="button-link button-like" type="button">Open logs folder</button>
                 </div>
               </div>
             </div>

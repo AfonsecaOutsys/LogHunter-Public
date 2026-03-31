@@ -34,6 +34,35 @@
     node.hidden = false;
   }
 
+  function setFieldInvalid(id, invalid) {
+    const node = byId(id);
+    if (!node) {
+      return;
+    }
+
+    node.setAttribute('aria-invalid', invalid ? 'true' : 'false');
+    const field = node.closest('.field');
+    if (field) {
+      field.classList.toggle('is-invalid', invalid);
+    }
+  }
+
+  function clearValidation() {
+    [
+      'savedConfigName',
+      'bucket',
+      'albId',
+      'accountId',
+      'awsEnvironmentText',
+      'startDateUtc',
+      'startHourUtc',
+      'startMinuteUtc',
+      'endDateUtc',
+      'endHourUtc',
+      'endMinuteUtc'
+    ].forEach((id) => setFieldInvalid(id, false));
+  }
+
   function setBar(id, value, total) {
     const node = byId(id);
     if (!node) {
@@ -353,6 +382,55 @@
     };
   }
 
+  function validateRequest(request) {
+    const configMode = request.configMode || 'new';
+    const missing = [];
+
+    clearValidation();
+
+    const requireValue = (id, label) => {
+      const node = byId(id);
+      const value = node && 'value' in node ? String(node.value || '').trim() : '';
+      if (value) {
+        return;
+      }
+
+      setFieldInvalid(id, true);
+      missing.push(label);
+    };
+
+    if (configMode === 'saved') {
+      requireValue('savedConfigName', 'Saved configuration');
+    } else {
+      requireValue('bucket', 'S3 bucket');
+      requireValue('albId', 'ALB identifier');
+      requireValue('accountId', 'AWS account ID');
+    }
+
+    requireValue('awsEnvironmentText', 'AWS credentials block');
+    requireValue('startDateUtc', 'Start date');
+    requireValue('startHourUtc', 'Start hour');
+    requireValue('startMinuteUtc', 'Start minute');
+    requireValue('endDateUtc', 'End date');
+    requireValue('endHourUtc', 'End hour');
+    requireValue('endMinuteUtc', 'End minute');
+
+    if (!missing.length && (!request.startUtc || !request.endUtc)) {
+      missing.push('Valid UTC start/end time');
+
+      [
+        'startDateUtc',
+        'startHourUtc',
+        'startMinuteUtc',
+        'endDateUtc',
+        'endHourUtc',
+        'endMinuteUtc'
+      ].forEach((id) => setFieldInvalid(id, true));
+    }
+
+    return missing;
+  }
+
   async function fetchJson(url, options) {
     const response = await fetch(url, {
       headers: {
@@ -409,10 +487,17 @@
 
   async function startDownload() {
     setError('');
+    const request = collectRequest();
+    const missing = validateRequest(request);
+    if (missing.length) {
+      setError(`Missing required input: ${missing.join(', ')}.`);
+      return;
+    }
+
     try {
       const payload = await fetchJson('/api/alb/download/start', {
         method: 'POST',
-        body: JSON.stringify(collectRequest())
+        body: JSON.stringify(request)
       });
 
       if (payload.snapshot) {
@@ -438,7 +523,7 @@
       });
 
       if (!payload.ok) {
-        throw new Error(payload.message || 'Unable to open run folder.');
+        throw new Error(payload.message || 'Unable to open logs folder.');
       }
     } catch (error) {
       setError(String(error));
@@ -457,7 +542,36 @@
     }
 
     document.querySelectorAll('input[name="configMode"]').forEach((element) => {
-      element.addEventListener('change', syncConfigMode);
+      element.addEventListener('change', () => {
+        syncConfigMode();
+        clearValidation();
+        setError('');
+      });
+    });
+
+    [
+      'savedConfigName',
+      'bucket',
+      'albId',
+      'accountId',
+      'awsEnvironmentText',
+      'startDateUtc',
+      'startHourUtc',
+      'startMinuteUtc',
+      'endDateUtc',
+      'endHourUtc',
+      'endMinuteUtc'
+    ].forEach((id) => {
+      const node = byId(id);
+      if (!node) {
+        return;
+      }
+
+      const eventName = node.tagName === 'SELECT' ? 'change' : 'input';
+      node.addEventListener(eventName, () => {
+        setFieldInvalid(id, false);
+        setError('');
+      });
     });
 
     byId('albDownloadStart')?.addEventListener('click', startDownload);
