@@ -138,6 +138,11 @@ public static class ReleaseUpdateChecker
         if (!string.Equals(state.LastCheckedForVersion, normalizedCurrentVersion, StringComparison.OrdinalIgnoreCase))
             return false;
 
+        // Revalidate cached update notices on every startup so deleted or replaced
+        // GitHub releases do not keep surfacing for hours.
+        if (IsNewer(NormalizeVersion(state.LatestVersion), normalizedCurrentVersion))
+            return false;
+
         return DateTime.UtcNow - state.LastCheckedUtc < CacheDuration;
     }
 
