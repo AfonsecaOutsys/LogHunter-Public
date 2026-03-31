@@ -70,7 +70,10 @@ public static class ReleaseUpdateChecker
                 LatestVersion: latestVersion,
                 LatestReleaseUrl: release.HtmlUrl,
                 LatestReleaseName: release.Name,
-                LatestPublishedUtc: publishedUtc);
+                LatestPublishedUtc: publishedUtc,
+                SuppressedUntilUtc: latestVersion == NormalizeVersion(state.LatestVersion)
+                    ? state.SuppressedUntilUtc
+                    : null);
 
             SaveState(updatedState);
             return CreateResultFromState(updatedState, normalizedCurrentVersion);
@@ -84,6 +87,10 @@ public static class ReleaseUpdateChecker
     public static void ShowStartupNotice(ReleaseUpdateCheckResult result, bool consoleMode)
     {
         if (!result.IsUpdateAvailable)
+            return;
+
+        var state = LoadState();
+        if (state.SuppressedUntilUtc is { } suppressedUntilUtc && suppressedUntilUtc > DateTime.UtcNow)
             return;
 
         var latestLabel = result.LatestReleaseName ?? $"v{result.LatestVersion}";
@@ -100,7 +107,14 @@ public static class ReleaseUpdateChecker
 
                 var openRelease = AnsiConsole.Confirm("Open the latest release page now?", false);
                 if (openRelease)
+                {
+                    SaveState(state with { SuppressedUntilUtc = null });
                     TryOpenBrowser(result.ReleaseUrl!);
+                }
+                else
+                {
+                    SaveState(state with { SuppressedUntilUtc = DateTime.UtcNow.Add(CacheDuration) });
+                }
             }
 
             AnsiConsole.WriteLine();
@@ -262,7 +276,8 @@ public static class ReleaseUpdateChecker
         [property: JsonPropertyName("latestVersion")] string? LatestVersion,
         [property: JsonPropertyName("latestReleaseUrl")] string? LatestReleaseUrl,
         [property: JsonPropertyName("latestReleaseName")] string? LatestReleaseName,
-        [property: JsonPropertyName("latestPublishedUtc")] DateTime? LatestPublishedUtc)
+        [property: JsonPropertyName("latestPublishedUtc")] DateTime? LatestPublishedUtc,
+        [property: JsonPropertyName("suppressedUntilUtc")] DateTime? SuppressedUntilUtc)
     {
         public static ReleaseUpdateState Default => new(
             Enabled: true,
@@ -271,7 +286,8 @@ public static class ReleaseUpdateChecker
             LatestVersion: null,
             LatestReleaseUrl: null,
             LatestReleaseName: null,
-            LatestPublishedUtc: null);
+            LatestPublishedUtc: null,
+            SuppressedUntilUtc: null);
     }
 }
 
