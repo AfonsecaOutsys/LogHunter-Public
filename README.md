@@ -1,13 +1,13 @@
 <div align="center">
 
-# LogHunter 🔎
+# LogHunter
 ### Tool for ALB, IIS, and OutSystems Platform logs analysis
 
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?style=for-the-badge&logo=dotnet)](#)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D4?style=for-the-badge&logo=windows)](#)
-[![UI](https://img.shields.io/badge/UI-Console%20Interactive-111827?style=for-the-badge)](#)
+[![UI](https://img.shields.io/badge/UI-Console%20%2B%20Local%20Web-111827?style=for-the-badge)](#)
 
-**Fast • Portable • Built for incident triage**
+**Fast - Portable - Built for incident triage**
 
 </div>
 
@@ -31,7 +31,7 @@ LogHunter is built for security and incident investigations, turning raw logs in
 - **What**: top endpoints/URIs, status codes, scan/probe patterns
 - **Likely success**: pivot from 4xx/5xx noise to 2xx/3xx on sensitive paths and correlate with IIS/Platform logs
 - **When / impact**: timeline views (for example, 5-minute IP buckets)
-- **Handoff**: CSV/HTML exports for SOC/customer evidence and follow-up checks
+- **Handoff**: CSV, Excel, SQLite, and HTML outputs for SOC/customer evidence and follow-up checks
 
 ---
 
@@ -40,6 +40,7 @@ LogHunter is built for security and incident investigations, turning raw logs in
 - **Speed**: optimized for large operations, often significantly faster than ad-hoc command-line analysis
 - **Capacity**: designed for large datasets (commonly 20GB+)
 - **Setup**: portable executable, no heavy local setup for end users of the published build
+- **Modes**: supports both the legacy console workflow and a local web shell
 
 ---
 
@@ -100,6 +101,8 @@ Place each log type into its respective folder and run the matching module. Gene
 
 For ALB, logs can also be downloaded directly from inside the tool.
 
+By default, LogHunter starts in **console mode**. You can explicitly start the local web shell with `--web`.
+
 ---
 
 ## Prerequisites
@@ -120,24 +123,27 @@ For ALB, logs can also be downloaded directly from inside the tool.
 The ALB module focuses on edge traffic triage: who is hitting your edge, what they target, when spikes occurred, whether WAF blocked requests, and where latency increased.
 
 Commands:
-1. **Download logs**
-2. **Top full paths for endpoint/path fragment (no query string)**
-3. **Top 50 IPs overall**
-4. **Top 50 IPs by URI (no query string)**
-5. **Requests ordered by AVG duration (filtered by target)**
-6. **Requests per IP per 5 minutes (chart + CSV)**
-7. **WAF blocked summary + Top 50 blocked requests**
-8. **WAF blocked over time**
+1. **Download logs from S3**
+2. **Top IPs + top full paths for endpoint/path fragment**
+3. **IP Summary**
+4. **5xx while backend succeeded**
+5. **Top 50 IPs overall**
+6. **Top 50 IPs by URI (no query)**
+7. **Top 50 requests by AVG duration**
+8. **ALB requests over time per selected IP (5-minute buckets)**
+9. **WAF blocked summary + top blocked requests**
+10. **WAF blocks over time (per minute) (chart)**
 
 ## IIS tools (Internet Information Services)
 
 The IIS module focuses on request triage using response behavior and burst detection, then pivots to likely-success traffic.
 
 Commands:
-1. **4xx → pick suspicious IPs → pivot to 2xx/3xx**
-2. **Burst patterns** (10s, 30s, 60s, 300s buckets)
-3. **Top bandwidth IPs and URIs (`sc-bytes`)**
-4. **Uploads and payload attempts (`cs-bytes`)**
+1. **IP Summary**
+2. **Status Pivot**
+3. **Burst patterns**
+4. **Top bandwidth IPs and URIs (`sc-bytes`)**
+5. **Uploads and payload attempts (`cs-bytes`)**
 
 ## Platform tools (OutSystems Platform logs)
 
@@ -146,16 +152,17 @@ The Platform module processes Platform exports (CSV/XLSX) to extract suspicious 
 Commands:
 1. **Suspicious requests: extract IPs**
 2. **Suspicious IPs: authenticated activity check**
-3. **Authenticated IP cache view**
+3. **Authenticated IP cache**
 
 ## IP reputation tools (AbuseIPDB)
 
 This module enriches suspicious IP analysis with external reputation context (supporting evidence, not ground truth).
 
 Commands:
-1. **Check IPs from output CSV**
+1. **Check IPs from ALB output file (CSV/XLSX)**
 2. **Check IPs from IIS burst session**
 3. **Check IPs from Platform suspicious cache**
+4. **Set or update API key**
 
 Outputs:
 - Enriched CSV with score/context
@@ -165,9 +172,36 @@ Outputs:
 
 ## Run
 
-```bash
+### Default startup
+
+```powershell
 LogHunter.exe
 ```
+
+Starts the legacy console menu.
+
+### Explicit modes
+
+```powershell
+LogHunter.exe --console
+LogHunter.exe --web
+```
+
+- `--console`: explicitly starts the console menu
+- `--web`: explicitly starts the local web shell on `127.0.0.1`
+- `--no-browser`: in web mode, do not auto-open the default browser
+
+### Other useful options
+
+```powershell
+LogHunter.exe --help
+LogHunter.exe --version
+LogHunter.exe --root C:\path\to\workspace
+```
+
+- `--root <path>`: use a custom workspace instead of the executable folder
+- `--viewer-sqlite <path>`: open the SQLite viewer directly for a generated database
+- `--viewer-ip <ip>`: optional selected IP shown in viewer metadata
 
 ---
 
