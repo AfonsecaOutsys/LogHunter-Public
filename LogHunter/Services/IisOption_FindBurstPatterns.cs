@@ -38,6 +38,8 @@ public static class IisOption_FindBurstPatterns
         public int C3xx { get; set; }
         public int C4xx { get; set; }
         public int C5xx { get; set; }
+        public int Dynamic4xx { get; set; }
+        public int Dynamic5xx { get; set; }
 
         public int Get { get; set; }
         public int Post { get; set; }
@@ -55,6 +57,7 @@ public static class IisOption_FindBurstPatterns
 
         private Dictionary<string, int>? _uriCounts;
         private readonly int _uriCap;
+        public int TopDynamicUriHits { get; private set; }
 
         public BurstAgg(int uniqueCap, int uriCap)
         {
@@ -64,6 +67,8 @@ public static class IisOption_FindBurstPatterns
 
         public void AddDynamicUri(string uriStem)
         {
+            int currentCount = 0;
+
             if (UniqueDynamicUris < _uniqueCap)
             {
                 _uniqueDyn ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -78,9 +83,20 @@ public static class IisOption_FindBurstPatterns
             _uriCounts ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             if (_uriCounts.Count <= _uriCap)
             {
-                if (_uriCounts.TryGetValue(uriStem, out var v)) _uriCounts[uriStem] = v + 1;
-                else _uriCounts[uriStem] = 1;
+                if (_uriCounts.TryGetValue(uriStem, out var v))
+                {
+                    currentCount = v + 1;
+                    _uriCounts[uriStem] = currentCount;
+                }
+                else
+                {
+                    currentCount = 1;
+                    _uriCounts[uriStem] = currentCount;
+                }
             }
+
+            if (currentCount > TopDynamicUriHits)
+                TopDynamicUriHits = currentCount;
         }
 
         public List<(string Uri, int Count)> TopUris(int take)
@@ -97,6 +113,11 @@ public static class IisOption_FindBurstPatterns
         public string UaDisplay => UaMixed ? "(mixed)" : (Ua ?? "-");
         public int AvgTimeMs => TotalAll == 0 ? 0 : (int)(TimeTakenTotalMs / TotalAll);
         public double FourxxRatio => TotalAll == 0 ? 0 : (double)C4xx / TotalAll;
+        public double DynamicFourxxRatio => TotalDynamic == 0 ? 0 : (double)Dynamic4xx / TotalDynamic;
+        public double UniqueDynamicRatio => TotalDynamic == 0 ? 0 : (double)UniqueDynamicUris / TotalDynamic;
+        public double FocusedUriRatio => TotalDynamic == 0 ? 0 : (double)TopDynamicUriHits / TotalDynamic;
+        public double HeadRatio => TotalAll == 0 ? 0 : (double)Head / TotalAll;
+        public double PostRatio => TotalAll == 0 ? 0 : (double)Post / TotalAll;
     }
 
     private sealed record BurstPick(string Id, string Display);
@@ -112,6 +133,19 @@ public static class IisOption_FindBurstPatterns
 
     // HTML rows for Tabulator
     private sealed record BurstUri(string Uri, int Count);
+
+    private sealed record BurstAssessment(
+        BurstAgg Agg,
+        int SeverityScore,
+        bool IsCandidate,
+        bool IsRate,
+        bool IsStrongRate,
+        bool IsEnum,
+        bool IsStrongEnum,
+        bool IsError,
+        bool IsFocused,
+        bool IsPostHeavy,
+        bool IsHeadHeavy);
 
     private sealed record BurstRow(
         int Rank,
@@ -193,9 +227,14 @@ public static class IisOption_FindBurstPatterns
                          : bucketChoice.StartsWith("300", StringComparison.Ordinal) ? 300
                          : 60;
 
-        var rateThreshold = (int)Math.Ceiling(2.0 * bucketSeconds);
-        var enumThreshold = Math.Max(10, (int)Math.Ceiling(0.5 * bucketSeconds));
-        var errorThreshold = Math.Max(10, (int)Math.Ceiling((25.0 / 60.0) * bucketSeconds));
+        var rateThreshold = (int)Math.Ceiling(2.5 * bucketSeconds);
+        var strongRateThreshold = (int)Math.Ceiling(4.0 * bucketSeconds);
+        var enumThreshold = Math.Max(12, (int)Math.Ceiling(0.60 * bucketSeconds));
+        var strongEnumThreshold = Math.Max(enumThreshold + 8, (int)Math.Ceiling(0.90 * bucketSeconds));
+        var errorThreshold = Math.Max(12, (int)Math.Ceiling((30.0 / 60.0) * bucketSeconds));
+        var focusThreshold = Math.Max(12, (int)Math.Ceiling(1.2 * bucketSeconds));
+        var postThreshold = Math.Max(10, (int)Math.Ceiling(0.30 * bucketSeconds));
+        var headThreshold = Math.Max(8, (int)Math.Ceiling(0.25 * bucketSeconds));
 
         var uniqueCap = Math.Max(enumThreshold + 1, 64);
         var uriCap = 40;
@@ -318,6 +357,8 @@ public static class IisOption_FindBurstPatterns
                                 if (IsDynamicPath(uriStr))
                                 {
                                     agg.TotalDynamic++;
+                                    if (status >= 400 && status <= 499) agg.Dynamic4xx++;
+                                    else if (status >= 500 && status <= 599) agg.Dynamic5xx++;
                                     agg.AddDynamicUri(uriStr);
                                 }
                             }
@@ -337,19 +378,21 @@ public static class IisOption_FindBurstPatterns
         // - Spectre shows top 20
         // - HTML contains "all bursts" (capped)
         var burstCandidates = aggs.Values
-            .Select(a => new
-            {
-                Agg = a,
-                IsRate = a.TotalDynamic >= rateThreshold,
-                IsEnum = a.UniqueDynamicUris >= enumThreshold,
-                IsError = a.C4xx >= errorThreshold || (a.FourxxRatio >= 0.80 && a.TotalAll >= Math.Max(20, rateThreshold / 2)),
-                SeverityScore = Score(a, rateThreshold, enumThreshold, errorThreshold)
-            })
-            .Where(x => x.IsRate || x.IsEnum || x.IsError)
+            .Select(a => AssessBurst(
+                a,
+                rateThreshold,
+                strongRateThreshold,
+                enumThreshold,
+                strongEnumThreshold,
+                errorThreshold,
+                focusThreshold,
+                postThreshold,
+                headThreshold))
+            .Where(x => x.IsCandidate)
             .OrderByDescending(x => x.SeverityScore)
             .ThenByDescending(x => x.Agg.TotalDynamic)
             .ThenByDescending(x => x.Agg.UniqueDynamicUris)
-            .ThenByDescending(x => x.Agg.C4xx)
+            .ThenByDescending(x => x.Agg.Dynamic4xx)
             .ThenBy(x => x.Agg.StartUtc)
             .ToList();
 
@@ -366,15 +409,15 @@ public static class IisOption_FindBurstPatterns
 
         ConsoleEx.Header(
             $"IIS: Burst buckets (Top {Math.Min(SpectreTop, burstsForSpectre.Count)})",
-            $"Bucket: {bucketSeconds}s | Rate>={rateThreshold} dyn | Unique>={enumThreshold} | 4xx>={errorThreshold} | HTML rows: {Math.Min(HtmlMaxRows, burstCandidates.Count)}");
+            $"Bucket: {bucketSeconds}s | Rate>={rateThreshold} dyn | StrongRate>={strongRateThreshold} | Enum>={enumThreshold} unique | Dyn4xx>={errorThreshold} | HTML rows: {Math.Min(HtmlMaxRows, burstCandidates.Count)}");
 
         var table = new Table()
             .RoundedBorder()
             .AddColumn(new TableColumn("[bold]#[/]").RightAligned())
             .AddColumn("[bold]Start (UTC)[/]")
             .AddColumn("[bold]IP[/]")
-            .AddColumn(new TableColumn("[bold]Req/min[/]").RightAligned())
-            .AddColumn(new TableColumn("[bold]4xx%[/]").RightAligned())
+            .AddColumn(new TableColumn("[bold]Dyn hits[/]").RightAligned())
+            .AddColumn(new TableColumn("[bold]Dyn 4xx%[/]").RightAligned())
             .AddColumn("[bold]Flags[/]")
             .AddColumn(new TableColumn("[bold]Avg ms[/]").RightAligned())
             .AddColumn("[bold]UA[/]");
@@ -382,14 +425,14 @@ public static class IisOption_FindBurstPatterns
         for (int i = 0; i < burstsForSpectre.Count; i++)
         {
             var a = burstsForSpectre[i].Agg;
-            var flags = BurstFlags(a, rateThreshold, enumThreshold, errorThreshold);
+            var flags = BurstFlags(burstsForSpectre[i]);
 
             table.AddRow(
                 (i + 1).ToString(CultureInfo.InvariantCulture),
                 a.StartUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                 Markup.Escape(a.Ip),
                 a.TotalDynamic.ToString("n0", CultureInfo.InvariantCulture),
-                (a.FourxxRatio * 100).ToString("0.0", CultureInfo.InvariantCulture),
+                (a.DynamicFourxxRatio * 100).ToString("0.0", CultureInfo.InvariantCulture),
                 $"[dim]{Markup.Escape(flags)}[/]",
                 a.AvgTimeMs.ToString("n0", CultureInfo.InvariantCulture),
                 Markup.Escape(Truncate(UaSummary(a), 40))
@@ -432,11 +475,11 @@ public static class IisOption_FindBurstPatterns
         {
             var a = burstsForSpectre[i].Agg;
             var id = $"{a.Ip}|{a.StartUtc.Ticks}";
-            var flags = BurstFlags(a, rateThreshold, enumThreshold, errorThreshold);
+            var flags = BurstFlags(burstsForSpectre[i]);
 
             pick.AddChoice(new BurstPick(
                 id,
-                $"{i + 1}. {a.StartUtc:yyyy-MM-dd HH:mm:ss}Z | {a.Ip} | dyn:{a.TotalDynamic} unique:{a.UniqueDynamicUris} 4xx:{a.C4xx} | {flags}"
+                $"{i + 1}. {a.StartUtc:yyyy-MM-dd HH:mm:ss}Z | {a.Ip} | dyn:{a.TotalDynamic} unique:{a.UniqueDynamicUris} dyn4xx:{a.Dynamic4xx} | {flags}"
             ));
         }
 
@@ -578,7 +621,7 @@ public static class IisOption_FindBurstPatterns
                 var a = burstsForHtml[i].Agg;
                 var id = $"{a.Ip}|{a.StartUtc.Ticks}";
                 var score = burstsForHtml[i].SeverityScore;
-                var flags = BurstFlags(a, rateThreshold, enumThreshold, errorThreshold);
+                var flags = BurstFlags(burstsForHtml[i]);
 
                 idToRelLog.TryGetValue(id, out var rawLog);
 
@@ -592,7 +635,7 @@ public static class IisOption_FindBurstPatterns
                     Flags: flags,
                     TotalDynamic: a.TotalDynamic,
                     UniqueDynamicUris: a.UniqueDynamicUris,
-                    FourxxPct: Math.Round(a.FourxxRatio * 100.0, 1),
+                    FourxxPct: Math.Round(a.DynamicFourxxRatio * 100.0, 1),
                     Post: a.Post,
                     Head: a.Head,
                     AvgMs: a.AvgTimeMs,
@@ -697,13 +740,14 @@ pre{margin:0;background:#0b0f14;border:1px solid var(--line);padding:10px;border
         sb.AppendLine("<div class=\"sub\">Bucket: <span class=\"mono\">" + bucketSeconds.ToString(CultureInfo.InvariantCulture) +
                       "s</span> · Trigger: dyn ≥ <span class=\"mono\">" + rateThreshold.ToString(CultureInfo.InvariantCulture) +
                       "</span>, unique ≥ <span class=\"mono\">" + enumThreshold.ToString(CultureInfo.InvariantCulture) +
-                      "</span>, 4xx ≥ <span class=\"mono\">" + errorThreshold.ToString(CultureInfo.InvariantCulture) + "</span></div>");
+                      "</span>, dyn 4xx ≥ <span class=\"mono\">" + errorThreshold.ToString(CultureInfo.InvariantCulture) + "</span></div>");
 
         sb.AppendLine("<div class=\"toolbar\">");
         sb.AppendLine("<input id=\"q\" type=\"search\" placeholder=\"Search IP, UA, flags, time...\">");
         sb.AppendLine("<label class=\"chk\"><input type=\"checkbox\" class=\"f\" value=\"RATE\" checked> RATE</label>");
         sb.AppendLine("<label class=\"chk\"><input type=\"checkbox\" class=\"f\" value=\"ENUM\" checked> ENUM</label>");
         sb.AppendLine("<label class=\"chk\"><input type=\"checkbox\" class=\"f\" value=\"4XX\" checked> 4XX</label>");
+        sb.AppendLine("<label class=\"chk\"><input type=\"checkbox\" class=\"f\" value=\"FOCUS\" checked> FOCUS</label>");
         sb.AppendLine("<label class=\"chk\"><input type=\"checkbox\" class=\"f\" value=\"POST\" checked> POST</label>");
         sb.AppendLine("<label class=\"chk\"><input type=\"checkbox\" class=\"f\" value=\"HEAD\" checked> HEAD</label>");
         sb.AppendLine("<span class=\"small\">(click a row for details; click headers to sort)</span>");
@@ -749,7 +793,10 @@ function hasAnyFlag(row, want){
   var flags = String(row.Flags||'').split('+').filter(Boolean);
   if(flags.length===0) return true;
   for(var i=0;i<flags.length;i++){
-    if(want[flags[i]]) return true;
+    var f = flags[i];
+    if(want[f]) return true;
+    if(f==='RATE+' && want.RATE) return true;
+    if(f==='ENUM+' && want.ENUM) return true;
   }
   return false;
 }
@@ -796,8 +843,8 @@ var table = new Tabulator('#tbl', {
     {title:'#', field:'Rank', width:60, hozAlign:'right'},
     {title:'Start (UTC)', field:'StartUtc', width:170, cssClass:'mono'},
     {title:'IP', field:'Ip', width:170, cssClass:'mono'},
-    {title:'Req/min', field:'TotalDynamic', sorter:'number', hozAlign:'right', cssClass:'mono'},
-    {title:'4xx%', field:'FourxxPct', sorter:'number', hozAlign:'right', cssClass:'mono'},
+    {title:'Dyn hits', field:'TotalDynamic', sorter:'number', hozAlign:'right', cssClass:'mono'},
+    {title:'Dyn 4xx%', field:'FourxxPct', sorter:'number', hozAlign:'right', cssClass:'mono'},
     {title:'Methods', field:'Post', width:170, formatter:function(cell){
       var r = cell.getRow().getData();
       return '<span class=""mono"">' + escHtml(methodsText(r)) + '</span>';
@@ -895,35 +942,128 @@ applyFilters();
 
     // ---------------- Scoring / flags ----------------
 
-    private static int Score(BurstAgg a, int rateTh, int enumTh, int errTh)
+    private static BurstAssessment AssessBurst(
+        BurstAgg a,
+        int rateTh,
+        int strongRateTh,
+        int enumTh,
+        int strongEnumTh,
+        int errTh,
+        int focusTh,
+        int postTh,
+        int headTh)
+    {
+        var isRate = a.TotalDynamic >= rateTh;
+        var isStrongRate = a.TotalDynamic >= strongRateTh;
+
+        var isEnum = a.TotalDynamic >= enumTh
+            && a.UniqueDynamicUris >= enumTh
+            && a.UniqueDynamicRatio >= 0.45;
+
+        var isStrongEnum = a.TotalDynamic >= strongEnumTh
+            && a.UniqueDynamicUris >= strongEnumTh
+            && a.UniqueDynamicRatio >= 0.65;
+
+        var isError = a.Dynamic4xx >= errTh
+            || (a.DynamicFourxxRatio >= 0.70
+                && a.Dynamic4xx >= Math.Max(8, errTh / 2)
+                && a.TotalDynamic >= Math.Max(15, rateTh / 3));
+
+        var isFocused = a.TopDynamicUriHits >= focusTh
+            && a.FocusedUriRatio >= 0.70;
+
+        var isPostHeavy = a.Post >= postTh && a.PostRatio >= 0.35;
+        var isHeadHeavy = a.Head >= headTh && a.HeadRatio >= 0.35;
+
+        // Conservative gate: prefer corroborated signals over one broad threshold hit.
+        var isCandidate =
+            isStrongEnum
+            || (isFocused && isRate)
+            || (isError && (isRate || isEnum || isPostHeavy || isHeadHeavy))
+            || (isEnum && (isError || isPostHeavy || isHeadHeavy))
+            || (isStrongRate && (isFocused || isError || isPostHeavy || isHeadHeavy));
+
+        var score = Score(
+            a,
+            isRate,
+            isStrongRate,
+            isEnum,
+            isStrongEnum,
+            isError,
+            isFocused,
+            isPostHeavy,
+            isHeadHeavy,
+            rateTh,
+            strongRateTh,
+            enumTh,
+            strongEnumTh,
+            errTh);
+
+        return new BurstAssessment(
+            a,
+            score,
+            isCandidate,
+            isRate,
+            isStrongRate,
+            isEnum,
+            isStrongEnum,
+            isError,
+            isFocused,
+            isPostHeavy,
+            isHeadHeavy);
+    }
+
+    private static int Score(
+        BurstAgg a,
+        bool isRate,
+        bool isStrongRate,
+        bool isEnum,
+        bool isStrongEnum,
+        bool isError,
+        bool isFocused,
+        bool isPostHeavy,
+        bool isHeadHeavy,
+        int rateTh,
+        int strongRateTh,
+        int enumTh,
+        int strongEnumTh,
+        int errTh)
     {
         int score = 0;
 
-        if (a.TotalDynamic >= rateTh) score += 50 + (a.TotalDynamic - rateTh);
-        if (a.UniqueDynamicUris >= enumTh) score += 40 + (a.UniqueDynamicUris - enumTh) * 2;
+        if (isStrongRate) score += 65 + Math.Min(50, a.TotalDynamic - strongRateTh);
+        else if (isRate) score += 30 + Math.Min(35, a.TotalDynamic - rateTh);
 
-        if (a.C4xx >= errTh) score += 35 + (a.C4xx - errTh) * 2;
-        else if (a.FourxxRatio >= 0.80 && a.TotalAll >= Math.Max(20, rateTh / 2)) score += 30;
+        if (isStrongEnum) score += 70 + Math.Min(40, (a.UniqueDynamicUris - strongEnumTh) * 2);
+        else if (isEnum) score += 35 + Math.Min(30, (a.UniqueDynamicUris - enumTh) * 2);
 
-        if (a.Post > 0) score += Math.Min(20, a.Post);
-        if (a.Head > 0) score += Math.Min(10, a.Head);
+        if (isError)
+        {
+            score += 50 + Math.Min(35, (a.Dynamic4xx - errTh) * 2);
+            if (a.DynamicFourxxRatio >= 0.85) score += 10;
+        }
 
-        if (a.TimeTakenMaxMs >= 5000) score += 15;
-        else if (a.TimeTakenMaxMs >= 2000) score += 8;
+        if (isFocused) score += 35 + Math.Min(15, (int)Math.Round((a.FocusedUriRatio - 0.70) * 100));
+        if (isPostHeavy) score += 20 + Math.Min(15, a.Post - Math.Max(10, rateTh / 4));
+        if (isHeadHeavy) score += 18 + Math.Min(12, a.Head - Math.Max(8, rateTh / 5));
 
         return score;
     }
 
-    private static string BurstFlags(BurstAgg a, int rateTh, int enumTh, int errTh)
+    private static string BurstFlags(BurstAssessment burst)
     {
         var flags = new List<string>();
 
-        if (a.TotalDynamic >= rateTh) flags.Add("RATE");
-        if (a.UniqueDynamicUris >= enumTh) flags.Add("ENUM");
-        if (a.C4xx >= errTh || (a.FourxxRatio >= 0.80 && a.TotalAll >= Math.Max(20, rateTh / 2))) flags.Add("4XX");
+        if (burst.IsStrongRate) flags.Add("RATE+");
+        else if (burst.IsRate) flags.Add("RATE");
 
-        if (a.Post > 0) flags.Add("POST");
-        if (a.Head > 0) flags.Add("HEAD");
+        if (burst.IsStrongEnum) flags.Add("ENUM+");
+        else if (burst.IsEnum) flags.Add("ENUM");
+
+        if (burst.IsError) flags.Add("4XX");
+        if (burst.IsFocused) flags.Add("FOCUS");
+        if (burst.IsPostHeavy) flags.Add("POST");
+        if (burst.IsHeadHeavy) flags.Add("HEAD");
 
         return flags.Count == 0 ? "-" : string.Join("+", flags);
     }
