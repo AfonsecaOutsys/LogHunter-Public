@@ -343,7 +343,8 @@ internal static class AlbApi
             totalBytes = selection.TotalBytes,
             selectionLabel = selection.SelectionLabel,
             summary = selection.Summary,
-            previewItems = selection.PreviewItems
+            previewItems = selection.PreviewItems,
+            remainingCount = selection.RemainingCount
         };
 
     private static async Task WriteJsonAsync(HttpListenerResponse response, object payload, HttpStatusCode statusCode = HttpStatusCode.OK)

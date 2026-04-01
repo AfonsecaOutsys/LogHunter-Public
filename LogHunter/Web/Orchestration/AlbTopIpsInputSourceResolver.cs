@@ -71,7 +71,8 @@ internal static class AlbTopIpsInputSourceResolver
             TotalBytes: totalBytes,
             SelectionLabel: selectionLabel,
             Summary: summary,
-            PreviewItems: BuildPreviewItems(files));
+            PreviewItems: BuildPreviewItems(files),
+            RemainingCount: Math.Max(0, fileCount - 3));
     }
 
     private static IReadOnlyList<string> BuildPreviewItems(IReadOnlyList<string> files)
@@ -137,8 +138,9 @@ internal sealed record AlbTopIpsInputSourceSelection(
     long TotalBytes,
     string SelectionLabel,
     string Summary,
-    IReadOnlyList<string> PreviewItems)
+    IReadOnlyList<string> PreviewItems,
+    int RemainingCount)
 {
     public static AlbTopIpsInputSourceSelection Empty(AlbTopIpsInputSourceType sourceType)
-        => new(sourceType, null, Array.Empty<string>(), 0, 0, string.Empty, string.Empty, Array.Empty<string>());
+        => new(sourceType, null, Array.Empty<string>(), 0, 0, string.Empty, string.Empty, Array.Empty<string>(), 0);
 }

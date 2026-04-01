@@ -626,7 +626,8 @@
       totalBytes: Number(selection.totalBytes || 0),
       selectionLabel: selection.selectionLabel || '',
       summary: selection.summary || '',
-      previewItems: Array.isArray(selection.previewItems) ? [...selection.previewItems] : []
+      previewItems: Array.isArray(selection.previewItems) ? [...selection.previewItems] : [],
+      remainingCount: Number(selection.remainingCount || 0)
     };
   }
 
@@ -636,6 +637,7 @@
 
     const totalBytes = items.reduce((sum, file) => sum + Number(file.size || 0), 0);
     const previewItems = items.slice(0, 3).map((file) => file.name);
+    const remainingCount = Math.max(0, items.length - previewItems.length);
     const folderName = sourceType === 'folder' && items.length
       ? getTopFolderName(items[0])
       : '';
@@ -655,7 +657,8 @@
       totalBytes,
       selectionLabel,
       summary,
-      previewItems
+      previewItems,
+      remainingCount
     };
   }
 
@@ -676,6 +679,9 @@
     const sourceType = getAlbOption2SourceType();
     const isFolder = sourceType === 'folder';
     const isFiles = sourceType === 'files';
+    const helperNode = byId('albOption2SourceHelper');
+    const titleNode = byId('albOption2SourceTitle');
+    const metaNode = byId('albOption2SourceMeta');
     const summaryNode = byId('albOption2SourceSummary');
     const previewNode = byId('albOption2SourcePreview');
     const chooseButton = byId('albOption2ChooseSource');
@@ -686,48 +692,81 @@
     setHidden(clearButton, !selection);
 
     if (chooseButton) {
-      chooseButton.textContent = isFolder ? 'Choose folder' : 'Choose files';
+      chooseButton.textContent = isFolder ? 'Select folder to scan' : 'Choose files';
     }
 
     if (sourceType === 'default') {
+      if (helperNode) {
+        helperNode.textContent = 'Uses the current workspace ALB folder.';
+      }
+      if (titleNode) {
+        titleNode.textContent = 'Workspace ALB folder';
+      }
+      if (metaNode) {
+        metaNode.textContent = 'Default';
+      }
       if (summaryNode) {
-        summaryNode.textContent = albOption2DefaultSelection?.summary || 'Default folder will be used.';
+        summaryNode.textContent = albOption2DefaultSelection?.selectionLabel || 'Default folder will be used.';
       }
 
       if (previewNode) {
-        previewNode.textContent = albOption2DefaultSelection?.selectionLabel
-          ? `Source: ${albOption2DefaultSelection.selectionLabel}`
+        previewNode.innerHTML = albOption2DefaultSelection?.summary
+          ? `<span class="selection-chip">${escapeHtml(albOption2DefaultSelection.summary)}</span>`
           : '';
+        previewNode.hidden = !albOption2DefaultSelection?.summary;
       }
 
       return;
     }
 
     if (!selection) {
+      if (helperNode) {
+        helperNode.textContent = isFolder
+          ? 'Browser folder upload is standard here: select the folder itself, then confirm Upload. Opening the folder and uploading from inside it will not select that folder.'
+          : 'Choose one or more .log files. The browser will attach only the files you pick.';
+      }
+      if (titleNode) {
+        titleNode.textContent = isFolder ? 'No folder selected yet' : 'No files selected yet';
+      }
+      if (metaNode) {
+        metaNode.textContent = isFolder ? 'Folder mode' : 'Files mode';
+      }
       if (summaryNode) {
         summaryNode.textContent = isFolder
-          ? 'Choose a folder to scan its .log files recursively.'
-          : 'Choose one or more .log files to scan directly.';
+          ? 'Select the folder you want to scan. The browser will show its standard folder-upload confirmation.'
+          : 'Select one or more .log files to scan directly.';
       }
 
       if (previewNode) {
-        previewNode.textContent = isFolder
-          ? 'Folder contents stay in the browser until you run the scan.'
-          : 'Selected files will be uploaded only when you run the scan.';
+        previewNode.innerHTML = '';
+        previewNode.hidden = true;
       }
 
       return;
     }
 
+    if (helperNode) {
+      helperNode.textContent = isFolder
+        ? 'The selected folder contents stay in the browser until you run the scan.'
+        : 'The selected files stay in the browser until you run the scan.';
+    }
+    if (titleNode) {
+      titleNode.textContent = selection.selectionLabel || (isFolder ? 'Selected folder' : 'Selected files');
+    }
+    if (metaNode) {
+      metaNode.textContent = isFolder ? 'Folder selected' : 'Files selected';
+    }
     if (summaryNode) {
-      summaryNode.textContent = selection.summary;
+      summaryNode.textContent = `${selection.fileCount} .log file${selection.fileCount === 1 ? '' : 's'} ready | ${formatBytes(selection.totalBytes)}`;
     }
 
     if (previewNode) {
       const preview = Array.isArray(selection.previewItems) ? selection.previewItems : [];
-      previewNode.textContent = preview.length
-        ? `Preview: ${preview.join(', ')}`
+      const remaining = Number(selection.remainingCount || 0);
+      previewNode.innerHTML = preview.length
+        ? `${preview.map((item) => `<span class="selection-chip" title="${escapeHtml(item)}">${escapeHtml(item)}</span>`).join('')}${remaining > 0 ? `<span class="selection-chip selection-chip--muted">+${remaining} more</span>` : ''}`
         : '';
+      previewNode.hidden = !preview.length;
     }
   }
 

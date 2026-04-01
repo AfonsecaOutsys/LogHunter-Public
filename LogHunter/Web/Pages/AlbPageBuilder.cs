@@ -344,7 +344,7 @@ internal static class AlbPageBuilder
             </div>
 
             <div class="field-group">
-              <div class="field">
+              <div class="field source-mode-field">
                 <label>Input source</label>
                 <div class="field-row">
                   <label class="choice-pill"><input type="radio" name="albOption2SourceType" value="default" checked> Use default folder</label>
@@ -352,14 +352,21 @@ internal static class AlbPageBuilder
                   <label class="choice-pill"><input type="radio" name="albOption2SourceType" value="files"> Select files</label>
                 </div>
               </div>
-              <div class="button-row">
-                <button id="albOption2ChooseSource" class="button-link primary button-like" type="button" hidden>Choose source</button>
+              <div class="button-row source-action-row">
+                <button id="albOption2ChooseSource" class="button-link primary button-like" type="button" hidden>Select source</button>
                 <button id="albOption2ClearSelection" class="button-link button-like" type="button" hidden>Clear selection</button>
               </div>
               <input id="albOption2FolderInput" type="file" webkitdirectory directory multiple hidden>
               <input id="albOption2FilesInput" type="file" multiple accept=".log" hidden>
-              <div id="albOption2SourceSummary" class="footer-note">Default folder will be used unless you choose another source.</div>
-              <div id="albOption2SourcePreview" class="footer-note"></div>
+              <div id="albOption2SourceHelper" class="footer-note source-helper">Default folder will be used unless you choose another source.</div>
+              <div class="selection-summary-card">
+                <div class="selection-summary-head">
+                  <div id="albOption2SourceTitle" class="selection-summary-title">Workspace ALB folder</div>
+                  <div id="albOption2SourceMeta" class="kicker">Default</div>
+                </div>
+                <div id="albOption2SourceSummary" class="selection-summary-body">Loading source details...</div>
+                <div id="albOption2SourcePreview" class="selection-chip-row" hidden></div>
+              </div>
             </div>
 
             <div class="field-group">
