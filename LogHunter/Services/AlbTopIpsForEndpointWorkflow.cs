@@ -93,38 +93,52 @@ internal static class AlbTopIpsForEndpointWorkflow
 
         int row = 1;
 
+        // Title
         ws.Cell(row, 1).Value = "ALB - Top IPs + Top Full Paths for Endpoint Fragment";
         ws.Range(row, 1, row, 6).Merge();
         ws.Cell(row, 1).Style.Font.Bold = true;
         ws.Cell(row, 1).Style.Font.FontSize = 14;
         row += 1;
 
+        // Metadata
         ws.Cell(row, 1).Value = "Endpoint fragment";
+        ws.Cell(row, 1).Style.Font.Bold = true;
         ws.Cell(row, 2).Value = result.EndpointFragment;
+        ws.Range(row, 2, row, 4).Merge();
         row += 1;
 
         ws.Cell(row, 1).Value = "Generated";
+        ws.Cell(row, 1).Style.Font.Bold = true;
         ws.Cell(row, 2).Value = DateTime.Now;
         ws.Cell(row, 2).Style.DateFormat.Format = "yyyy-mm-dd hh:mm:ss";
+        ws.Range(row, 2, row, 4).Merge();
         row += 2;
 
+        // Top IP Summary header
         ws.Cell(row, 1).Value = "Top IP Summary";
         ws.Range(row, 1, row, 3).Merge();
         ws.Cell(row, 1).Style.Font.Bold = true;
+        ws.Cell(row, 1).Style.Font.FontSize = 12;
         ws.Cell(row, 1).Style.Fill.BackgroundColor = XLColor.LightGray;
         row += 1;
 
+        // Column headers
         ws.Cell(row, 1).Value = "IP Rank";
         ws.Cell(row, 2).Value = "Hits";
         ws.Cell(row, 3).Value = "IP";
         ws.Range(row, 1, row, 3).Style.Font.Bold = true;
         ws.Range(row, 1, row, 3).Style.Fill.BackgroundColor = XLColor.AliceBlue;
+        ws.Range(row, 1, row, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         row += 1;
 
+        // IP data rows
         foreach (var ip in result.TopIps)
         {
             ws.Cell(row, 1).Value = ip.Rank;
+            ws.Cell(row, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             ws.Cell(row, 2).Value = ip.Hits;
+            ws.Cell(row, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+            ws.Cell(row, 2).Style.NumberFormat.Format = "#,##0";
             ws.Cell(row, 3).Value = ip.IP;
             row++;
         }
@@ -137,11 +151,13 @@ internal static class AlbTopIpsForEndpointWorkflow
 
         row += 2;
 
+        // Per-IP URI detail sections
         foreach (var group in result.TopIps)
         {
             ws.Cell(row, 1).Value = $"IP #{group.Rank}: {group.IP} ({group.Hits:N0} hits)";
             ws.Range(row, 1, row, 6).Merge();
             ws.Cell(row, 1).Style.Font.Bold = true;
+            ws.Cell(row, 1).Style.Font.FontSize = 11;
             ws.Cell(row, 1).Style.Fill.BackgroundColor = XLColor.LightGray;
             row += 1;
 
@@ -150,13 +166,16 @@ internal static class AlbTopIpsForEndpointWorkflow
             ws.Cell(row, 3).Value = "URI (no query)";
             ws.Range(row, 1, row, 3).Style.Font.Bold = true;
             ws.Range(row, 1, row, 3).Style.Fill.BackgroundColor = XLColor.AliceBlue;
+            ws.Range(row, 1, row, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             row += 1;
 
             int start = row;
             if (group.TopUris.Count == 0)
             {
                 ws.Cell(row, 1).Value = "-";
+                ws.Cell(row, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
                 ws.Cell(row, 2).Value = 0;
+                ws.Cell(row, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
                 ws.Cell(row, 3).Value = "(no URI matches)";
                 row++;
             }
@@ -165,7 +184,10 @@ internal static class AlbTopIpsForEndpointWorkflow
                 foreach (var uri in group.TopUris)
                 {
                     ws.Cell(row, 1).Value = uri.Rank;
+                    ws.Cell(row, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
                     ws.Cell(row, 2).Value = uri.Hits;
+                    ws.Cell(row, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+                    ws.Cell(row, 2).Style.NumberFormat.Format = "#,##0";
                     ws.Cell(row, 3).Value = uri.URI;
                     row++;
                 }
@@ -177,7 +199,9 @@ internal static class AlbTopIpsForEndpointWorkflow
         }
 
         ws.SheetView.FreezeRows(6);
-        ws.Columns(1, 3).AdjustToContents(10, 110);
+        ws.Column(1).Width = 12;
+        ws.Column(2).Width = 12;
+        ws.Column(3).AdjustToContents(20, 80);
 
         wb.SaveAs(outFile);
         return outFile;
