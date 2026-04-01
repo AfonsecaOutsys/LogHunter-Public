@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using LogHunter.Services;
 using LogHunter.Web.Hosting;
+using LogHunter.Web.Orchestration;
 using LogHunter.Web.Pages;
 
 namespace LogHunter.Web.Api;
@@ -155,7 +156,18 @@ internal static class AlbApi
                 return true;
             }
 
-            if (!app.AlbTopIps.TryStart(endpointFragment, body?.ExportXlsx == true, out var snapshot, out var error))
+            var inputRequest = new AlbTopIpsInputSourceRequest(
+                SourceType: body?.SourceType ?? "default",
+                FolderPath: body?.FolderPath,
+                FilePaths: body?.FilePaths ?? Array.Empty<string>());
+
+            if (!AlbTopIpsInputSourceResolver.TryResolve(inputRequest, out var selection, out var error))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            if (!app.AlbTopIps.TryStart(endpointFragment, body?.ExportXlsx == true, selection, out var snapshot, out error))
             {
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
@@ -165,9 +177,70 @@ internal static class AlbApi
             return true;
         }
 
+        if (string.Equals(path, "/api/alb/top-ips-top-paths/meta", StringComparison.OrdinalIgnoreCase))
+        {
+            var selection = AlbTopIpsInputSourceResolver.ResolveDefaultFolder();
+            await WriteJsonAsync(context.Response, new
+            {
+                defaultSelection = BuildInputSourcePayload(selection),
+                currentJob = app.AlbTopIps.GetSnapshot()
+            }).ConfigureAwait(false);
+            return true;
+        }
+
         if (string.Equals(path, "/api/alb/top-ips-top-paths/job", StringComparison.OrdinalIgnoreCase))
         {
             await WriteJsonAsync(context.Response, app.AlbTopIps.GetSnapshot()).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/alb/top-ips-top-paths/pick-folder", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            if (!WindowsPathPicker.TryPickFolder(out var folderPath, out var pickerError))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = pickerError }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            var request = new AlbTopIpsInputSourceRequest("folder", folderPath, Array.Empty<string>());
+            if (!AlbTopIpsInputSourceResolver.TryResolve(request, out var selection, out var error))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            await WriteJsonAsync(context.Response, new { ok = true, selection = BuildInputSourcePayload(selection) }).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/alb/top-ips-top-paths/pick-files", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            if (!WindowsPathPicker.TryPickFiles(out var files, out var pickerError))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = pickerError }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            var request = new AlbTopIpsInputSourceRequest("files", null, files);
+            if (!AlbTopIpsInputSourceResolver.TryResolve(request, out var selection, out var error))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            await WriteJsonAsync(context.Response, new { ok = true, selection = BuildInputSourcePayload(selection) }).ConfigureAwait(false);
             return true;
         }
 
@@ -241,6 +314,24 @@ internal static class AlbApi
         return JsonSerializer.Deserialize<T>(json, JsonOptions);
     }
 
+    private static object BuildInputSourcePayload(AlbTopIpsInputSourceSelection selection)
+        => new
+        {
+            sourceType = selection.SourceType switch
+            {
+                AlbTopIpsInputSourceType.SelectedFolder => "folder",
+                AlbTopIpsInputSourceType.SelectedFiles => "files",
+                _ => "default"
+            },
+            rootPath = selection.RootPath,
+            filePaths = selection.Files,
+            fileCount = selection.FileCount,
+            totalBytes = selection.TotalBytes,
+            selectionLabel = selection.SelectionLabel,
+            summary = selection.Summary,
+            previewItems = selection.PreviewItems
+        };
+
     private static async Task WriteJsonAsync(HttpListenerResponse response, object payload, HttpStatusCode statusCode = HttpStatusCode.OK)
     {
         var json = JsonSerializer.Serialize(payload, JsonOptions);
@@ -271,5 +362,10 @@ internal static class AlbApi
         string? EndUtc);
 
     private sealed record AlbOpenFolderRequest(string? JobId);
-    private sealed record AlbTopIpsTopPathsRequest(string? EndpointFragment, bool ExportXlsx);
+    private sealed record AlbTopIpsTopPathsRequest(
+        string? EndpointFragment,
+        bool ExportXlsx,
+        string? SourceType,
+        string? FolderPath,
+        string[]? FilePaths);
 }

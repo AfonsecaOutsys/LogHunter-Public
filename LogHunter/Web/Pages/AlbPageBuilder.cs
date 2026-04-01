@@ -344,6 +344,24 @@ internal static class AlbPageBuilder
             </div>
 
             <div class="field-group">
+              <div class="field">
+                <label>Input source</label>
+                <div class="field-row">
+                  <label class="choice-pill"><input type="radio" name="albOption2SourceType" value="default" checked> Use default folder</label>
+                  <label class="choice-pill"><input type="radio" name="albOption2SourceType" value="folder"> Select folder</label>
+                  <label class="choice-pill"><input type="radio" name="albOption2SourceType" value="files"> Select files</label>
+                </div>
+              </div>
+              <div id="albOption2SourceActions" class="button-row">
+                <button id="albOption2PickFolder" class="button-link button-like" type="button" hidden>Select folder</button>
+                <button id="albOption2PickFiles" class="button-link button-like" type="button" hidden>Select files</button>
+                <button id="albOption2ClearSelection" class="button-link button-like" type="button" hidden>Clear selection</button>
+              </div>
+              <div id="albOption2SourceSummary" class="footer-note">Default folder will be used unless you choose another source.</div>
+              <div id="albOption2SourcePreview" class="footer-note"></div>
+            </div>
+
+            <div class="field-group">
               <label class="choice-pill"><input id="albOption2Export" type="checkbox" checked> Export grouped workbook</label>
             </div>
 

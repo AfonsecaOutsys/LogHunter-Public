@@ -63,6 +63,19 @@ internal sealed class AlbTopIpsJobManager
     }
 
     public bool TryStart(string endpointFragment, bool exportXlsx, out AlbTopIpsJobSnapshot snapshot, out string? error)
+        => TryStart(
+            endpointFragment,
+            exportXlsx,
+            AlbTopIpsInputSourceResolver.ResolveDefaultFolder(),
+            out snapshot,
+            out error);
+
+    public bool TryStart(
+        string endpointFragment,
+        bool exportXlsx,
+        AlbTopIpsInputSourceSelection inputSource,
+        out AlbTopIpsJobSnapshot snapshot,
+        out string? error)
     {
         lock (_gate)
         {
@@ -73,21 +86,24 @@ internal sealed class AlbTopIpsJobManager
                 return false;
             }
 
-            var files = AlbScanner.GetLogFiles();
+            var files = inputSource.Files.ToList();
             if (files.Count == 0)
             {
                 snapshot = _snapshot;
-                error = $"No .log files found in: {AppFolders.ALB}";
+                error = inputSource.SourceType == AlbTopIpsInputSourceType.DefaultFolder
+                    ? $"No .log files found in: {AppFolders.ALB}"
+                    : "No .log files were found in the selected input source.";
                 return false;
             }
-
-            var totalBytes = SumFileSizesSafe(files);
 
             _snapshot = new AlbTopIpsJobSnapshot(
                 JobId: Guid.NewGuid().ToString("N"),
                 State: "running",
                 Message: "Scanning ALB logs (pass 1/2).",
                 EndpointFragment: endpointFragment,
+                InputSourceType: inputSource.SourceType.ToString(),
+                InputSourceLabel: inputSource.SelectionLabel,
+                InputSourceSummary: inputSource.Summary,
                 CreatedUtc: DateTime.UtcNow,
                 UpdatedUtc: DateTime.UtcNow,
                 CurrentStep: 0,
@@ -95,7 +111,7 @@ internal sealed class AlbTopIpsJobManager
                 Phase: "pass1",
                 FilesProcessed: 0,
                 FilesTotal: files.Count,
-                TotalBytes: totalBytes,
+                TotalBytes: inputSource.TotalBytes,
                 ExportPath: null,
                 Result: null,
                 Error: null);
@@ -221,23 +237,6 @@ internal sealed class AlbTopIpsJobManager
         }
     }
 
-    private static long SumFileSizesSafe(IEnumerable<string> files)
-    {
-        long total = 0;
-        foreach (var path in files)
-        {
-            try
-            {
-                total += new FileInfo(path).Length;
-            }
-            catch
-            {
-                // ignore size failures
-            }
-        }
-
-        return total;
-    }
 }
 
 internal sealed record AlbTopIpsJobSnapshot(
@@ -245,6 +244,9 @@ internal sealed record AlbTopIpsJobSnapshot(
     string State,
     string Message,
     string EndpointFragment,
+    string InputSourceType,
+    string InputSourceLabel,
+    string InputSourceSummary,
     DateTime CreatedUtc,
     DateTime UpdatedUtc,
     int CurrentStep,
@@ -263,6 +265,9 @@ internal sealed record AlbTopIpsJobSnapshot(
             State: "idle",
             Message: "No ALB endpoint-fragment scan has been run yet.",
             EndpointFragment: string.Empty,
+            InputSourceType: AlbTopIpsInputSourceType.DefaultFolder.ToString(),
+            InputSourceLabel: AppFolders.ALB,
+            InputSourceSummary: $"Default folder | {AppFolders.ALB}",
             CreatedUtc: DateTime.UtcNow,
             UpdatedUtc: DateTime.UtcNow,
             CurrentStep: 0,
