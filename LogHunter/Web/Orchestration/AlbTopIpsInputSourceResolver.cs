@@ -18,6 +18,20 @@ internal static class AlbTopIpsInputSourceResolver
             selectionLabel: AppFolders.ALB);
     }
 
+    public static AlbTopIpsInputSourceSelection ResolveServerPath(string folderPath, AlbTopIpsInputSourceType sourceType)
+    {
+        var files = AlbScanner.GetLogFiles(folderPath);
+        return BuildSelection(sourceType, folderPath, files, folderPath);
+    }
+
+    public static AlbTopIpsInputSourceSelection ResolveServerFiles(IReadOnlyList<string> filePaths)
+    {
+        var logFiles = filePaths
+            .Where(f => f.EndsWith(".log", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return BuildSelection(AlbTopIpsInputSourceType.SelectedFiles, null, logFiles, $"{logFiles.Count} selected file(s)");
+    }
+
     public static bool TryResolve(AlbTopIpsInputSourceRequest request, out AlbTopIpsInputSourceSelection selection, out string? error)
     {
         error = null;
@@ -43,7 +57,7 @@ internal static class AlbTopIpsInputSourceResolver
 
     public static AlbTopIpsInputSourceSelection BuildUploadedSelection(
         AlbTopIpsInputSourceType sourceType,
-        string rootPath,
+        string? rootPath,
         IReadOnlyList<string> files,
         string selectionLabel)
         => BuildSelection(sourceType, rootPath, files, selectionLabel);

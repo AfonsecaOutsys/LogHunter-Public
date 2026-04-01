@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -164,8 +166,21 @@ internal static class AlbApi
             {
                 selection = AlbTopIpsInputSourceResolver.ResolveDefaultFolder();
             }
-            else if (!app.AlbTopIpsStaging.TryBuildSelection(body?.StagingId ?? string.Empty, sourceType, out selection, out error))
+            else if (!string.IsNullOrWhiteSpace(body?.ServerPath))
             {
+                selection = AlbTopIpsInputSourceResolver.ResolveServerPath(body.ServerPath, sourceType);
+            }
+            else if (body?.ServerFilePaths is { Count: > 0 })
+            {
+                selection = AlbTopIpsInputSourceResolver.ResolveServerFiles(body.ServerFilePaths);
+            }
+            else if (!string.IsNullOrWhiteSpace(body?.StagingId) && app.AlbTopIpsStaging.TryBuildSelection(body.StagingId, sourceType, out selection, out error))
+            {
+                // Staging upload path — selection already resolved above.
+            }
+            else
+            {
+                error = "A folder path, file selection, or staged upload is required.";
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
@@ -255,6 +270,52 @@ internal static class AlbApi
             }
 
             await WriteJsonAsync(context.Response, new { ok = true }).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/alb/top-ips-top-paths/browse-folder", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            var folderPath = await NativeFileDialogHelper.BrowseFolderAsync(AppFolders.ALB).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(folderPath))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, cancelled = true }).ConfigureAwait(false);
+                return true;
+            }
+
+            var files = AlbScanner.GetLogFiles(folderPath);
+            var selection = AlbTopIpsInputSourceResolver.BuildUploadedSelection(
+                AlbTopIpsInputSourceType.SelectedFolder, folderPath, files, folderPath);
+
+            await WriteJsonAsync(context.Response, new { ok = true, selection = BuildInputSourcePayload(selection) }).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/alb/top-ips-top-paths/browse-files", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            var filePaths = await NativeFileDialogHelper.BrowseFilesAsync(AppFolders.ALB).ConfigureAwait(false);
+            if (filePaths.Count == 0)
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, cancelled = true }).ConfigureAwait(false);
+                return true;
+            }
+
+            var logFiles = filePaths.Where(f => f.EndsWith(".log", StringComparison.OrdinalIgnoreCase)).ToList();
+            var selection = AlbTopIpsInputSourceResolver.BuildUploadedSelection(
+                AlbTopIpsInputSourceType.SelectedFiles, null, logFiles, $"{logFiles.Count} selected file(s)");
+
+            await WriteJsonAsync(context.Response, new { ok = true, selection = BuildInputSourcePayload(selection) }).ConfigureAwait(false);
             return true;
         }
 
@@ -382,5 +443,7 @@ internal static class AlbApi
         string? EndpointFragment,
         bool ExportXlsx,
         string? SourceType,
-        string? StagingId);
+        string? StagingId,
+        string? ServerPath,
+        IReadOnlyList<string>? ServerFilePaths);
 }

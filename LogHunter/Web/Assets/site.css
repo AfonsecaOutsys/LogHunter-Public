@@ -302,6 +302,13 @@ code {
   background: rgba(255, 255, 255, 0.7);
 }
 
+.button-link.compact {
+  min-height: 32px;
+  padding: 0 14px;
+  font-size: 0.82rem;
+  border-radius: 6px;
+}
+
 .button-link.primary {
   color: var(--button-text);
   border-color: transparent;
@@ -320,6 +327,15 @@ code {
   padding: 20px;
   display: grid;
   gap: 18px;
+}
+
+.panel-tight {
+  gap: 10px;
+  padding: 16px;
+}
+
+.panel-tight h2 {
+  margin: 0 0 6px;
 }
 
 .panel h2,
@@ -525,7 +541,7 @@ code {
 
 .module-two-column {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.6fr);
   gap: 22px;
 }
 
@@ -643,12 +659,82 @@ code {
   margin-top: 18px;
 }
 
+.source-group {
+  display: grid;
+  gap: 10px;
+}
+
+.source-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg-surface-interactive);
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.source-btn:hover {
+  border-color: var(--line-cool-strong);
+  color: var(--text);
+}
+
+.source-btn.active {
+  border-color: var(--accent);
+  background: rgba(29, 111, 95, 0.15);
+  color: var(--text);
+}
+
+:root[data-theme='light'] .source-btn {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+:root[data-theme='light'] .source-btn.active {
+  border-color: #1d6f5f;
+  background: rgba(29, 111, 95, 0.1);
+  color: #114b43;
+}
+
+.source-btn--clear {
+  color: var(--muted);
+  border-style: dashed;
+}
+
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+    var(--bg-surface-passive);
+  width: fit-content;
+  max-width: 100%;
+  word-break: break-word;
+}
+
+:root[data-theme='light'] .source-chip {
+  background: rgba(255, 255, 255, 0.5);
+}
+
 .field {
   display: grid;
   gap: 8px;
 }
 
-.field label {
+.field label,
+.field-label {
   font-size: 0.92rem;
   color: var(--muted);
   font-weight: 600;
@@ -1026,6 +1112,13 @@ code {
   border: 1px solid rgba(255, 120, 120, 0.28);
   background: rgba(255, 120, 120, 0.12);
   color: #ffb3b3;
+}
+
+.export-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .result-summary {

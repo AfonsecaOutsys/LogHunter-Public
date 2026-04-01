@@ -113,18 +113,8 @@ internal static class AlbPageBuilder
         <section class="hero">
           <div class="hero-grid">
             <div>
-              <div class="eyebrow">Download Workflow</div>
               <h1>Download logs from S3</h1>
-              <p>This page wraps the existing ALB download flow for the browser. It reuses the same ALB workspace structure, config persistence, AWS CLI usage, automatic region derivation from the bucket, pruning, and extraction behavior as the console workflow.</p>
-            </div>
-
-            <div class="panel">
-              <h2>Expected input</h2>
-              <ul class="list-clean">
-                <li>The details for a new config, or an existing saved config if you already have one.</li>
-                <li>The three AWS environment lines for this session.</li>
-                <li>A UTC start/end window using 5-minute increments.</li>
-              </ul>
+              <p>Download ALB logs using AWS CLI credentials and a UTC time window.</p>
             </div>
           </div>
         </section>
@@ -135,9 +125,10 @@ internal static class AlbPageBuilder
             <div id="albDownloadError" class="inline-error" hidden></div>
 
             <div class="field-group">
-              <div class="field-row">
-                <label class="choice-pill"><input type="radio" name="configMode" value="new" checked> Create or update config</label>
-                <label class="choice-pill"><input type="radio" name="configMode" value="saved"> Use saved config</label>
+              <label class="field-label">Configuration</label>
+              <div class="button-row source-action-row">
+                <button id="configModeNew" class="source-btn active" type="button" data-config-mode="new">New config</button>
+                <button id="configModeSaved" class="source-btn" type="button" data-config-mode="saved">Saved config</button>
               </div>
             </div>
 
@@ -240,28 +231,26 @@ internal static class AlbPageBuilder
             </div>
           </section>
 
-          <section class="panel">
+          <section class="panel panel-tight">
             <h2>Job status</h2>
             <div class="status-block">
               <div class="status-pill"><span>Status</span><strong id="albJobState">idle</strong></div>
               <div class="status-pill"><span>Stage</span><strong id="albJobStage">idle</strong></div>
             </div>
-            <p id="albJobMessage" class="page-copy">No ALB download has been started yet.</p>
+            <p id="albJobMessage" class="page-copy">Idle.</p>
             <div id="albJobStep" class="footer-note"></div>
-
-            <div class="result-summary">
-              <div class="result-card progress-card-compact">
-                <div class="progress-card-head">
-                  <div class="info-label" id="albPrimaryLabel">Overall progress</div>
-                  <div id="albPrimaryStageBadge" class="kicker">idle</div>
-                </div>
-                <div id="albPrimarySummary" class="info-value">Waiting for a job to start.</div>
-                <div class="progress-track"><div id="albPrimaryBar" class="progress-fill" style="width:0%"></div></div>
-                <div id="albPrimaryMeta" class="footer-note">No ALB job is running.</div>
-                <div class="button-row">
-                  <button id="albOpenRunFolder" class="button-link button-like" type="button">Open logs folder</button>
-                </div>
+            <div class="export-row">
+              <div id="albJobMeta" class="footer-note"></div>
+              <button id="albOpenRunFolder" class="button-link primary button-like compact" type="button" hidden>Open logs folder</button>
+            </div>
+            <div class="result-card progress-card-compact">
+              <div class="progress-card-head">
+                <div class="info-label" id="albPrimaryLabel">Overall progress</div>
+                <div id="albPrimaryStageBadge" class="kicker">idle</div>
               </div>
+              <div id="albPrimarySummary" class="info-value">Waiting for a job to start.</div>
+              <div class="progress-track"><div id="albPrimaryBar" class="progress-fill" style="width:0%"></div></div>
+              <div id="albPrimaryMeta" class="footer-note">No job running.</div>
             </div>
 
             <div id="albCurrentDaySection" class="result-summary" hidden>
@@ -315,18 +304,8 @@ internal static class AlbPageBuilder
         <section class="hero">
           <div class="hero-grid">
             <div>
-              <div class="eyebrow">Workflow</div>
               <h1>Top IPs + top full paths</h1>
-              <p>Match an endpoint or path fragment, rank the top matching client IPs, then break each one down by full URI path without query strings.</p>
-            </div>
-
-            <div class="panel">
-              <h2>What this scans</h2>
-              <ul class="list-clean">
-                <li>Pass 1: top client IPs whose requests contain the fragment.</li>
-                <li>Pass 2: top full paths per matching top IP.</li>
-                <li>Optional export: the same grouped workbook the console flow writes.</li>
-              </ul>
+              <p>Rank the top client IPs matching an endpoint fragment, then break each down by full URI path.</p>
             </div>
           </div>
         </section>
@@ -343,61 +322,21 @@ internal static class AlbPageBuilder
               </div>
             </div>
 
-            <div class="field-group option2-flow-stack">
-              <section class="option2-step-card option2-step-card--selector">
-                <div class="option2-step-head">
-                  <div>
-                    <div class="eyebrow">Step 1</div>
-                    <h3>Choose input source</h3>
-                  </div>
-                  <p class="footer-note">Pick how this scan will get its ALB logs.</p>
-                </div>
-                <div class="field source-mode-field">
-                  <div class="field-row option2-mode-row option2-mode-row--segmented">
-                    <label class="choice-pill choice-pill--compact choice-pill--segmented">
-                      <input type="radio" name="albOption2SourceType" value="default" checked>
-                      <span>Use default folder</span>
-                    </label>
-                    <label class="choice-pill choice-pill--compact choice-pill--segmented">
-                      <input type="radio" name="albOption2SourceType" value="folder">
-                      <span>Select folder</span>
-                    </label>
-                    <label class="choice-pill choice-pill--compact choice-pill--segmented">
-                      <input type="radio" name="albOption2SourceType" value="files">
-                      <span>Select files</span>
-                    </label>
-                  </div>
-                </div>
-              </section>
-
-              <section class="option2-step-card option2-step-card--action">
-                <div class="option2-step-head">
-                  <div>
-                    <div class="eyebrow">Step 2</div>
-                    <h3>Select files or folder</h3>
-                  </div>
-                  <p class="footer-note">Provide the actual scan input for the chosen mode.</p>
-                </div>
-                <div class="button-row source-action-row">
-                  <button id="albOption2ChooseSource" class="button-link primary button-like" type="button" hidden>Select source</button>
-                  <button id="albOption2ClearSelection" class="button-link button-like" type="button" hidden>Clear selection</button>
-                </div>
-                <input id="albOption2FolderInput" type="file" webkitdirectory directory multiple hidden>
-                <input id="albOption2FilesInput" type="file" multiple accept=".log" hidden>
-                <div id="albOption2SourceHelper" class="footer-note source-helper">Default folder will be used unless you choose another source.</div>
-                <div class="selection-summary-card">
-                  <div class="selection-summary-head">
-                    <div id="albOption2SourceTitle" class="selection-summary-title">Workspace ALB folder</div>
-                    <div id="albOption2SourceMeta" class="kicker">Default</div>
-                  </div>
-                  <div id="albOption2SourceSummary" class="selection-summary-body">Loading source details...</div>
-                  <div id="albOption2SourcePreview" class="selection-chip-row" hidden></div>
-                </div>
-              </section>
+            <div class="field-group source-group">
+              <label class="field-label">Log source</label>
+              <div class="button-row source-action-row">
+                <button id="albOption2UseDefault" class="source-btn active" type="button">Default folder</button>
+                <button id="albOption2SelectFolder" class="source-btn" type="button">Select folder</button>
+                <button id="albOption2SelectFiles" class="source-btn" type="button">Select files</button>
+                <button id="albOption2ClearSelection" class="source-btn source-btn--clear" type="button" hidden>Clear</button>
+              </div>
+              <input id="albOption2FolderInput" type="file" webkitdirectory directory multiple hidden>
+              <input id="albOption2FilesInput" type="file" multiple accept=".log" hidden>
+              <div id="albOption2SourceChip" class="source-chip">Loading...</div>
             </div>
 
             <div class="field-group">
-              <label class="choice-pill"><input id="albOption2Export" type="checkbox" checked> Export grouped workbook</label>
+              <label class="choice-pill"><input id="albOption2Export" type="checkbox" checked> Export to Excel</label>
             </div>
 
             <div class="button-row">
@@ -405,29 +344,27 @@ internal static class AlbPageBuilder
             </div>
           </section>
 
-          <section class="panel">
+          <section class="panel panel-tight">
             <h2>Scan status</h2>
             <div class="status-block">
               <div class="status-pill"><span>Status</span><strong id="albOption2State">idle</strong></div>
               <div class="status-pill"><span>Phase</span><strong id="albOption2Phase">idle</strong></div>
               <div class="status-pill"><span>Matches</span><strong id="albOption2Matches">0</strong></div>
             </div>
-            <p id="albOption2Message" class="page-copy">No ALB endpoint-fragment scan has been run yet.</p>
+            <p id="albOption2Message" class="page-copy">Idle.</p>
             <div id="albOption2Meta" class="footer-note"></div>
-            <div id="albOption2ExportPath" class="footer-note"></div>
-            <div class="button-row">
-              <button id="albOption2OpenExport" class="button-link button-like" type="button" hidden>Open workbook</button>
+            <div class="export-row">
+              <div id="albOption2ExportPath" class="footer-note"></div>
+              <button id="albOption2OpenExport" class="button-link primary button-like compact" type="button" hidden>Open Excel</button>
             </div>
-            <div class="result-summary">
-              <div class="result-card progress-card-compact">
-                <div class="progress-card-head">
-                  <div class="info-label">Scan progress</div>
-                  <div id="albOption2StageBadge" class="kicker">idle</div>
-                </div>
-                <div id="albOption2Summary" class="info-value">Waiting for a scan to start.</div>
-                <div class="progress-track"><div id="albOption2Bar" class="progress-fill" style="width:0%"></div></div>
-                <div id="albOption2BarMeta" class="footer-note">No ALB option 2 scan is running.</div>
+            <div class="result-card progress-card-compact">
+              <div class="progress-card-head">
+                <div class="info-label">Scan progress</div>
+                <div id="albOption2StageBadge" class="kicker">idle</div>
               </div>
+              <div id="albOption2Summary" class="info-value">Waiting for a scan to start.</div>
+              <div class="progress-track"><div id="albOption2Bar" class="progress-fill" style="width:0%"></div></div>
+              <div id="albOption2BarMeta" class="footer-note">No scan running.</div>
             </div>
           </section>
         </section>
