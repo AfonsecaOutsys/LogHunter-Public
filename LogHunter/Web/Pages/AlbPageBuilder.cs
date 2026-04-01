@@ -353,10 +353,19 @@ internal static class AlbPageBuilder
                   <p class="footer-note">Pick how this scan will get its ALB logs.</p>
                 </div>
                 <div class="field source-mode-field">
-                  <div class="field-row option2-mode-row">
-                    <label class="choice-pill choice-pill--compact"><input type="radio" name="albOption2SourceType" value="default" checked> Use default folder</label>
-                    <label class="choice-pill choice-pill--compact"><input type="radio" name="albOption2SourceType" value="folder"> Select folder</label>
-                    <label class="choice-pill choice-pill--compact"><input type="radio" name="albOption2SourceType" value="files"> Select files</label>
+                  <div class="field-row option2-mode-row option2-mode-row--segmented">
+                    <label class="choice-pill choice-pill--compact choice-pill--segmented">
+                      <input type="radio" name="albOption2SourceType" value="default" checked>
+                      <span>Use default folder</span>
+                    </label>
+                    <label class="choice-pill choice-pill--compact choice-pill--segmented">
+                      <input type="radio" name="albOption2SourceType" value="folder">
+                      <span>Select folder</span>
+                    </label>
+                    <label class="choice-pill choice-pill--compact choice-pill--segmented">
+                      <input type="radio" name="albOption2SourceType" value="files">
+                      <span>Select files</span>
+                    </label>
                   </div>
                 </div>
               </section>
