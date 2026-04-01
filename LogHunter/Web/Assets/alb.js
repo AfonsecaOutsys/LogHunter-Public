@@ -692,12 +692,12 @@
     setHidden(clearButton, !selection);
 
     if (chooseButton) {
-      chooseButton.textContent = isFolder ? 'Select folder to scan' : 'Choose files';
+      chooseButton.textContent = isFolder ? 'Choose folder' : 'Choose files';
     }
 
     if (sourceType === 'default') {
       if (helperNode) {
-        helperNode.textContent = 'Uses the current workspace ALB folder.';
+        helperNode.textContent = 'The scan will use the current workspace ALB folder.';
       }
       if (titleNode) {
         titleNode.textContent = 'Workspace ALB folder';
@@ -722,8 +722,8 @@
     if (!selection) {
       if (helperNode) {
         helperNode.textContent = isFolder
-          ? 'Browser folder upload is standard here: select the folder itself, then confirm Upload. Opening the folder and uploading from inside it will not select that folder.'
-          : 'Choose one or more .log files. The browser will attach only the files you pick.';
+          ? 'Select the folder itself in the browser picker, then confirm Upload.'
+          : 'Choose one or more .log files to attach for this scan.';
       }
       if (titleNode) {
         titleNode.textContent = isFolder ? 'No folder selected yet' : 'No files selected yet';
@@ -733,7 +733,7 @@
       }
       if (summaryNode) {
         summaryNode.textContent = isFolder
-          ? 'Select the folder you want to scan. The browser will show its standard folder-upload confirmation.'
+          ? 'No folder selected yet. Pick the folder you want to scan.'
           : 'Select one or more .log files to scan directly.';
       }
 

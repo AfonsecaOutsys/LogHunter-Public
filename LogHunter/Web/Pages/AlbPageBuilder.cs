@@ -343,30 +343,48 @@ internal static class AlbPageBuilder
               </div>
             </div>
 
-            <div class="field-group">
-              <div class="field source-mode-field">
-                <label>Input source</label>
-                <div class="field-row">
-                  <label class="choice-pill"><input type="radio" name="albOption2SourceType" value="default" checked> Use default folder</label>
-                  <label class="choice-pill"><input type="radio" name="albOption2SourceType" value="folder"> Select folder</label>
-                  <label class="choice-pill"><input type="radio" name="albOption2SourceType" value="files"> Select files</label>
+            <div class="field-group option2-flow-stack">
+              <section class="option2-step-card option2-step-card--selector">
+                <div class="option2-step-head">
+                  <div>
+                    <div class="eyebrow">Step 1</div>
+                    <h3>Choose input source</h3>
+                  </div>
+                  <p class="footer-note">Pick how this scan will get its ALB logs.</p>
                 </div>
-              </div>
-              <div class="button-row source-action-row">
-                <button id="albOption2ChooseSource" class="button-link primary button-like" type="button" hidden>Select source</button>
-                <button id="albOption2ClearSelection" class="button-link button-like" type="button" hidden>Clear selection</button>
-              </div>
-              <input id="albOption2FolderInput" type="file" webkitdirectory directory multiple hidden>
-              <input id="albOption2FilesInput" type="file" multiple accept=".log" hidden>
-              <div id="albOption2SourceHelper" class="footer-note source-helper">Default folder will be used unless you choose another source.</div>
-              <div class="selection-summary-card">
-                <div class="selection-summary-head">
-                  <div id="albOption2SourceTitle" class="selection-summary-title">Workspace ALB folder</div>
-                  <div id="albOption2SourceMeta" class="kicker">Default</div>
+                <div class="field source-mode-field">
+                  <div class="field-row option2-mode-row">
+                    <label class="choice-pill choice-pill--compact"><input type="radio" name="albOption2SourceType" value="default" checked> Use default folder</label>
+                    <label class="choice-pill choice-pill--compact"><input type="radio" name="albOption2SourceType" value="folder"> Select folder</label>
+                    <label class="choice-pill choice-pill--compact"><input type="radio" name="albOption2SourceType" value="files"> Select files</label>
+                  </div>
                 </div>
-                <div id="albOption2SourceSummary" class="selection-summary-body">Loading source details...</div>
-                <div id="albOption2SourcePreview" class="selection-chip-row" hidden></div>
-              </div>
+              </section>
+
+              <section class="option2-step-card option2-step-card--action">
+                <div class="option2-step-head">
+                  <div>
+                    <div class="eyebrow">Step 2</div>
+                    <h3>Select files or folder</h3>
+                  </div>
+                  <p class="footer-note">Provide the actual scan input for the chosen mode.</p>
+                </div>
+                <div class="button-row source-action-row">
+                  <button id="albOption2ChooseSource" class="button-link primary button-like" type="button" hidden>Select source</button>
+                  <button id="albOption2ClearSelection" class="button-link button-like" type="button" hidden>Clear selection</button>
+                </div>
+                <input id="albOption2FolderInput" type="file" webkitdirectory directory multiple hidden>
+                <input id="albOption2FilesInput" type="file" multiple accept=".log" hidden>
+                <div id="albOption2SourceHelper" class="footer-note source-helper">Default folder will be used unless you choose another source.</div>
+                <div class="selection-summary-card">
+                  <div class="selection-summary-head">
+                    <div id="albOption2SourceTitle" class="selection-summary-title">Workspace ALB folder</div>
+                    <div id="albOption2SourceMeta" class="kicker">Default</div>
+                  </div>
+                  <div id="albOption2SourceSummary" class="selection-summary-body">Loading source details...</div>
+                  <div id="albOption2SourcePreview" class="selection-chip-row" hidden></div>
+                </div>
+              </section>
             </div>
 
             <div class="field-group">

@@ -771,14 +771,76 @@ code {
   gap: 12px;
 }
 
+.option2-flow-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.option2-step-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line-cool);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+    color-mix(in srgb, var(--bg-surface-passive) 88%, rgba(11, 17, 29, 0.12) 12%);
+  box-shadow: var(--shadow-soft);
+}
+
+.option2-step-card--selector {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.012), rgba(255, 255, 255, 0)),
+    color-mix(in srgb, var(--bg-surface-passive) 82%, rgba(12, 18, 30, 0.06) 18%);
+}
+
+.option2-step-card--action {
+  border-color: var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0)),
+    color-mix(in srgb, var(--bg-surface-interactive) 76%, rgba(12, 18, 30, 0.12) 24%);
+}
+
+.option2-step-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.option2-step-head h3 {
+  margin: 6px 0 0;
+  font-size: 1rem;
+}
+
+.option2-step-head .footer-note {
+  margin: 0;
+  max-width: 26rem;
+}
+
+.option2-mode-row {
+  gap: 10px;
+}
+
+.choice-pill--compact {
+  padding: 8px 12px;
+  min-height: 0;
+  box-shadow: none;
+  font-size: 0.9rem;
+}
+
+.choice-pill--compact input {
+  transform: scale(0.94);
+}
+
 .source-action-row {
   align-items: center;
-  margin-top: 14px;
+  margin-top: 0;
 }
 
 .source-helper {
-  margin-top: 2px;
-  max-width: 62ch;
+  margin-top: 0;
+  max-width: 58ch;
 }
 
 .selection-summary-card {
@@ -786,11 +848,11 @@ code {
   gap: 12px;
   padding: 16px 18px;
   border-radius: 18px;
-  border: 1px solid var(--line-cool);
+  border: 1px solid var(--line);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0)),
     color-mix(in srgb, var(--bg-surface-passive) 86%, rgba(12, 18, 31, 0.24) 14%);
-  box-shadow: var(--shadow-soft);
+  box-shadow: none;
 }
 
 .selection-summary-head {
@@ -823,12 +885,12 @@ code {
   display: inline-flex;
   align-items: center;
   max-width: min(100%, 220px);
-  padding: 7px 11px;
+  padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.045);
   color: var(--muted);
-  font-size: 0.86rem;
+  font-size: 0.82rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
