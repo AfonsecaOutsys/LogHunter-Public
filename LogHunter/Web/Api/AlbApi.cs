@@ -156,12 +156,15 @@ internal static class AlbApi
                 return true;
             }
 
-            var inputRequest = new AlbTopIpsInputSourceRequest(
-                SourceType: body?.SourceType ?? "default",
-                FolderPath: body?.FolderPath,
-                FilePaths: body?.FilePaths ?? Array.Empty<string>());
+            var sourceType = AlbTopIpsInputSourceResolver.NormalizeSourceType(body?.SourceType);
+            AlbTopIpsInputSourceSelection selection;
+            string? error;
 
-            if (!AlbTopIpsInputSourceResolver.TryResolve(inputRequest, out var selection, out var error))
+            if (sourceType == AlbTopIpsInputSourceType.DefaultFolder)
+            {
+                selection = AlbTopIpsInputSourceResolver.ResolveDefaultFolder();
+            }
+            else if (!app.AlbTopIpsStaging.TryBuildSelection(body?.StagingId ?? string.Empty, sourceType, out selection, out error))
             {
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
@@ -194,7 +197,7 @@ internal static class AlbApi
             return true;
         }
 
-        if (string.Equals(path, "/api/alb/top-ips-top-paths/pick-folder", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(path, "/api/alb/top-ips-top-paths/staging/start", StringComparison.OrdinalIgnoreCase))
         {
             if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
             {
@@ -202,24 +205,30 @@ internal static class AlbApi
                 return true;
             }
 
-            if (!WindowsPathPicker.TryPickFolder(out var folderPath, out var pickerError))
+            AlbTopIpsStagingStartRequest? body;
+            try
             {
-                await WriteJsonAsync(context.Response, new { ok = false, error = pickerError }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                body = await ReadJsonAsync<AlbTopIpsStagingStartRequest>(context.Request).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = ex.Message }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
 
-            var request = new AlbTopIpsInputSourceRequest("folder", folderPath, Array.Empty<string>());
-            if (!AlbTopIpsInputSourceResolver.TryResolve(request, out var selection, out var error))
+            var sourceType = AlbTopIpsInputSourceResolver.NormalizeSourceType(body?.SourceType);
+            if (sourceType == AlbTopIpsInputSourceType.DefaultFolder)
             {
-                await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                await WriteJsonAsync(context.Response, new { ok = false, error = "Staging is only used for selected folder or selected files." }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
 
-            await WriteJsonAsync(context.Response, new { ok = true, selection = BuildInputSourcePayload(selection) }).ConfigureAwait(false);
+            var stagingId = app.AlbTopIpsStaging.CreateSession(sourceType);
+            await WriteJsonAsync(context.Response, new { ok = true, stagingId }).ConfigureAwait(false);
             return true;
         }
 
-        if (string.Equals(path, "/api/alb/top-ips-top-paths/pick-files", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(path, "/api/alb/top-ips-top-paths/staging/upload", StringComparison.OrdinalIgnoreCase))
         {
             if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
             {
@@ -227,20 +236,25 @@ internal static class AlbApi
                 return true;
             }
 
-            if (!WindowsPathPicker.TryPickFiles(out var files, out var pickerError))
+            var stagingId = context.Request.QueryString["stagingId"];
+            var relativePath = context.Request.QueryString["relativePath"];
+            if (string.IsNullOrWhiteSpace(stagingId) || string.IsNullOrWhiteSpace(relativePath))
             {
-                await WriteJsonAsync(context.Response, new { ok = false, error = pickerError }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                await WriteJsonAsync(context.Response, new { ok = false, error = "stagingId and relativePath are required." }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
 
-            var request = new AlbTopIpsInputSourceRequest("files", null, files);
-            if (!AlbTopIpsInputSourceResolver.TryResolve(request, out var selection, out var error))
+            try
             {
-                await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                app.AlbTopIpsStaging.SaveFile(stagingId, relativePath, context.Request.InputStream);
+            }
+            catch (Exception ex)
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = ex.Message }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
 
-            await WriteJsonAsync(context.Response, new { ok = true, selection = BuildInputSourcePayload(selection) }).ConfigureAwait(false);
+            await WriteJsonAsync(context.Response, new { ok = true }).ConfigureAwait(false);
             return true;
         }
 
@@ -362,10 +376,10 @@ internal static class AlbApi
         string? EndUtc);
 
     private sealed record AlbOpenFolderRequest(string? JobId);
+    private sealed record AlbTopIpsStagingStartRequest(string? SourceType);
     private sealed record AlbTopIpsTopPathsRequest(
         string? EndpointFragment,
         bool ExportXlsx,
         string? SourceType,
-        string? FolderPath,
-        string[]? FilePaths);
+        string? StagingId);
 }

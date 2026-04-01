@@ -630,6 +630,44 @@
     };
   }
 
+  function buildAlbOption2BrowserSelection(sourceType, files) {
+    const items = Array.from(files || [])
+      .filter((file) => file && typeof file.name === 'string' && file.name.toLowerCase().endsWith('.log'));
+
+    const totalBytes = items.reduce((sum, file) => sum + Number(file.size || 0), 0);
+    const previewItems = items.slice(0, 3).map((file) => file.name);
+    const folderName = sourceType === 'folder' && items.length
+      ? getTopFolderName(items[0])
+      : '';
+
+    const selectionLabel = sourceType === 'folder'
+      ? (folderName || 'Selected folder')
+      : `${items.length} selected file(s)`;
+
+    const summary = sourceType === 'folder'
+      ? `${selectionLabel} | ${items.length} .log files | ${formatBytes(totalBytes)}`
+      : `${items.length} selected file(s) | ${formatBytes(totalBytes)}`;
+
+    return {
+      sourceType,
+      files: items,
+      fileCount: items.length,
+      totalBytes,
+      selectionLabel,
+      summary,
+      previewItems
+    };
+  }
+
+  function getTopFolderName(file) {
+    const relativePath = typeof file.webkitRelativePath === 'string' ? file.webkitRelativePath : '';
+    if (!relativePath || !relativePath.includes('/')) {
+      return '';
+    }
+
+    return relativePath.split('/')[0] || '';
+  }
+
   function getAlbOption2SourceType() {
     return document.querySelector('input[name="albOption2SourceType"]:checked')?.value || 'default';
   }
@@ -640,50 +678,53 @@
     const isFiles = sourceType === 'files';
     const summaryNode = byId('albOption2SourceSummary');
     const previewNode = byId('albOption2SourcePreview');
-    const pickFolderButton = byId('albOption2PickFolder');
-    const pickFilesButton = byId('albOption2PickFiles');
+    const chooseButton = byId('albOption2ChooseSource');
     const clearButton = byId('albOption2ClearSelection');
+    const selection = albOption2Selection && albOption2Selection.sourceType === sourceType ? albOption2Selection : null;
 
-    setHidden(pickFolderButton, !isFolder);
-    setHidden(pickFilesButton, !isFiles);
-    setHidden(clearButton, sourceType === 'default' || !albOption2Selection || albOption2Selection.sourceType !== sourceType);
+    setHidden(chooseButton, sourceType === 'default');
+    setHidden(clearButton, !selection);
+
+    if (chooseButton) {
+      chooseButton.textContent = isFolder ? 'Choose folder' : 'Choose files';
+    }
 
     if (sourceType === 'default') {
-      const selection = albOption2DefaultSelection;
       if (summaryNode) {
-        summaryNode.textContent = selection?.summary || 'Default folder will be used.';
+        summaryNode.textContent = albOption2DefaultSelection?.summary || 'Default folder will be used.';
       }
 
       if (previewNode) {
-        previewNode.textContent = selection?.selectionLabel ? `Source: ${selection.selectionLabel}` : '';
+        previewNode.textContent = albOption2DefaultSelection?.selectionLabel
+          ? `Source: ${albOption2DefaultSelection.selectionLabel}`
+          : '';
       }
 
       return;
     }
 
-    const hasMatchingSelection = albOption2Selection && albOption2Selection.sourceType === sourceType;
-    if (!hasMatchingSelection) {
+    if (!selection) {
       if (summaryNode) {
         summaryNode.textContent = isFolder
-          ? 'No folder selected yet.'
-          : 'No files selected yet.';
+          ? 'Choose a folder to scan its .log files recursively.'
+          : 'Choose one or more .log files to scan directly.';
       }
 
       if (previewNode) {
         previewNode.textContent = isFolder
-          ? 'Choose a folder to scan its .log files recursively.'
-          : 'Choose one or more .log files to scan directly.';
+          ? 'Folder contents stay in the browser until you run the scan.'
+          : 'Selected files will be uploaded only when you run the scan.';
       }
 
       return;
     }
 
     if (summaryNode) {
-      summaryNode.textContent = albOption2Selection.summary;
+      summaryNode.textContent = selection.summary;
     }
 
     if (previewNode) {
-      const preview = Array.isArray(albOption2Selection.previewItems) ? albOption2Selection.previewItems : [];
+      const preview = Array.isArray(selection.previewItems) ? selection.previewItems : [];
       previewNode.textContent = preview.length
         ? `Preview: ${preview.join(', ')}`
         : '';
@@ -716,43 +757,95 @@
     }
   }
 
-  async function pickAlbOption2Folder() {
+  function chooseAlbOption2Source() {
     setAlbOption2Error('');
-    try {
-      const payload = await fetchJson('/api/alb/top-ips-top-paths/pick-folder', {
-        method: 'POST',
-        body: JSON.stringify({})
-      });
+    const sourceType = getAlbOption2SourceType();
+    if (sourceType === 'folder') {
+      byId('albOption2FolderInput')?.click();
+      return;
+    }
 
-      setAlbOption2Selection(payload.selection, 'folder');
-    } catch (error) {
-      setAlbOption2Error(String(error));
+    if (sourceType === 'files') {
+      byId('albOption2FilesInput')?.click();
     }
   }
 
-  async function pickAlbOption2Files() {
-    setAlbOption2Error('');
-    try {
-      const payload = await fetchJson('/api/alb/top-ips-top-paths/pick-files', {
-        method: 'POST',
-        body: JSON.stringify({})
-      });
-
-      setAlbOption2Selection(payload.selection, 'files');
-    } catch (error) {
-      setAlbOption2Error(String(error));
-    }
-  }
-
-  function clearAlbOption2Selection() {
-    albOption2Selection = null;
+  function handleAlbOption2FolderInput() {
+    const input = byId('albOption2FolderInput');
+    const files = input?.files ? Array.from(input.files) : [];
+    albOption2Selection = buildAlbOption2BrowserSelection('folder', files);
     renderAlbOption2Selection();
     setAlbOption2Error('');
   }
 
+  function handleAlbOption2FilesInput() {
+    const input = byId('albOption2FilesInput');
+    const files = input?.files ? Array.from(input.files) : [];
+    albOption2Selection = buildAlbOption2BrowserSelection('files', files);
+    renderAlbOption2Selection();
+    setAlbOption2Error('');
+  }
+
+  function clearAlbOption2Selection() {
+    albOption2Selection = null;
+    const folderInput = byId('albOption2FolderInput');
+    const filesInput = byId('albOption2FilesInput');
+    if (folderInput) {
+      folderInput.value = '';
+    }
+    if (filesInput) {
+      filesInput.value = '';
+    }
+    renderAlbOption2Selection();
+    setAlbOption2Error('');
+  }
+
+  async function createAlbOption2StagingSession(sourceType) {
+    const payload = await fetchJson('/api/alb/top-ips-top-paths/staging/start', {
+      method: 'POST',
+      body: JSON.stringify({ sourceType })
+    });
+
+    return payload.stagingId || '';
+  }
+
+  async function uploadAlbOption2Selection(selection) {
+    const stagingId = await createAlbOption2StagingSession(selection.sourceType);
+    if (!stagingId) {
+      throw new Error('Unable to create an upload session.');
+    }
+
+    for (const file of selection.files) {
+      const relativePath = selection.sourceType === 'folder' && file.webkitRelativePath
+        ? file.webkitRelativePath
+        : file.name;
+
+      const response = await fetch(`/api/alb/top-ips-top-paths/staging/upload?stagingId=${encodeURIComponent(stagingId)}&relativePath=${encodeURIComponent(relativePath)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream'
+        },
+        body: file
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || `Upload failed for ${file.name}.`);
+      }
+    }
+
+    return stagingId;
+  }
+
   async function runAlbOption2() {
     const sourceType = getAlbOption2SourceType();
-    const hasMatchingSelection = albOption2Selection && albOption2Selection.sourceType === sourceType;
+    const selection = albOption2Selection && albOption2Selection.sourceType === sourceType ? albOption2Selection : null;
 
     setAlbOption2Error('');
     setText('albOption2State', 'running');
@@ -774,7 +867,7 @@
       return;
     }
 
-    if (sourceType !== 'default' && !hasMatchingSelection) {
+    if (sourceType !== 'default' && !selection) {
       setText('albOption2State', 'idle');
       setAlbOption2Error(sourceType === 'folder'
         ? 'Select a folder before running the scan.'
@@ -783,17 +876,35 @@
       return;
     }
 
+    if (selection && selection.fileCount === 0) {
+      setText('albOption2State', 'idle');
+      setAlbOption2Error(sourceType === 'folder'
+        ? 'The selected folder does not contain any .log files.'
+        : 'Select one or more .log files before running the scan.');
+      renderAlbOption2Selection();
+      return;
+    }
+
     albOption2JobId = '';
 
     try {
+      let stagingId = '';
+      if (selection) {
+        setText('albOption2Message', sourceType === 'folder'
+          ? 'Uploading selected folder files...'
+          : 'Uploading selected files...');
+        setText('albOption2Summary', `Preparing ${selection.fileCount} file(s) for scanning`);
+        setText('albOption2BarMeta', 'Uploading selected logs to the local web session.');
+        stagingId = await uploadAlbOption2Selection(selection);
+      }
+
       const payload = await fetchJson('/api/alb/top-ips-top-paths/run', {
         method: 'POST',
         body: JSON.stringify({
           endpointFragment: endpoint,
           exportXlsx: Boolean(byId('albOption2Export')?.checked),
           sourceType,
-          folderPath: sourceType === 'folder' && hasMatchingSelection ? albOption2Selection.rootPath || '' : '',
-          filePaths: sourceType === 'files' && hasMatchingSelection ? albOption2Selection.filePaths || [] : []
+          stagingId
         })
       });
 
@@ -957,9 +1068,10 @@
 
     byId('albOption2Run')?.addEventListener('click', runAlbOption2);
     byId('albOption2OpenExport')?.addEventListener('click', openAlbOption2Export);
-    byId('albOption2PickFolder')?.addEventListener('click', pickAlbOption2Folder);
-    byId('albOption2PickFiles')?.addEventListener('click', pickAlbOption2Files);
+    byId('albOption2ChooseSource')?.addEventListener('click', chooseAlbOption2Source);
     byId('albOption2ClearSelection')?.addEventListener('click', clearAlbOption2Selection);
+    byId('albOption2FolderInput')?.addEventListener('change', handleAlbOption2FolderInput);
+    byId('albOption2FilesInput')?.addEventListener('change', handleAlbOption2FilesInput);
     byId('albOption2Endpoint')?.addEventListener('input', () => {
       setAlbOption2Error('');
     });

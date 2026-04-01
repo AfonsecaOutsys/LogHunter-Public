@@ -15,6 +15,8 @@ public static class AppFolders
     public static readonly string IIS = Path.Combine(Base, "IIS");
     public static readonly string PlatformLogs = Path.Combine(Base, "PlatformLogs");
     public static readonly string Output = Path.Combine(Base, "output");
+    public static readonly string WebTemp = Path.Combine(Base, "web-temp");
+    public static readonly string WebAlbOption2Staging = Path.Combine(WebTemp, "alb-option2");
 
     // Shared static assets (JS/CSS/etc) used by HTML reports.
     // Now under: ALB\configs\_assets
@@ -29,6 +31,8 @@ public static class AppFolders
         Directory.CreateDirectory(IIS);
         Directory.CreateDirectory(PlatformLogs);
         Directory.CreateDirectory(Output);
+        Directory.CreateDirectory(WebTemp);
+        Directory.CreateDirectory(WebAlbOption2Staging);
 
         Directory.CreateDirectory(Assets);
     }

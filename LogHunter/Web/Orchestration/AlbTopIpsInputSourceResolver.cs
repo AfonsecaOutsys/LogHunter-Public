@@ -29,54 +29,9 @@ internal static class AlbTopIpsInputSourceResolver
             return true;
         }
 
-        if (sourceType == AlbTopIpsInputSourceType.SelectedFolder)
-        {
-            var folderPath = request.FolderPath?.Trim();
-            if (string.IsNullOrWhiteSpace(folderPath))
-            {
-                selection = AlbTopIpsInputSourceSelection.Empty(sourceType);
-                error = "Select a folder before running the scan.";
-                return false;
-            }
-
-            if (!Directory.Exists(folderPath))
-            {
-                selection = AlbTopIpsInputSourceSelection.Empty(sourceType);
-                error = $"Folder not found: {folderPath}";
-                return false;
-            }
-
-            var files = AlbScanner.GetLogFiles(folderPath);
-            selection = BuildSelection(sourceType, folderPath, files, folderPath);
-            return true;
-        }
-
-        var selectedFiles = (request.FilePaths ?? Array.Empty<string>())
-            .Where(static path => !string.IsNullOrWhiteSpace(path))
-            .Select(static path => path.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (selectedFiles.Count == 0)
-        {
-            selection = AlbTopIpsInputSourceSelection.Empty(sourceType);
-            error = "Select one or more log files before running the scan.";
-            return false;
-        }
-
-        var existingFiles = selectedFiles
-            .Where(File.Exists)
-            .ToList();
-
-        if (existingFiles.Count == 0)
-        {
-            selection = AlbTopIpsInputSourceSelection.Empty(sourceType);
-            error = "None of the selected files are available anymore.";
-            return false;
-        }
-
-        selection = BuildSelection(sourceType, null, existingFiles, $"{existingFiles.Count} selected file(s)");
-        return true;
+        selection = AlbTopIpsInputSourceSelection.Empty(sourceType);
+        error = "A staged upload selection is required for this source type.";
+        return false;
     }
 
     public static AlbTopIpsInputSourceType NormalizeSourceType(string? value)
@@ -85,6 +40,13 @@ internal static class AlbTopIpsInputSourceResolver
             : string.Equals(value, "files", StringComparison.OrdinalIgnoreCase)
                 ? AlbTopIpsInputSourceType.SelectedFiles
                 : AlbTopIpsInputSourceType.DefaultFolder;
+
+    public static AlbTopIpsInputSourceSelection BuildUploadedSelection(
+        AlbTopIpsInputSourceType sourceType,
+        string rootPath,
+        IReadOnlyList<string> files,
+        string selectionLabel)
+        => BuildSelection(sourceType, rootPath, files, selectionLabel);
 
     private static AlbTopIpsInputSourceSelection BuildSelection(
         AlbTopIpsInputSourceType sourceType,

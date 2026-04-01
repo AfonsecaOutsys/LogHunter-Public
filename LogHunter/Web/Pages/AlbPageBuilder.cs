@@ -352,11 +352,12 @@ internal static class AlbPageBuilder
                   <label class="choice-pill"><input type="radio" name="albOption2SourceType" value="files"> Select files</label>
                 </div>
               </div>
-              <div id="albOption2SourceActions" class="button-row">
-                <button id="albOption2PickFolder" class="button-link button-like" type="button" hidden>Select folder</button>
-                <button id="albOption2PickFiles" class="button-link button-like" type="button" hidden>Select files</button>
+              <div class="button-row">
+                <button id="albOption2ChooseSource" class="button-link primary button-like" type="button" hidden>Choose source</button>
                 <button id="albOption2ClearSelection" class="button-link button-like" type="button" hidden>Clear selection</button>
               </div>
+              <input id="albOption2FolderInput" type="file" webkitdirectory directory multiple hidden>
+              <input id="albOption2FilesInput" type="file" multiple accept=".log" hidden>
               <div id="albOption2SourceSummary" class="footer-note">Default folder will be used unless you choose another source.</div>
               <div id="albOption2SourcePreview" class="footer-note"></div>
             </div>
