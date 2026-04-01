@@ -14,6 +14,7 @@ internal sealed class WebAppContext
         Session = session;
         StartedUtc = DateTime.UtcNow;
         AlbDownloads = new AlbDownloadJobManager(rootPath, Directory.GetCurrentDirectory());
+        AlbTopIps = new AlbTopIpsJobManager(rootPath);
     }
 
     public string AppName { get; }
@@ -27,4 +28,5 @@ internal sealed class WebAppContext
     public DateTime StartedUtc { get; }
 
     public AlbDownloadJobManager AlbDownloads { get; }
+    public AlbTopIpsJobManager AlbTopIps { get; }
 }

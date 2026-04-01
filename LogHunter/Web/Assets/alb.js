@@ -1,5 +1,6 @@
 (function () {
   let currentJobId = '';
+  let albOption2Polling = null;
 
   function byId(id) {
     return document.getElementById(id);
@@ -546,6 +547,22 @@
     }
   }
 
+  async function openAlbOption2Export() {
+    setAlbOption2Error('');
+    try {
+      const payload = await fetchJson('/api/alb/top-ips-top-paths/open-export', {
+        method: 'POST',
+        body: JSON.stringify({ jobId: currentJobId || '' })
+      });
+
+      if (!payload.ok) {
+        throw new Error(payload.message || 'Unable to open workbook.');
+      }
+    } catch (error) {
+      setAlbOption2Error(String(error));
+    }
+  }
+
   function renderOption2Result(result, exportPath) {
     const results = byId('albOption2Results');
     const topIps = byId('albOption2TopIps');
@@ -593,9 +610,15 @@
   async function runAlbOption2() {
     setAlbOption2Error('');
     setText('albOption2State', 'running');
+    setText('albOption2Phase', 'queued');
     setText('albOption2Message', 'Scanning ALB logs...');
     setText('albOption2Meta', '');
     setText('albOption2ExportPath', '');
+    setText('albOption2StageBadge', 'queued');
+    setText('albOption2Summary', 'Preparing ALB option 2 scan.');
+    setText('albOption2BarMeta', 'Waiting for the job to start.');
+    setHidden(byId('albOption2OpenExport'), true);
+    setBar('albOption2Bar', 0, 1);
 
     const endpoint = byId('albOption2Endpoint')?.value?.trim() || '';
     if (!endpoint) {
@@ -613,11 +636,90 @@
         })
       });
 
-      renderOption2Result(payload.result || {}, payload.exportPath || '');
+      renderOption2Snapshot(payload.snapshot || {});
+      startAlbOption2Polling();
     } catch (error) {
       setText('albOption2State', 'failed');
       setAlbOption2Error(String(error));
     }
+  }
+
+  function renderOption2Snapshot(snapshot) {
+    const result = snapshot && snapshot.result ? snapshot.result : null;
+    const currentStep = Number(snapshot?.currentStep || 0);
+    const totalSteps = Number(snapshot?.totalSteps || 0);
+    const filesTotal = Number(snapshot?.filesTotal || 0);
+    const totalBytes = Number(snapshot?.totalBytes || 0);
+    const phase = snapshot?.phase || 'idle';
+    const state = snapshot?.state || 'idle';
+    const exportPath = snapshot?.exportPath || '';
+    const createdUtc = snapshot?.createdUtc ? new Date(snapshot.createdUtc) : null;
+    const now = new Date();
+    let etaText = 'n/a';
+
+    if (state === 'running' && createdUtc && !Number.isNaN(createdUtc.getTime()) && currentStep > 0 && totalSteps > currentStep) {
+      const elapsedSeconds = Math.max(1, (now.getTime() - createdUtc.getTime()) / 1000);
+      const secondsPerStep = elapsedSeconds / currentStep;
+      etaText = formatEta(secondsPerStep * (totalSteps - currentStep));
+    }
+
+    currentJobId = snapshot?.jobId || currentJobId;
+    setText('albOption2State', formatValue(state));
+    setText('albOption2Phase', formatValue(phase));
+    setText('albOption2StageBadge', formatValue(phase));
+    setText('albOption2Message', snapshot?.error ? `${snapshot.message} ${snapshot.error}` : formatValue(snapshot?.message));
+    setText('albOption2Meta', filesTotal > 0 ? `Scope: ${filesTotal} files | ${formatBytes(totalBytes)}` : '');
+    setText('albOption2ExportPath', exportPath ? `Exported workbook: ${exportPath}` : '');
+    setText('albOption2Matches', String(result?.totalMatchingIps || 0));
+    setHidden(byId('albOption2OpenExport'), !exportPath);
+
+    if (state === 'completed') {
+      setText('albOption2Summary', result && result.totalMatchingIps > 0
+        ? `${result.totalMatchingIps} matching IPs found`
+        : 'No matching IPs found');
+      setText('albOption2BarMeta', 'ETA 0s');
+      setBar('albOption2Bar', totalSteps > 0 ? totalSteps : 1, totalSteps > 0 ? totalSteps : 1);
+      if (result) {
+        renderOption2Result(result, exportPath);
+      }
+      return;
+    }
+
+    if (state === 'failed') {
+      setText('albOption2Summary', 'Scan failed');
+      setText('albOption2BarMeta', snapshot?.error ? `ETA n/a | ${snapshot.error}` : 'ETA n/a');
+      return;
+    }
+
+    if (state === 'running') {
+      setText('albOption2Summary', totalSteps > 0 ? `${Math.round((currentStep / totalSteps) * 100)}% complete` : 'Scanning ALB logs');
+      setText('albOption2BarMeta', `ETA ${etaText}`);
+      setBar('albOption2Bar', currentStep, totalSteps);
+    }
+  }
+
+  async function pollAlbOption2Status() {
+    try {
+      const snapshot = await fetchJson('/api/alb/top-ips-top-paths/job', { method: 'GET', headers: { 'Accept': 'application/json' } });
+      renderOption2Snapshot(snapshot);
+
+      if (snapshot && snapshot.state && snapshot.state !== 'running' && albOption2Polling) {
+        clearInterval(albOption2Polling);
+        albOption2Polling = null;
+      }
+    } catch (error) {
+      setAlbOption2Error(String(error));
+    }
+  }
+
+  function startAlbOption2Polling() {
+    if (albOption2Polling) {
+      clearInterval(albOption2Polling);
+    }
+
+    albOption2Polling = setInterval(async () => {
+      await pollAlbOption2Status();
+    }, 1000);
   }
 
   function startPollingLoop() {
@@ -685,9 +787,11 @@
     }
 
     byId('albOption2Run')?.addEventListener('click', runAlbOption2);
+    byId('albOption2OpenExport')?.addEventListener('click', openAlbOption2Export);
     byId('albOption2Endpoint')?.addEventListener('input', () => {
       setAlbOption2Error('');
     });
+    pollAlbOption2Status().catch((error) => setAlbOption2Error(String(error)));
   }
 
   if (document.readyState === 'loading') {

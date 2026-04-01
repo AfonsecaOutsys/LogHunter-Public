@@ -155,58 +155,42 @@ internal static class AlbApi
                 return true;
             }
 
-            var files = AlbScanner.GetLogFiles();
-            if (files.Count == 0)
+            if (!app.AlbTopIps.TryStart(endpointFragment, body?.ExportXlsx == true, out var snapshot, out var error))
             {
-                await WriteJsonAsync(context.Response, new { ok = false, error = $"No .log files found in: {AppFolders.ALB}" }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
 
-            var endpointIpCounts = new Dictionary<string, int>(StringComparer.Ordinal);
-            await AlbTopIpsForEndpointWorkflow.ScanEndpointIpCountsAsync(files, endpointFragment, endpointIpCounts).ConfigureAwait(false);
+            await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
+            return true;
+        }
 
-            if (endpointIpCounts.Count == 0)
+        if (string.Equals(path, "/api/alb/top-ips-top-paths/job", StringComparison.OrdinalIgnoreCase))
+        {
+            await WriteJsonAsync(context.Response, app.AlbTopIps.GetSnapshot()).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/alb/top-ips-top-paths/open-export", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
             {
-                await WriteJsonAsync(context.Response, new
-                {
-                    ok = true,
-                    result = new
-                    {
-                        endpointFragment,
-                        filesScanned = files.Count,
-                        totalMatchingIps = 0,
-                        topIps = Array.Empty<object>()
-                    },
-                    exportPath = ""
-                }).ConfigureAwait(false);
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
                 return true;
             }
 
-            var selectedIps = endpointIpCounts
-                .OrderByDescending(kvp => kvp.Value)
-                .ThenBy(kvp => kvp.Key, StringComparer.Ordinal)
-                .Take(AlbTopIpsForEndpointWorkflow.DefaultTopIpCount)
-                .Select(kvp => kvp.Key)
-                .ToHashSet(StringComparer.Ordinal);
+            AlbOpenFolderRequest? body = null;
+            try
+            {
+                body = await ReadJsonAsync<AlbOpenFolderRequest>(context.Request).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Optional body. Ignore parse failures and use current job.
+            }
 
-            var uriCountsByIp = new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
-            await AlbTopIpsForEndpointWorkflow.ScanEndpointUriCountsBySelectedIpsAsync(
-                files,
-                endpointFragment,
-                selectedIps,
-                uriCountsByIp).ConfigureAwait(false);
-
-            var result = AlbTopIpsForEndpointWorkflow.BuildResult(
-                endpointFragment,
-                files.Count,
-                endpointIpCounts,
-                uriCountsByIp);
-
-            string? exportPath = null;
-            if (body?.ExportXlsx == true)
-                exportPath = AlbTopIpsForEndpointWorkflow.ExportXlsx(AppFolders.Output, result);
-
-            await WriteJsonAsync(context.Response, new { ok = true, result, exportPath = exportPath ?? string.Empty }).ConfigureAwait(false);
+            var ok = app.AlbTopIps.TryOpenExport(body?.JobId, out var message);
+            await WriteJsonAsync(context.Response, new { ok, message }, ok ? HttpStatusCode.OK : HttpStatusCode.BadRequest).ConfigureAwait(false);
             return true;
         }
 

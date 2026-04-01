@@ -356,11 +356,26 @@ internal static class AlbPageBuilder
             <h2>Scan status</h2>
             <div class="status-block">
               <div class="status-pill"><span>Status</span><strong id="albOption2State">idle</strong></div>
+              <div class="status-pill"><span>Phase</span><strong id="albOption2Phase">idle</strong></div>
               <div class="status-pill"><span>Matches</span><strong id="albOption2Matches">0</strong></div>
             </div>
             <p id="albOption2Message" class="page-copy">No ALB endpoint-fragment scan has been run yet.</p>
             <div id="albOption2Meta" class="footer-note"></div>
             <div id="albOption2ExportPath" class="footer-note"></div>
+            <div class="button-row">
+              <button id="albOption2OpenExport" class="button-link button-like" type="button" hidden>Open workbook</button>
+            </div>
+            <div class="result-summary">
+              <div class="result-card progress-card-compact">
+                <div class="progress-card-head">
+                  <div class="info-label">Scan progress</div>
+                  <div id="albOption2StageBadge" class="kicker">idle</div>
+                </div>
+                <div id="albOption2Summary" class="info-value">Waiting for a scan to start.</div>
+                <div class="progress-track"><div id="albOption2Bar" class="progress-fill" style="width:0%"></div></div>
+                <div id="albOption2BarMeta" class="footer-note">No ALB option 2 scan is running.</div>
+              </div>
+            </div>
           </section>
         </section>
 
