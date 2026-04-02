@@ -342,6 +342,231 @@ internal static class AlbApi
             return true;
         }
 
+        // ── IP Summary endpoints ──────────────────────────────────────
+
+        if (string.Equals(path, "/api/alb/ip-summary/meta", StringComparison.OrdinalIgnoreCase))
+        {
+            var selection = AlbTopIpsInputSourceResolver.ResolveDefaultFolder();
+            await WriteJsonAsync(context.Response, new
+            {
+                defaultSelection = BuildInputSourcePayload(selection),
+                currentJob = app.AlbIpSummary.GetSnapshot()
+            }).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/alb/ip-summary/job", StringComparison.OrdinalIgnoreCase))
+        {
+            await WriteJsonAsync(context.Response, app.AlbIpSummary.GetSnapshot()).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/alb/ip-summary/run", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            AlbIpSummaryRunRequest? body;
+            try
+            {
+                body = await ReadJsonAsync<AlbIpSummaryRunRequest>(context.Request).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = ex.Message }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            if (body?.Ips is null || body.Ips.Count == 0)
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = "At least one IP is required." }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            var validIps = new List<string>();
+            foreach (var raw in body.Ips)
+            {
+                var trimmed = raw?.Trim();
+                if (string.IsNullOrWhiteSpace(trimmed)) continue;
+                if (!System.Net.IPAddress.TryParse(trimmed, out var parsed)) continue;
+                var normalized = parsed.ToString();
+                if (!validIps.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+                    validIps.Add(normalized);
+            }
+
+            if (validIps.Count == 0)
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = "No valid IP addresses found." }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            var sourceType = AlbTopIpsInputSourceResolver.NormalizeSourceType(body.SourceType);
+            AlbTopIpsInputSourceSelection selection;
+
+            if (sourceType == AlbTopIpsInputSourceType.DefaultFolder)
+            {
+                selection = AlbTopIpsInputSourceResolver.ResolveDefaultFolder();
+            }
+            else if (!string.IsNullOrWhiteSpace(body.ServerPath))
+            {
+                selection = AlbTopIpsInputSourceResolver.ResolveServerPath(body.ServerPath, sourceType);
+            }
+            else if (body.ServerFilePaths is { Count: > 0 })
+            {
+                selection = AlbTopIpsInputSourceResolver.ResolveServerFiles(body.ServerFilePaths);
+            }
+            else
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = "A folder path or file selection is required." }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            if (!app.AlbIpSummary.TryStart(validIps, body.ExportXlsx, selection, out var snapshot, out var error))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/alb/ip-summary/browse-folder", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            var folderPath = await NativeFileDialogHelper.BrowseFolderAsync(AppFolders.ALB).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(folderPath))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, cancelled = true }).ConfigureAwait(false);
+                return true;
+            }
+
+            var files = AlbScanner.GetLogFiles(folderPath);
+            var selection = AlbTopIpsInputSourceResolver.BuildUploadedSelection(
+                AlbTopIpsInputSourceType.SelectedFolder, folderPath, files, folderPath);
+
+            await WriteJsonAsync(context.Response, new { ok = true, selection = BuildInputSourcePayload(selection) }).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/alb/ip-summary/browse-files", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            var filePaths = await NativeFileDialogHelper.BrowseFilesAsync(AppFolders.ALB).ConfigureAwait(false);
+            if (filePaths.Count == 0)
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, cancelled = true }).ConfigureAwait(false);
+                return true;
+            }
+
+            var logFiles = filePaths.Where(f => f.EndsWith(".log", StringComparison.OrdinalIgnoreCase)).ToList();
+            var selection = AlbTopIpsInputSourceResolver.BuildUploadedSelection(
+                AlbTopIpsInputSourceType.SelectedFiles, null, logFiles, $"{logFiles.Count} selected file(s)");
+
+            await WriteJsonAsync(context.Response, new { ok = true, selection = BuildInputSourcePayload(selection) }).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/alb/ip-summary/open-report", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            var ok = app.AlbIpSummary.TryOpenReport(null, out var message);
+            await WriteJsonAsync(context.Response, new { ok, message }, ok ? HttpStatusCode.OK : HttpStatusCode.BadRequest).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/alb/ip-summary/open-export", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            var ok = app.AlbIpSummary.TryOpenExport(null, out var message);
+            await WriteJsonAsync(context.Response, new { ok, message }, ok ? HttpStatusCode.OK : HttpStatusCode.BadRequest).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/alb/ip-summary/output-files", StringComparison.OrdinalIgnoreCase))
+        {
+            var outDir = AppFolders.Output;
+            var files = new List<object>();
+            if (Directory.Exists(outDir))
+            {
+                foreach (var fi in Directory.EnumerateFiles(outDir, "*", SearchOption.TopDirectoryOnly)
+                    .Where(p => p.EndsWith(".csv", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+                    .Select(p => new FileInfo(p))
+                    .OrderByDescending(f => f.CreationTimeUtc)
+                    .Take(50))
+                {
+                    files.Add(new
+                    {
+                        name = fi.Name,
+                        path = fi.FullName,
+                        size = fi.Length,
+                        createdUtc = fi.CreationTimeUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + "Z"
+                    });
+                }
+            }
+
+            await WriteJsonAsync(context.Response, new { files }).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/alb/ip-summary/extract-ips", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            AlbIpSummaryExtractIpsRequest? body;
+            try
+            {
+                body = await ReadJsonAsync<AlbIpSummaryExtractIpsRequest>(context.Request).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = ex.Message }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            if (string.IsNullOrWhiteSpace(body?.FilePath) || !File.Exists(body.FilePath))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = "File not found." }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            if (!AlbIpExtractorHelper.TryExtractIps(body.FilePath, out var ipColumn, out var ips, out var extractError))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = extractError }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            await WriteJsonAsync(context.Response, new { ok = true, ipColumn, ips }).ConfigureAwait(false);
+            return true;
+        }
+
         return false;
     }
 
@@ -446,4 +671,13 @@ internal static class AlbApi
         string? StagingId,
         string? ServerPath,
         IReadOnlyList<string>? ServerFilePaths);
+
+    private sealed record AlbIpSummaryRunRequest(
+        IReadOnlyList<string> Ips,
+        bool ExportXlsx,
+        string? SourceType,
+        string? ServerPath,
+        IReadOnlyList<string>? ServerFilePaths);
+
+    private sealed record AlbIpSummaryExtractIpsRequest(string? FilePath);
 }

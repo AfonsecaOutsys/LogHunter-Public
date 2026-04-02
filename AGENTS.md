@@ -29,6 +29,17 @@ At the end of a coding session:
 - The backnote should capture what shipped in the patch release so it can be folded into the next minor-release notes without the user needing to restate it.
 - Unless the user says otherwise, keep these backnotes internal-only and do not mirror them to `LogHunter-Public`.
 
+## Version Bump Rules
+
+- When work from a feature/fix branch is merged into `main`, bump the shipped version on `main`.
+- For these routine merges, default to a patch-version bump only:
+  - `1.5.0.0` -> `1.5.0.1`
+  - `1.5.0.1` -> `1.5.0.2`
+  - `1.5.0.9` -> `1.5.0.10`
+- Do not autonomously bump the minor version line.
+- Minor-version changes such as `1.5` -> `1.6` or `1.6` -> `1.7` only happen when the user explicitly decides them.
+- If the current version format needs interpretation, preserve the current minor line and increment only the rightmost shipped patch component unless the user says otherwise.
+
 ## UI / UX Design Guardrails (LogHunter 2.0)
 
 LogHunter is an operator-focused tool, not a marketing/product UI. All UI decisions must prioritize speed, clarity, and action over explanation.

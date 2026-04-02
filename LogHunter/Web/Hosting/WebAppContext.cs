@@ -16,6 +16,7 @@ internal sealed class WebAppContext
         AlbDownloads = new AlbDownloadJobManager(rootPath, Directory.GetCurrentDirectory());
         AlbTopIps = new AlbTopIpsJobManager(rootPath);
         AlbTopIpsStaging = new AlbTopIpsStagingManager(AppFolders.WebAlbOption2Staging);
+        AlbIpSummary = new AlbIpSummaryJobManager();
     }
 
     public string AppName { get; }
@@ -31,4 +32,5 @@ internal sealed class WebAppContext
     public AlbDownloadJobManager AlbDownloads { get; }
     public AlbTopIpsJobManager AlbTopIps { get; }
     public AlbTopIpsStagingManager AlbTopIpsStaging { get; }
+    public AlbIpSummaryJobManager AlbIpSummary { get; }
 }
