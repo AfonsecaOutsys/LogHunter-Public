@@ -768,6 +768,7 @@
     setAlbOption2Error('');
     setAlbOption2SourceType('folder');
     renderAlbOption2Selection();
+    await new Promise(r => setTimeout(r, 0));
 
     try {
       const payload = await fetchJson('/api/alb/top-ips-top-paths/browse-folder', { method: 'POST' });
@@ -793,6 +794,7 @@
     setAlbOption2Error('');
     setAlbOption2SourceType('files');
     renderAlbOption2Selection();
+    await new Promise(r => setTimeout(r, 0));
 
     try {
       const payload = await fetchJson('/api/alb/top-ips-top-paths/browse-files', { method: 'POST' });

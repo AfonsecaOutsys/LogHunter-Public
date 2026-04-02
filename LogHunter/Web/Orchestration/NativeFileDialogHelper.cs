@@ -50,6 +50,7 @@ internal static class NativeFileDialogHelper
 
     private static string? ShowFolderDialog(string? initialDirectory)
     {
+        var owner = GetForegroundWindow();
         var dialog = (IFileOpenDialog)new FileOpenDialogCoClass();
         try
         {
@@ -60,7 +61,7 @@ internal static class NativeFileDialogHelper
             if (!string.IsNullOrWhiteSpace(initialDirectory))
                 SetInitialDirectory(dialog, initialDirectory);
 
-            var hr = dialog.Show(IntPtr.Zero);
+            var hr = dialog.Show(owner);
             if (hr != 0)
                 return null;
 
@@ -76,6 +77,7 @@ internal static class NativeFileDialogHelper
 
     private static IReadOnlyList<string> ShowFilesDialog(string? initialDirectory)
     {
+        var owner = GetForegroundWindow();
         var dialog = (IFileOpenDialog)new FileOpenDialogCoClass();
         try
         {
@@ -93,7 +95,7 @@ internal static class NativeFileDialogHelper
             if (!string.IsNullOrWhiteSpace(initialDirectory))
                 SetInitialDirectory(dialog, initialDirectory);
 
-            var hr = dialog.Show(IntPtr.Zero);
+            var hr = dialog.Show(owner);
             if (hr != 0)
                 return Array.Empty<string>();
 
@@ -121,6 +123,9 @@ internal static class NativeFileDialogHelper
         if (hr == 0 && item != null)
             dialog.SetFolder(item);
     }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern int SHCreateItemFromParsingName(
