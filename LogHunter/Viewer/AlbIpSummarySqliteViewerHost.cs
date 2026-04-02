@@ -52,9 +52,10 @@ internal sealed class AlbIpSummarySqliteViewerHost : IDisposable
         Console.WriteLine($"SQLite deep analysis viewer ready for {metadata.DatabaseName}");
         Console.WriteLine($"Viewer URL: {_baseUrl}");
         Console.WriteLine("Press Ctrl+C in this viewer process to stop the local server.");
-        TryOpenBrowser(_baseUrl);
 
         var getContextTask = _listener.GetContextAsync();
+        await Task.Delay(350).ConfigureAwait(false);
+        TryOpenBrowser(_baseUrl);
         while (!stopRequested())
         {
             HttpListenerContext? context = null;
@@ -453,6 +454,7 @@ ORDER BY {MapSortField(request.SortField)} {MapSortDirection(request.SortDirecti
             return false;
         }
     }
+
 
     private static int GetFreePort()
     {

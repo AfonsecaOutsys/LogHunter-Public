@@ -18,8 +18,6 @@ public static class IisIpSummarySqliteViewerLauncher
             return false;
 
         var viewerPort = GetFreePort();
-        var viewerUrl = $"http://127.0.0.1:{viewerPort}/";
-
         try
         {
             var startInfo = new ProcessStartInfo
@@ -31,7 +29,6 @@ public static class IisIpSummarySqliteViewerLauncher
             };
 
             _ = Process.Start(startInfo);
-            TryOpenBrowser(viewerUrl);
             return true;
         }
         catch
@@ -46,23 +43,6 @@ public static class IisIpSummarySqliteViewerLauncher
         if (!string.IsNullOrWhiteSpace(requestedIp))
             args += $" --viewer-ip {QuoteArg(requestedIp)}";
         return args;
-    }
-
-    private static bool TryOpenBrowser(string url)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = url,
-                UseShellExecute = true
-            });
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     private static int GetFreePort()

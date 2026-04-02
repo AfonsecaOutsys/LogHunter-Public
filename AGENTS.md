@@ -2,10 +2,20 @@
 
 At the end of a coding session:
 
-- Always push the current working branch to GitHub, provided it is not `main`.
+- Never create a commit unless the user explicitly asks for a commit.
+- Never push the current working branch unless the user explicitly asks for a push.
 - Never merge to `main`.
 - Only merge into `main` when explicitly asked to do it.
 - Only produce a Release build to `C:\espaces` when explicitly asked to do it.
+- These rules must be treated as the expected behavior across branches so `AGENTS.md` stays aligned between branch lines unless the user explicitly changes it.
+
+## Session Flow Rules
+
+- When the user says `testmode on`, enable Test Mode for the current session.
+- Test Mode stays active until the user says `testmode off`.
+- In Test Mode, the session flow becomes: major fix -> build Release `.exe` according to the Release Publish Rules -> stop for user testing feedback.
+- Test Mode does not authorize a commit, push, merge, or release publish unless the user explicitly asks for it.
+- Outside Test Mode, do not assume commit, push, merge, or release publish steps unless the user explicitly asks for them.
 
 ## Release Publish Rules
 
@@ -27,7 +37,9 @@ At the end of a coding session:
 - Keep a detailed internal patch note file under `LogHunter/docs/patch-notes/` for the shipped version when the release contains material operator-facing changes.
 - After shipping a patch or hotfix release, also add or update a carry-forward backnote for the next planned minor release under `LogHunter/docs/patch-notes/`.
 - The backnote should capture what shipped in the patch release so it can be folded into the next minor-release notes without the user needing to restate it.
+- Maintain these patch, hotfix, and carry-forward notes cumulatively so the next minor release line already has the shipped changes ready to fold in when the user decides to cut that version.
 - Unless the user says otherwise, keep these backnotes internal-only and do not mirror them to `LogHunter-Public`.
+- These release-note carry-forward rules should stay aligned across branches unless the user explicitly changes them.
 
 ## Version Bump Rules
 

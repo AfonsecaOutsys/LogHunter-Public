@@ -1635,13 +1635,13 @@
     byId('ipSummaryOpenReport')?.addEventListener('click', async () => {
       const btn = byId('ipSummaryOpenReport');
       if (btn?.disabled) return;
-      try { await fetchJson('/api/alb/ip-summary/open-report', { method: 'POST' }); } catch {}
+      try { await fetchJson('/api/alb/ip-summary/open-report', { method: 'POST' }); } catch (err) { setIpSummaryError(String(err)); }
     });
 
     byId('ipSummaryOpenExport')?.addEventListener('click', async () => {
       const btn = byId('ipSummaryOpenExport');
       if (btn?.disabled) return;
-      try { await fetchJson('/api/alb/ip-summary/open-export', { method: 'POST' }); } catch {}
+      try { await fetchJson('/api/alb/ip-summary/open-export', { method: 'POST' }); } catch (err) { setIpSummaryError(String(err)); }
     });
 
     loadIpSummaryMeta().catch(err => setIpSummaryError(String(err)));
