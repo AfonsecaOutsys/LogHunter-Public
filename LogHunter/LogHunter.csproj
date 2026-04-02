@@ -4,10 +4,10 @@
 		<AssemblyName>LogHunter</AssemblyName>
 		<RootNamespace>LogHunter</RootNamespace>
 
-		<Version>1.5.0.1</Version>
-		<InformationalVersion>1.5.0.1</InformationalVersion>
-		<AssemblyVersion>1.5.0.1</AssemblyVersion>
-		<FileVersion>1.5.0.1</FileVersion>
+		<Version>1.5.0.2</Version>
+		<InformationalVersion>1.5.0.2</InformationalVersion>
+		<AssemblyVersion>1.5.0.2</AssemblyVersion>
+		<FileVersion>1.5.0.2</FileVersion>
 		<ApplicationIcon>Resources\AppIcon\LogHunter.ico</ApplicationIcon>
 
 		<OutputType>Exe</OutputType>
