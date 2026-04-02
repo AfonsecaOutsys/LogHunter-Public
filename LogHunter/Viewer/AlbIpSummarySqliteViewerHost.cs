@@ -29,7 +29,7 @@ internal sealed class AlbIpSummarySqliteViewerHost : IDisposable
     private readonly int _port;
     private readonly string _baseUrl;
 
-    public AlbIpSummarySqliteViewerHost(string dbPath, string? requestedIp)
+    public AlbIpSummarySqliteViewerHost(string dbPath, string? requestedIp, int? port = null)
     {
         _dbPath = Path.GetFullPath(dbPath);
         _requestedIp = string.IsNullOrWhiteSpace(requestedIp) ? null : requestedIp.Trim();
@@ -39,7 +39,7 @@ internal sealed class AlbIpSummarySqliteViewerHost : IDisposable
 
         _connection = new SqliteConnection($"Data Source={_dbPath};Mode=ReadOnly");
         _connection.Open();
-        _port = GetFreePort();
+        _port = port is > 0 ? port.Value : GetFreePort();
         _baseUrl = $"http://127.0.0.1:{_port}/";
         _listener.Prefixes.Add(_baseUrl);
     }
