@@ -465,8 +465,12 @@ internal static class AlbPageBuilder
               <div id="ipSummarySourceChip" class="source-chip">Loading...</div>
             </div>
 
-            <div class="field-group">
-              <label class="choice-pill choice-pill--flat"><input id="ipSummaryExport" type="checkbox" checked> Export to Excel</label>
+            <div class="field-group source-group">
+              <label class="field-label">Output mode</label>
+              <div class="button-row source-action-row">
+                <button id="ipSummaryModeChart" class="source-btn active" type="button">Chart summary</button>
+                <button id="ipSummaryModeExport" class="source-btn" type="button">Export output</button>
+              </div>
             </div>
 
             <div class="button-row">
@@ -485,8 +489,8 @@ internal static class AlbPageBuilder
             <div id="ipSummaryMeta" class="footer-note"></div>
             <div class="export-row">
               <div id="ipSummaryExportInfo" class="footer-note"></div>
-              <button id="ipSummaryOpenReport" class="button-link primary button-like compact" type="button" hidden>Open report</button>
-              <button id="ipSummaryOpenExport" class="button-link primary button-like compact" type="button" hidden>Open Excel</button>
+              <button id="ipSummaryOpenReport" class="button-link button-like compact" type="button" disabled>Open report</button>
+              <button id="ipSummaryOpenExport" class="button-link button-like compact" type="button" disabled>Open Excel</button>
             </div>
             <div class="result-card progress-card-compact">
               <div class="progress-card-head">

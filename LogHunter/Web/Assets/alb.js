@@ -1144,6 +1144,7 @@
   let ipSummaryInputMode = 'manual';
   let ipSummaryExtractedIps = [];
   let ipSummarySelectedExtractedIps = new Set();
+  let ipSummaryExportMode = 'chart'; // 'chart' or 'export'
 
   function setIpSummaryError(msg) {
     const node = byId('ipSummaryError');
@@ -1380,7 +1381,7 @@
       return;
     }
 
-    const exportXlsx = byId('ipSummaryExport')?.checked ?? true;
+    const exportXlsx = ipSummaryExportMode === 'export';
     const body = { ips, exportXlsx, sourceType: ipSummarySourceType };
 
     if (ipSummarySourceType === 'folder' && ipSummaryServerSelection?.rootPath) {
@@ -1435,23 +1436,56 @@
   function renderIpSummarySnapshot(snap) {
     if (!snap) return;
 
-    setText('ipSummaryState', snap.state || 'idle');
-    setText('ipSummaryPhase', snap.phase || 'idle');
-    setText('ipSummaryIpCount', String((snap.requestedIps || []).length));
-    setText('ipSummaryMessage', snap.message || '');
-    setText('ipSummaryStageBadge', snap.phase || 'idle');
+    const state = snap.state || 'idle';
+    const phase = snap.phase || 'idle';
+    const currentStep = Number(snap.currentStep || 0);
+    const totalSteps = Number(snap.totalSteps || 0);
+    const createdUtc = snap.createdUtc ? new Date(snap.createdUtc) : null;
+    const now = new Date();
 
-    const pct = snap.totalSteps > 0 ? Math.round((snap.currentStep / snap.totalSteps) * 100) : 0;
+    setText('ipSummaryState', state);
+    setText('ipSummaryPhase', phase);
+    setText('ipSummaryIpCount', String((snap.requestedIps || []).length));
+    setText('ipSummaryMessage', snap.error ? `${snap.message} ${snap.error}` : (snap.message || ''));
+    setText('ipSummaryStageBadge', phase);
+
+    ipSummaryJobId = snap.jobId || ipSummaryJobId;
+
+    // Progress bar + ETA
+    const pct = totalSteps > 0 ? Math.round((currentStep / totalSteps) * 100) : 0;
     const bar = byId('ipSummaryBar');
     if (bar) bar.style.width = pct + '%';
 
-    setText('ipSummarySummary', snap.state === 'running'
-      ? `${snap.filesProcessed || 0} / ${snap.filesTotal || 0} files`
-      : snap.state === 'completed' ? 'Scan complete.' : snap.state === 'failed' ? 'Scan failed.' : 'Waiting for a scan to start.');
+    let etaText = 'n/a';
+    if (state === 'running' && createdUtc && !Number.isNaN(createdUtc.getTime()) && currentStep > 0 && totalSteps > currentStep) {
+      const elapsedSeconds = Math.max(1, (now.getTime() - createdUtc.getTime()) / 1000);
+      const secondsPerStep = elapsedSeconds / currentStep;
+      etaText = formatEta(secondsPerStep * (totalSteps - currentStep));
+    }
 
-    setText('ipSummaryBarMeta', snap.state === 'running'
-      ? `${pct}% | ${snap.filesProcessed || 0} / ${snap.filesTotal || 0} files`
-      : snap.state === 'idle' ? 'No scan running.' : '');
+    const isExporting = phase === 'building-excel' || phase === 'building-sqlite' || phase === 'building-report';
+
+    if (state === 'completed') {
+      setText('ipSummarySummary', 'Scan complete.');
+      setText('ipSummaryBarMeta', `100% | ${snap.filesTotal || 0} files scanned`);
+      if (bar) bar.style.width = '100%';
+    } else if (state === 'failed') {
+      setText('ipSummarySummary', 'Scan failed.');
+      setText('ipSummaryBarMeta', snap.error || '');
+    } else if (isExporting) {
+      const exportLabel = phase === 'building-excel' ? 'Building Excel workbook...'
+        : phase === 'building-sqlite' ? 'Finalizing SQLite database...'
+        : 'Building chart report...';
+      setText('ipSummarySummary', exportLabel);
+      setText('ipSummaryBarMeta', `100% | ${exportLabel}`);
+      if (bar) bar.style.width = '100%';
+    } else if (state === 'running') {
+      setText('ipSummarySummary', `${pct}% — ${snap.filesProcessed || 0} / ${snap.filesTotal || 0} files`);
+      setText('ipSummaryBarMeta', `${pct}% | ETA ${etaText} | ${snap.filesProcessed || 0} / ${snap.filesTotal || 0} files`);
+    } else {
+      setText('ipSummarySummary', 'Waiting for a scan to start.');
+      setText('ipSummaryBarMeta', 'No scan running.');
+    }
 
     // Per-IP row counts
     const ipCounts = snap.ipRowCounts || {};
@@ -1467,13 +1501,19 @@
         .join('');
     }
 
-    // Export buttons
+    // Export buttons — always visible, disabled until artifacts ready
     const openReport = byId('ipSummaryOpenReport');
     const openExport = byId('ipSummaryOpenExport');
-    setHidden(openReport, !snap.htmlReportPath);
-    setHidden(openExport, !snap.excelPath && !snap.sqlitePath);
+    const hasReport = Boolean(snap.htmlReportPath);
+    const hasExport = Boolean(snap.excelPath || snap.sqlitePath);
 
+    if (openReport) {
+      openReport.disabled = !hasReport;
+      openReport.classList.toggle('primary', hasReport);
+    }
     if (openExport) {
+      openExport.disabled = !hasExport;
+      openExport.classList.toggle('primary', hasExport);
       openExport.textContent = snap.sqlitePath && !snap.excelPath ? 'Open SQLite' : 'Open Excel';
     }
 
@@ -1483,6 +1523,8 @@
         exportInfo.textContent = 'Detail mode: SQLite (exceeded 1M rows)';
       } else if (snap.excelPath) {
         exportInfo.textContent = 'Excel workbook exported.';
+      } else if (state === 'completed' && hasReport && !hasExport) {
+        exportInfo.textContent = 'Chart summary only (no data export).';
       } else {
         exportInfo.textContent = '';
       }
@@ -1561,6 +1603,14 @@
   function fmt(v) { return Number(v || 0).toLocaleString('en-US'); }
   function escHtml(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+  function setIpSummaryExportMode(mode) {
+    ipSummaryExportMode = mode;
+    const btnChart = byId('ipSummaryModeChart');
+    const btnExport = byId('ipSummaryModeExport');
+    if (btnChart) btnChart.classList.toggle('active', mode === 'chart');
+    if (btnExport) btnExport.classList.toggle('active', mode === 'export');
+  }
+
   function initializeIpSummaryPage() {
     if (!document.querySelector('[data-alb-ip-summary-page]')) return;
 
@@ -1569,6 +1619,9 @@
       setIpSummaryInputMode('file');
       loadIpSummaryOutputFiles();
     });
+
+    byId('ipSummaryModeChart')?.addEventListener('click', () => setIpSummaryExportMode('chart'));
+    byId('ipSummaryModeExport')?.addEventListener('click', () => setIpSummaryExportMode('export'));
 
     byId('ipSummaryExtractBtn')?.addEventListener('click', extractIpsFromFile);
 
@@ -1580,10 +1633,14 @@
     byId('ipSummaryRun')?.addEventListener('click', runIpSummary);
 
     byId('ipSummaryOpenReport')?.addEventListener('click', async () => {
+      const btn = byId('ipSummaryOpenReport');
+      if (btn?.disabled) return;
       try { await fetchJson('/api/alb/ip-summary/open-report', { method: 'POST' }); } catch {}
     });
 
     byId('ipSummaryOpenExport')?.addEventListener('click', async () => {
+      const btn = byId('ipSummaryOpenExport');
+      if (btn?.disabled) return;
       try { await fetchJson('/api/alb/ip-summary/open-export', { method: 'POST' }); } catch {}
     });
 

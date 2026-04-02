@@ -1300,6 +1300,14 @@ code {
   box-shadow: var(--shadow-soft);
 }
 
+.button-link:disabled,
+.button-link[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+  box-shadow: none;
+}
+
 .button-link:hover,
 .button-link:focus-visible {
   transform: translateY(-1px);

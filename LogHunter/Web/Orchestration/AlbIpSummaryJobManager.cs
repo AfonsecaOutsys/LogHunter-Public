@@ -254,6 +254,37 @@ internal sealed class AlbIpSummaryJobManager
             string? finalExcelPath = null;
             string? finalSqlitePath = anySqlite ? sqlitePath : null;
 
+            if (anySqlite)
+            {
+                Update(jobId, snapshot => snapshot with
+                {
+                    Phase = "building-sqlite",
+                    Message = "Scan complete. Finalizing SQLite database...",
+                    UpdatedUtc = DateTime.UtcNow,
+                    CurrentStep = files.Count
+                });
+            }
+            else if (exportXlsx)
+            {
+                Update(jobId, snapshot => snapshot with
+                {
+                    Phase = "building-excel",
+                    Message = "Scan complete. Building Excel workbook...",
+                    UpdatedUtc = DateTime.UtcNow,
+                    CurrentStep = files.Count
+                });
+            }
+            else
+            {
+                Update(jobId, snapshot => snapshot with
+                {
+                    Phase = "building-report",
+                    Message = "Scan complete. Building chart report...",
+                    UpdatedUtc = DateTime.UtcNow,
+                    CurrentStep = files.Count
+                });
+            }
+
             if (!anySqlite && exportXlsx)
             {
                 var excelEligible = resultsByIp.Values
