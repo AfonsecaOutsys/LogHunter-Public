@@ -837,6 +837,13 @@ code {
   cursor: pointer;
 }
 
+.choice-pill--flat {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  box-shadow: none;
+}
+
 .choice-pill:hover,
 .choice-pill:focus-within {
   transform: translateY(-1px);

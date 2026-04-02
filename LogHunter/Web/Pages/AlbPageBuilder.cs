@@ -170,7 +170,7 @@ internal static class AlbPageBuilder
               </div>
               <p class="footer-note">Config name is optional. Leave it blank to default from the ALB identifier. Region is derived automatically from the S3 bucket name on this page.</p>
               <div class="field-row">
-                <label class="choice-pill"><input id="isSentry" type="checkbox"> Sentry Infrastructure</label>
+                <label class="choice-pill choice-pill--flat"><input id="isSentry" type="checkbox"> Sentry Infrastructure</label>
               </div>
             </div>
 
@@ -336,7 +336,7 @@ internal static class AlbPageBuilder
             </div>
 
             <div class="field-group">
-              <label class="choice-pill"><input id="albOption2Export" type="checkbox" checked> Export to Excel</label>
+              <label class="choice-pill choice-pill--flat"><input id="albOption2Export" type="checkbox" checked> Export to Excel</label>
             </div>
 
             <div class="button-row">
