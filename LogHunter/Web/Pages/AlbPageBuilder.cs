@@ -11,7 +11,7 @@ internal static class AlbPageBuilder
     private static readonly AlbOptionDefinition[] Options =
     [
         new(1, "/alb/download-logs", "Download logs from S3", "Download ALB logs into the workspace using AWS CLI and your current credentials/session.", true),
-        new(2, "/alb/top-ips-top-paths", "Top IPs + top full paths for endpoint/path fragment", "Match a fragment, rank top IPs, then show top full URI paths per IP.", false),
+        new(2, "/alb/top-ips-top-paths", "Top IPs + top full paths for endpoint/path fragment", "Match a fragment, rank top IPs, then show top full URI paths per IP.", true),
         new(3, "/alb/ip-summary", "IP Summary", "Review one or more client IPs with shared charts and exports.", false),
         new(4, "/alb/top-50-ips", "Top 50 IPs overall", "Scan logs and show the top 50 client IPs across the selected range.", false),
         new(5, "/alb/top-50-ips-by-uri", "Top 50 IPs by URI (no query)", "Group top IP activity by URI path without query strings.", false),
@@ -35,6 +35,14 @@ internal static class AlbPageBuilder
         {
             page = new WebPageDefinition("/alb/download-logs", "/alb", "ALB", "ALB / Download logs from S3", "Download Workflow", "Run the ALB S3 download workflow from the browser and monitor its progress.");
             mainContent = BuildDownloadContent(context);
+            extraScriptPath = "/assets/alb.js";
+            return true;
+        }
+
+        if (string.Equals(path, "/alb/top-ips-top-paths", StringComparison.OrdinalIgnoreCase))
+        {
+            page = new WebPageDefinition("/alb/top-ips-top-paths", "/alb", "ALB", "ALB / Top IPs + Top Full Paths", "Workflow", "Match an endpoint fragment, rank the top matching IPs, and inspect top full paths per IP.");
+            mainContent = BuildTopIpsTopPathsContent();
             extraScriptPath = "/assets/alb.js";
             return true;
         }
@@ -105,18 +113,8 @@ internal static class AlbPageBuilder
         <section class="hero">
           <div class="hero-grid">
             <div>
-              <div class="eyebrow">Download Workflow</div>
               <h1>Download logs from S3</h1>
-              <p>This page wraps the existing ALB download flow for the browser. It reuses the same ALB workspace structure, config persistence, AWS CLI usage, automatic region derivation from the bucket, pruning, and extraction behavior as the console workflow.</p>
-            </div>
-
-            <div class="panel">
-              <h2>Expected input</h2>
-              <ul class="list-clean">
-                <li>The details for a new config, or an existing saved config if you already have one.</li>
-                <li>The three AWS environment lines for this session.</li>
-                <li>A UTC start/end window using 5-minute increments.</li>
-              </ul>
+              <p>Download ALB logs using AWS CLI credentials and a UTC time window.</p>
             </div>
           </div>
         </section>
@@ -127,9 +125,10 @@ internal static class AlbPageBuilder
             <div id="albDownloadError" class="inline-error" hidden></div>
 
             <div class="field-group">
-              <div class="field-row">
-                <label class="choice-pill"><input type="radio" name="configMode" value="new" checked> Create or update config</label>
-                <label class="choice-pill"><input type="radio" name="configMode" value="saved"> Use saved config</label>
+              <label class="field-label">Configuration</label>
+              <div class="button-row source-action-row">
+                <button id="configModeNew" class="source-btn active" type="button" data-config-mode="new">New config</button>
+                <button id="configModeSaved" class="source-btn" type="button" data-config-mode="saved">Saved config</button>
               </div>
             </div>
 
@@ -171,7 +170,7 @@ internal static class AlbPageBuilder
               </div>
               <p class="footer-note">Config name is optional. Leave it blank to default from the ALB identifier. Region is derived automatically from the S3 bucket name on this page.</p>
               <div class="field-row">
-                <label class="choice-pill"><input id="isSentry" type="checkbox"> Sentry Infrastructure</label>
+                <label class="choice-pill choice-pill--flat"><input id="isSentry" type="checkbox"> Sentry Infrastructure</label>
               </div>
             </div>
 
@@ -232,28 +231,26 @@ internal static class AlbPageBuilder
             </div>
           </section>
 
-          <section class="panel">
+          <section class="panel panel-tight">
             <h2>Job status</h2>
             <div class="status-block">
               <div class="status-pill"><span>Status</span><strong id="albJobState">idle</strong></div>
               <div class="status-pill"><span>Stage</span><strong id="albJobStage">idle</strong></div>
             </div>
-            <p id="albJobMessage" class="page-copy">No ALB download has been started yet.</p>
+            <p id="albJobMessage" class="page-copy">Idle.</p>
             <div id="albJobStep" class="footer-note"></div>
-
-            <div class="result-summary">
-              <div class="result-card progress-card-compact">
-                <div class="progress-card-head">
-                  <div class="info-label" id="albPrimaryLabel">Overall progress</div>
-                  <div id="albPrimaryStageBadge" class="kicker">idle</div>
-                </div>
-                <div id="albPrimarySummary" class="info-value">Waiting for a job to start.</div>
-                <div class="progress-track"><div id="albPrimaryBar" class="progress-fill" style="width:0%"></div></div>
-                <div id="albPrimaryMeta" class="footer-note">No ALB job is running.</div>
-                <div class="button-row">
-                  <button id="albOpenRunFolder" class="button-link button-like" type="button">Open logs folder</button>
-                </div>
+            <div class="export-row">
+              <div id="albJobMeta" class="footer-note"></div>
+              <button id="albOpenRunFolder" class="button-link primary button-like compact" type="button" hidden>Open logs folder</button>
+            </div>
+            <div class="result-card progress-card-compact">
+              <div class="progress-card-head">
+                <div class="info-label" id="albPrimaryLabel">Overall progress</div>
+                <div id="albPrimaryStageBadge" class="kicker">idle</div>
               </div>
+              <div id="albPrimarySummary" class="info-value">Waiting for a job to start.</div>
+              <div class="progress-track"><div id="albPrimaryBar" class="progress-fill" style="width:0%"></div></div>
+              <div id="albPrimaryMeta" class="footer-note">No job running.</div>
             </div>
 
             <div id="albCurrentDaySection" class="result-summary" hidden>
@@ -294,6 +291,103 @@ internal static class AlbPageBuilder
                 </div>
               </details>
             </div>
+          </section>
+        </section>
+      </section>
+""";
+    }
+
+    private static string BuildTopIpsTopPathsContent()
+    {
+        return """
+      <section class="stack" data-alb-option2-page="true">
+        <section class="hero">
+          <div class="hero-grid">
+            <div>
+              <h1>Top IPs + top full paths</h1>
+              <p>Rank the top client IPs matching an endpoint fragment, then break each down by full URI path.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="module-two-column">
+          <section class="panel form-panel">
+            <h2>Scan inputs</h2>
+            <div id="albOption2Error" class="inline-error" hidden></div>
+
+            <div class="field-group">
+              <div class="field">
+                <label for="albOption2Endpoint">Endpoint/path fragment</label>
+                <input id="albOption2Endpoint" placeholder="login or /login/">
+              </div>
+            </div>
+
+            <div class="field-group source-group">
+              <label class="field-label">Log source</label>
+              <div class="button-row source-action-row">
+                <button id="albOption2UseDefault" class="source-btn active" type="button">Default folder</button>
+                <button id="albOption2SelectFolder" class="source-btn" type="button">Select folder</button>
+                <button id="albOption2SelectFiles" class="source-btn" type="button">Select files</button>
+                <button id="albOption2ClearSelection" class="source-btn source-btn--clear" type="button" hidden>Clear</button>
+              </div>
+              <input id="albOption2FolderInput" type="file" webkitdirectory directory multiple hidden>
+              <input id="albOption2FilesInput" type="file" multiple accept=".log" hidden>
+              <div id="albOption2SourceChip" class="source-chip">Loading...</div>
+            </div>
+
+            <div class="field-group">
+              <label class="choice-pill choice-pill--flat"><input id="albOption2Export" type="checkbox" checked> Export to Excel</label>
+            </div>
+
+            <div class="button-row">
+              <button id="albOption2Run" class="button-link primary button-like" type="button">Run scan</button>
+            </div>
+          </section>
+
+          <section class="panel panel-tight">
+            <h2>Scan status</h2>
+            <div class="status-block">
+              <div class="status-pill"><span>Status</span><strong id="albOption2State">idle</strong></div>
+              <div class="status-pill"><span>Phase</span><strong id="albOption2Phase">idle</strong></div>
+              <div class="status-pill"><span>Matches</span><strong id="albOption2Matches">0</strong></div>
+            </div>
+            <p id="albOption2Message" class="page-copy">Idle.</p>
+            <div id="albOption2Meta" class="footer-note"></div>
+            <div class="export-row">
+              <div id="albOption2ExportPath" class="footer-note"></div>
+              <button id="albOption2OpenExport" class="button-link primary button-like compact" type="button" hidden>Open Excel</button>
+            </div>
+            <div class="result-card progress-card-compact">
+              <div class="progress-card-head">
+                <div class="info-label">Scan progress</div>
+                <div id="albOption2StageBadge" class="kicker">idle</div>
+              </div>
+              <div id="albOption2Summary" class="info-value">Waiting for a scan to start.</div>
+              <div class="progress-track"><div id="albOption2Bar" class="progress-fill" style="width:0%"></div></div>
+              <div id="albOption2BarMeta" class="footer-note">No scan running.</div>
+            </div>
+          </section>
+        </section>
+
+        <section id="albOption2Results" class="stack" hidden>
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">Results</div>
+                <h2>Top matching IPs</h2>
+              </div>
+            </div>
+            <div id="albOption2TopIps" class="result-summary-body"></div>
+          </section>
+
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">Breakdown</div>
+                <h2>Top full paths per IP</h2>
+              </div>
+            </div>
+            <div id="albOption2TopUris" class="stack"></div>
           </section>
         </section>
       </section>

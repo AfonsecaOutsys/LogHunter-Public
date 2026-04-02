@@ -11,13 +11,15 @@ namespace LogHunter.Services;
 public static class AlbScanner
 {
     public static List<string> GetLogFiles()
+        => GetLogFiles(AppFolders.ALB);
+
+    public static List<string> GetLogFiles(string? rootFolder)
     {
-        var albRoot = AppFolders.ALB;
-        if (!Directory.Exists(albRoot))
+        if (string.IsNullOrWhiteSpace(rootFolder) || !Directory.Exists(rootFolder))
             return new List<string>();
 
         // ALB analysis uses extracted .log files (not .gz).
-        return Directory.EnumerateFiles(albRoot, "*.log", SearchOption.AllDirectories).ToList();
+        return Directory.EnumerateFiles(rootFolder, "*.log", SearchOption.AllDirectories).ToList();
     }
 
     // ------------------------

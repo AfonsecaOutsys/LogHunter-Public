@@ -1,5 +1,10 @@
 (function () {
   let currentJobId = '';
+  let albOption2Polling = null;
+  let albOption2JobId = '';
+  let albOption2DefaultSelection = null;
+  let albOption2Selection = null;
+  let albOption2ServerSelection = null;
 
   function byId(id) {
     return document.getElementById(id);
@@ -20,6 +25,22 @@
 
   function setError(message) {
     const node = byId('albDownloadError');
+    if (!node) {
+      return;
+    }
+
+    if (!message) {
+      node.textContent = '';
+      node.hidden = true;
+      return;
+    }
+
+    node.textContent = message;
+    node.hidden = false;
+  }
+
+  function setAlbOption2Error(message) {
+    const node = byId('albOption2Error');
     if (!node) {
       return;
     }
@@ -354,15 +375,16 @@
     setText('albJobStep', snapshot.totalSteps ? `Step ${snapshot.currentStep || 0} of ${snapshot.totalSteps}` : '');
 
     currentJobId = snapshot.jobId || currentJobId;
+    const hasJob = snapshot.state && snapshot.state !== 'idle';
+    setHidden(byId('albOpenRunFolder'), !hasJob);
     renderProgress(snapshot);
     renderOutput(snapshot);
     renderResult(snapshot);
   }
 
   function collectRequest() {
-    const configMode = document.querySelector('input[name="configMode"]:checked')?.value || 'new';
     return {
-      configMode,
+      configMode: currentConfigMode,
       savedConfigName: byId('savedConfigName')?.value || '',
       configName: byId('configName')?.value || '',
       bucket: byId('bucket')?.value || '',
@@ -479,10 +501,20 @@
     }
   }
 
-  function syncConfigMode() {
-    const mode = document.querySelector('input[name="configMode"]:checked')?.value || 'new';
+  let currentConfigMode = 'new';
+
+  function setConfigMode(mode) {
+    currentConfigMode = mode;
+    const btnNew = byId('configModeNew');
+    const btnSaved = byId('configModeSaved');
+    if (btnNew) btnNew.classList.toggle('active', mode === 'new');
+    if (btnSaved) btnSaved.classList.toggle('active', mode === 'saved');
     setHidden(byId('savedConfigFields'), mode !== 'saved');
     setHidden(byId('newConfigFields'), mode !== 'new');
+  }
+
+  function syncConfigMode() {
+    setConfigMode(currentConfigMode);
   }
 
   async function startDownload() {
@@ -530,6 +562,495 @@
     }
   }
 
+  async function openAlbOption2Export() {
+    setAlbOption2Error('');
+    try {
+      if (!albOption2JobId) {
+        throw new Error('No ALB option 2 scan has produced a workbook yet.');
+      }
+
+      const payload = await fetchJson('/api/alb/top-ips-top-paths/open-export', {
+        method: 'POST',
+        body: JSON.stringify({ jobId: albOption2JobId })
+      });
+
+      if (!payload.ok) {
+        throw new Error(payload.message || 'Unable to open Excel.');
+      }
+    } catch (error) {
+      setAlbOption2Error(String(error));
+    }
+  }
+
+  function renderOption2Result(result, exportPath) {
+    const results = byId('albOption2Results');
+    const topIps = byId('albOption2TopIps');
+    const topUris = byId('albOption2TopUris');
+    if (!results || !topIps || !topUris) {
+      return;
+    }
+
+    const items = Array.isArray(result?.topIps) ? result.topIps : [];
+    setText('albOption2State', items.length ? 'completed' : 'no matches');
+    setText('albOption2Matches', String(result?.totalMatchingIps || 0));
+    setText('albOption2Message', items.length
+      ? `Scan completed for fragment "${result.endpointFragment}".`
+      : `No ALB hits matched fragment "${result.endpointFragment}".`);
+    setText('albOption2ExportPath', exportPath ? `Exported: ${exportPath}` : '');
+
+    if (!items.length) {
+      results.hidden = false;
+      topIps.innerHTML = '<div class="footer-note">No matching IPs found.</div>';
+      topUris.innerHTML = '';
+      return;
+    }
+
+    results.hidden = false;
+    topIps.innerHTML = `
+      <div class="result-lines">
+        ${items.map((item) => `<div>#${escapeHtml(item.rank)} ${escapeHtml(item.ip)} <strong>${escapeHtml(formatValue(item.hits))}</strong> hits</div>`).join('')}
+      </div>
+    `;
+
+    topUris.innerHTML = items.map((item) => `
+      <div class="result-card">
+        <div class="info-label">IP #${escapeHtml(item.rank)}</div>
+        <div class="info-value">${escapeHtml(item.ip)} <span class="footer-note">(${escapeHtml(formatValue(item.hits))} hits)</span></div>
+        <ul class="list-clean">
+          ${(Array.isArray(item.topUris) && item.topUris.length
+            ? item.topUris.map((uri) => `<li><span class="footer-note">#${escapeHtml(uri.rank)}</span> <strong>${escapeHtml(formatValue(uri.hits))}</strong> ${escapeHtml(uri.uri)}</li>`).join('')
+            : '<li class="footer-note">(no URI matches)</li>')}
+        </ul>
+      </div>
+    `).join('');
+  }
+
+  function cloneSelection(selection) {
+    if (!selection) {
+      return null;
+    }
+
+    return {
+      sourceType: selection.sourceType || 'default',
+      rootPath: selection.rootPath || '',
+      filePaths: Array.isArray(selection.filePaths) ? [...selection.filePaths] : [],
+      fileCount: Number(selection.fileCount || 0),
+      totalBytes: Number(selection.totalBytes || 0),
+      selectionLabel: selection.selectionLabel || '',
+      summary: selection.summary || '',
+      previewItems: Array.isArray(selection.previewItems) ? [...selection.previewItems] : [],
+      remainingCount: Number(selection.remainingCount || 0)
+    };
+  }
+
+  function buildAlbOption2BrowserSelection(sourceType, files) {
+    const items = Array.from(files || [])
+      .filter((file) => file && typeof file.name === 'string' && file.name.toLowerCase().endsWith('.log'));
+
+    const totalBytes = items.reduce((sum, file) => sum + Number(file.size || 0), 0);
+    const previewItems = items.slice(0, 3).map((file) => file.name);
+    const remainingCount = Math.max(0, items.length - previewItems.length);
+    const folderName = sourceType === 'folder' && items.length
+      ? getTopFolderName(items[0])
+      : '';
+
+    const selectionLabel = sourceType === 'folder'
+      ? (folderName || 'Selected folder')
+      : `${items.length} selected file(s)`;
+
+    const summary = sourceType === 'folder'
+      ? `${selectionLabel} | ${items.length} .log files | ${formatBytes(totalBytes)}`
+      : `${items.length} selected file(s) | ${formatBytes(totalBytes)}`;
+
+    return {
+      sourceType,
+      files: items,
+      fileCount: items.length,
+      totalBytes,
+      selectionLabel,
+      summary,
+      previewItems,
+      remainingCount
+    };
+  }
+
+  function getTopFolderName(file) {
+    const relativePath = typeof file.webkitRelativePath === 'string' ? file.webkitRelativePath : '';
+    if (!relativePath || !relativePath.includes('/')) {
+      return '';
+    }
+
+    return relativePath.split('/')[0] || '';
+  }
+
+  let albOption2SourceType = 'default';
+
+  function getAlbOption2SourceType() {
+    return albOption2SourceType;
+  }
+
+  function setAlbOption2SourceType(type) {
+    albOption2SourceType = type;
+  }
+
+  function renderAlbOption2Selection() {
+    const sourceType = getAlbOption2SourceType();
+    const chip = byId('albOption2SourceChip');
+    const clearButton = byId('albOption2ClearSelection');
+    const selection = albOption2Selection && albOption2Selection.sourceType === sourceType ? albOption2Selection : null;
+
+    // Update active button state
+    const btnDefault = byId('albOption2UseDefault');
+    const btnFolder = byId('albOption2SelectFolder');
+    const btnFiles = byId('albOption2SelectFiles');
+    if (btnDefault) btnDefault.classList.toggle('active', sourceType === 'default');
+    if (btnFolder) btnFolder.classList.toggle('active', sourceType === 'folder');
+    if (btnFiles) btnFiles.classList.toggle('active', sourceType === 'files');
+
+    setHidden(clearButton, sourceType === 'default');
+
+    if (sourceType === 'default') {
+      if (chip) {
+        const def = albOption2DefaultSelection;
+        chip.textContent = def
+          ? `${def.selectionLabel || 'Default folder'} | ${def.fileCount || 0} files | ${formatBytes(def.totalBytes || 0)}`
+          : 'Default folder';
+      }
+      return;
+    }
+
+    if (!selection) {
+      if (chip) {
+        chip.textContent = sourceType === 'folder' ? 'No folder selected' : 'No files selected';
+      }
+      return;
+    }
+
+    if (chip) {
+      if (sourceType === 'files') {
+        chip.textContent = `${selection.fileCount} file${selection.fileCount === 1 ? '' : 's'} | ${formatBytes(selection.totalBytes)}`;
+      } else {
+        chip.textContent = `${selection.selectionLabel || 'Selected folder'} | ${selection.fileCount} file${selection.fileCount === 1 ? '' : 's'} | ${formatBytes(selection.totalBytes)}`;
+      }
+    }
+  }
+
+  function setAlbOption2Selection(selection, forceSourceType) {
+    albOption2Selection = cloneSelection(selection);
+    if (forceSourceType) {
+      setAlbOption2SourceType(forceSourceType);
+    }
+    renderAlbOption2Selection();
+  }
+
+  async function loadAlbOption2Meta() {
+    const payload = await fetchJson('/api/alb/top-ips-top-paths/meta', { method: 'GET', headers: { 'Accept': 'application/json' } });
+    albOption2DefaultSelection = cloneSelection(payload.defaultSelection);
+    renderAlbOption2Selection();
+
+    if (payload.currentJob) {
+      renderOption2Snapshot(payload.currentJob);
+      albOption2JobId = payload.currentJob.jobId || albOption2JobId;
+      if (payload.currentJob.state === 'running') {
+        startAlbOption2Polling();
+      }
+    }
+  }
+
+  function useAlbOption2Default() {
+    setAlbOption2Error('');
+    setAlbOption2SourceType('default');
+    albOption2Selection = null;
+    renderAlbOption2Selection();
+  }
+
+  async function selectAlbOption2Folder() {
+    setAlbOption2Error('');
+    setAlbOption2SourceType('folder');
+    renderAlbOption2Selection();
+    await new Promise(r => setTimeout(r, 0));
+
+    try {
+      const payload = await fetchJson('/api/alb/top-ips-top-paths/browse-folder', { method: 'POST' });
+      if (!payload.ok) {
+        if (payload.cancelled) {
+          setAlbOption2SourceType('default');
+          renderAlbOption2Selection();
+          return;
+        }
+        throw new Error(payload.error || 'Failed to browse folder.');
+      }
+      albOption2ServerSelection = payload.selection;
+      albOption2Selection = payload.selection;
+      renderAlbOption2Selection();
+    } catch (error) {
+      setAlbOption2SourceType('default');
+      renderAlbOption2Selection();
+      setAlbOption2Error(String(error));
+    }
+  }
+
+  async function selectAlbOption2Files() {
+    setAlbOption2Error('');
+    setAlbOption2SourceType('files');
+    renderAlbOption2Selection();
+    await new Promise(r => setTimeout(r, 0));
+
+    try {
+      const payload = await fetchJson('/api/alb/top-ips-top-paths/browse-files', { method: 'POST' });
+      if (!payload.ok) {
+        if (payload.cancelled) {
+          setAlbOption2SourceType('default');
+          renderAlbOption2Selection();
+          return;
+        }
+        throw new Error(payload.error || 'Failed to browse files.');
+      }
+      albOption2ServerSelection = payload.selection;
+      albOption2Selection = payload.selection;
+      renderAlbOption2Selection();
+    } catch (error) {
+      setAlbOption2SourceType('default');
+      renderAlbOption2Selection();
+      setAlbOption2Error(String(error));
+    }
+  }
+
+  function handleAlbOption2FolderInput() {
+    const input = byId('albOption2FolderInput');
+    const files = input?.files ? Array.from(input.files) : [];
+    albOption2Selection = buildAlbOption2BrowserSelection('folder', files);
+    renderAlbOption2Selection();
+    setAlbOption2Error('');
+  }
+
+  function handleAlbOption2FilesInput() {
+    const input = byId('albOption2FilesInput');
+    const files = input?.files ? Array.from(input.files) : [];
+    albOption2Selection = buildAlbOption2BrowserSelection('files', files);
+    renderAlbOption2Selection();
+    setAlbOption2Error('');
+  }
+
+  function clearAlbOption2Selection() {
+    albOption2Selection = null;
+    albOption2ServerSelection = null;
+    setAlbOption2SourceType('default');
+    const folderInput = byId('albOption2FolderInput');
+    const filesInput = byId('albOption2FilesInput');
+    if (folderInput) {
+      folderInput.value = '';
+    }
+    if (filesInput) {
+      filesInput.value = '';
+    }
+    renderAlbOption2Selection();
+    setAlbOption2Error('');
+  }
+
+  async function createAlbOption2StagingSession(sourceType) {
+    const payload = await fetchJson('/api/alb/top-ips-top-paths/staging/start', {
+      method: 'POST',
+      body: JSON.stringify({ sourceType })
+    });
+
+    return payload.stagingId || '';
+  }
+
+  async function uploadAlbOption2Selection(selection) {
+    const stagingId = await createAlbOption2StagingSession(selection.sourceType);
+    if (!stagingId) {
+      throw new Error('Unable to create an upload session.');
+    }
+
+    for (const file of selection.files) {
+      const relativePath = selection.sourceType === 'folder' && file.webkitRelativePath
+        ? file.webkitRelativePath
+        : file.name;
+
+      const response = await fetch(`/api/alb/top-ips-top-paths/staging/upload?stagingId=${encodeURIComponent(stagingId)}&relativePath=${encodeURIComponent(relativePath)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream'
+        },
+        body: file
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || `Upload failed for ${file.name}.`);
+      }
+    }
+
+    return stagingId;
+  }
+
+  async function runAlbOption2() {
+    const sourceType = getAlbOption2SourceType();
+    const selection = albOption2Selection && albOption2Selection.sourceType === sourceType ? albOption2Selection : null;
+
+    setAlbOption2Error('');
+    setText('albOption2State', 'running');
+    setText('albOption2Phase', 'queued');
+    setText('albOption2Message', 'Scanning ALB logs...');
+    setText('albOption2Meta', '');
+    setText('albOption2ExportPath', '');
+    setText('albOption2StageBadge', 'queued');
+    setText('albOption2Summary', 'Preparing scan.');
+    setText('albOption2BarMeta', 'Waiting for the job to start.');
+    setHidden(byId('albOption2OpenExport'), true);
+    setHidden(byId('albOption2Results'), true);
+    setBar('albOption2Bar', 0, 1);
+
+    const endpoint = byId('albOption2Endpoint')?.value?.trim() || '';
+    if (!endpoint) {
+      setText('albOption2State', 'idle');
+      setAlbOption2Error('Endpoint/path fragment is required.');
+      return;
+    }
+
+    if (sourceType !== 'default' && !selection) {
+      setText('albOption2State', 'idle');
+      setAlbOption2Error(sourceType === 'folder'
+        ? 'Select a folder before running the scan.'
+        : 'Select one or more files before running the scan.');
+      renderAlbOption2Selection();
+      return;
+    }
+
+    if (selection && selection.fileCount === 0) {
+      setText('albOption2State', 'idle');
+      setAlbOption2Error(sourceType === 'folder'
+        ? 'The selected folder does not contain any .log files.'
+        : 'Select one or more .log files before running the scan.');
+      renderAlbOption2Selection();
+      return;
+    }
+
+    albOption2JobId = '';
+
+    try {
+      const runBody = {
+        endpointFragment: endpoint,
+        exportXlsx: Boolean(byId('albOption2Export')?.checked),
+        sourceType
+      };
+
+      if (albOption2ServerSelection && sourceType !== 'default') {
+        // Server-side native dialog selection — pass path directly, no upload needed.
+        if (sourceType === 'folder' && albOption2ServerSelection.rootPath) {
+          runBody.serverPath = albOption2ServerSelection.rootPath;
+        } else if (albOption2ServerSelection.filePaths) {
+          runBody.serverFilePaths = albOption2ServerSelection.filePaths;
+        }
+      } else if (selection && sourceType !== 'default') {
+        // Browser file input fallback — upload via staging.
+        setText('albOption2Message', sourceType === 'folder'
+          ? 'Uploading selected folder files...'
+          : 'Uploading selected files...');
+        setText('albOption2Summary', `Preparing ${selection.fileCount} file(s) for scanning`);
+        setText('albOption2BarMeta', 'Uploading selected logs to the local web session.');
+        runBody.stagingId = await uploadAlbOption2Selection(selection);
+      }
+
+      const payload = await fetchJson('/api/alb/top-ips-top-paths/run', {
+        method: 'POST',
+        body: JSON.stringify(runBody)
+      });
+
+      renderOption2Snapshot(payload.snapshot || {});
+      startAlbOption2Polling();
+    } catch (error) {
+      setText('albOption2State', 'failed');
+      setAlbOption2Error(String(error));
+    }
+  }
+
+  function renderOption2Snapshot(snapshot) {
+    const result = snapshot && snapshot.result ? snapshot.result : null;
+    const currentStep = Number(snapshot?.currentStep || 0);
+    const totalSteps = Number(snapshot?.totalSteps || 0);
+    const filesTotal = Number(snapshot?.filesTotal || 0);
+    const totalBytes = Number(snapshot?.totalBytes || 0);
+    const phase = snapshot?.phase || 'idle';
+    const state = snapshot?.state || 'idle';
+    const exportPath = snapshot?.exportPath || '';
+    const inputSummary = snapshot?.inputSourceSummary || '';
+    const createdUtc = snapshot?.createdUtc ? new Date(snapshot.createdUtc) : null;
+    const now = new Date();
+    let etaText = 'n/a';
+
+    if (state === 'running' && createdUtc && !Number.isNaN(createdUtc.getTime()) && currentStep > 0 && totalSteps > currentStep) {
+      const elapsedSeconds = Math.max(1, (now.getTime() - createdUtc.getTime()) / 1000);
+      const secondsPerStep = elapsedSeconds / currentStep;
+      etaText = formatEta(secondsPerStep * (totalSteps - currentStep));
+    }
+
+    albOption2JobId = snapshot?.jobId || albOption2JobId;
+    setText('albOption2State', formatValue(state));
+    setText('albOption2Phase', formatValue(phase));
+    setText('albOption2StageBadge', formatValue(phase));
+    setText('albOption2Message', snapshot?.error ? `${snapshot.message} ${snapshot.error}` : formatValue(snapshot?.message));
+    setText('albOption2Meta', inputSummary || (filesTotal > 0 ? `Scope: ${filesTotal} files | ${formatBytes(totalBytes)}` : ''));
+    setText('albOption2ExportPath', exportPath ? `Exported: ${exportPath}` : '');
+    setText('albOption2Matches', String(result?.totalMatchingIps || 0));
+    setHidden(byId('albOption2OpenExport'), !exportPath);
+
+    if (state === 'completed') {
+      setText('albOption2Summary', result && result.totalMatchingIps > 0
+        ? `${result.totalMatchingIps} matching IPs found`
+        : 'No matching IPs found');
+      setText('albOption2BarMeta', 'ETA 0s');
+      setBar('albOption2Bar', totalSteps > 0 ? totalSteps : 1, totalSteps > 0 ? totalSteps : 1);
+      if (result) {
+        renderOption2Result(result, exportPath);
+      }
+      return;
+    }
+
+    if (state === 'failed') {
+      setText('albOption2Summary', 'Scan failed');
+      setText('albOption2BarMeta', snapshot?.error ? `ETA n/a | ${snapshot.error}` : 'ETA n/a');
+      return;
+    }
+
+    if (state === 'running') {
+      setText('albOption2Summary', totalSteps > 0 ? `${Math.round((currentStep / totalSteps) * 100)}% complete` : 'Scanning ALB logs');
+      setText('albOption2BarMeta', `ETA ${etaText}`);
+      setBar('albOption2Bar', currentStep, totalSteps);
+    }
+  }
+
+  async function pollAlbOption2Status() {
+    try {
+      const snapshot = await fetchJson('/api/alb/top-ips-top-paths/job', { method: 'GET', headers: { 'Accept': 'application/json' } });
+      renderOption2Snapshot(snapshot);
+
+      if (snapshot && snapshot.state && snapshot.state !== 'running' && albOption2Polling) {
+        clearInterval(albOption2Polling);
+        albOption2Polling = null;
+      }
+    } catch (error) {
+      setAlbOption2Error(String(error));
+    }
+  }
+
+  function startAlbOption2Polling() {
+    if (albOption2Polling) {
+      clearInterval(albOption2Polling);
+    }
+
+    albOption2Polling = setInterval(async () => {
+      await pollAlbOption2Status();
+    }, 1000);
+  }
+
   function startPollingLoop() {
     setInterval(async () => {
       await pollStatus();
@@ -541,6 +1062,10 @@
       return;
     }
 
+    byId('configModeNew')?.addEventListener('click', () => setConfigMode('new'));
+    byId('configModeSaved')?.addEventListener('click', () => setConfigMode('saved'));
+
+    // Legacy radio fallback (unused, kept for safety).
     document.querySelectorAll('input[name="configMode"]').forEach((element) => {
       element.addEventListener('change', () => {
         syncConfigMode();
@@ -589,9 +1114,32 @@
     startPollingLoop();
   }
 
+  function initializeAlbOption2Page() {
+    if (!document.querySelector('[data-alb-option2-page="true"]')) {
+      return;
+    }
+
+    byId('albOption2Run')?.addEventListener('click', runAlbOption2);
+    byId('albOption2OpenExport')?.addEventListener('click', openAlbOption2Export);
+    byId('albOption2UseDefault')?.addEventListener('click', useAlbOption2Default);
+    byId('albOption2SelectFolder')?.addEventListener('click', selectAlbOption2Folder);
+    byId('albOption2SelectFiles')?.addEventListener('click', selectAlbOption2Files);
+    byId('albOption2ClearSelection')?.addEventListener('click', clearAlbOption2Selection);
+    byId('albOption2FolderInput')?.addEventListener('change', handleAlbOption2FolderInput);
+    byId('albOption2FilesInput')?.addEventListener('change', handleAlbOption2FilesInput);
+    byId('albOption2Endpoint')?.addEventListener('input', () => {
+      setAlbOption2Error('');
+    });
+    loadAlbOption2Meta().catch((error) => setAlbOption2Error(String(error)));
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeAlbPage);
+    document.addEventListener('DOMContentLoaded', () => {
+      initializeAlbPage();
+      initializeAlbOption2Page();
+    });
   } else {
     initializeAlbPage();
+    initializeAlbOption2Page();
   }
 })();
