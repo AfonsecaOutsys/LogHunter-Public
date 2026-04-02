@@ -143,6 +143,20 @@ internal sealed class AlbIpSummaryJobManager
 
     private static bool TryShellOpen(string path, out string message)
     {
+        // .db files have no default Windows handler — open Explorer with the file selected instead.
+        var ext = Path.GetExtension(path);
+        if (string.Equals(ext, ".db", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(ext, ".sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            if (AlbIpSummarySqliteViewerLauncher.Launch(path, null))
+            {
+                message = path;
+                return true;
+            }
+
+            return TryRevealInExplorer(path, out message);
+        }
+
         try
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
@@ -150,6 +164,20 @@ internal sealed class AlbIpSummaryJobManager
                 FileName = path,
                 UseShellExecute = true
             });
+            message = path;
+            return true;
+        }
+        catch
+        {
+            return TryRevealInExplorer(path, out message);
+        }
+    }
+
+    private static bool TryRevealInExplorer(string path, out string message)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{path}\"");
             message = path;
             return true;
         }
