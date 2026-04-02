@@ -48,7 +48,6 @@
 		<PackageReference Include="ExcelDataReader" Version="3.8.0" />
 		<PackageReference Include="ExcelDataReader.DataSet" Version="3.8.0" />
 		<PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
-		<PackageReference Include="ScottPlot" Version="5.1.57" />
 		<PackageReference Include="Spectre.Console" Version="0.54.0" />
 	</ItemGroup>
 
