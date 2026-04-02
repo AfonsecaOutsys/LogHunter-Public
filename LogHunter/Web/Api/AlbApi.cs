@@ -424,7 +424,7 @@ internal static class AlbApi
                 return true;
             }
 
-            if (!app.AlbIpSummary.TryStart(validIps, body.ExportXlsx, selection, out var snapshot, out var error))
+            if (!app.AlbIpSummary.TryStart(validIps, body.ExportXlsx, body.ChartOnly, selection, out var snapshot, out var error))
             {
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
@@ -675,6 +675,7 @@ internal static class AlbApi
     private sealed record AlbIpSummaryRunRequest(
         IReadOnlyList<string> Ips,
         bool ExportXlsx,
+        bool ChartOnly,
         string? SourceType,
         string? ServerPath,
         IReadOnlyList<string>? ServerFilePaths);

@@ -468,8 +468,8 @@ internal static class AlbPageBuilder
             <div class="field-group source-group">
               <label class="field-label">Output mode</label>
               <div class="button-row source-action-row">
-                <button id="ipSummaryModeChart" class="source-btn active" type="button">Chart summary</button>
-                <button id="ipSummaryModeExport" class="source-btn" type="button">Export output</button>
+                <button id="ipSummaryModeExport" class="source-btn active" type="button">Export output</button>
+                <button id="ipSummaryModeChart" class="source-btn" type="button">Chart summary</button>
               </div>
             </div>
 

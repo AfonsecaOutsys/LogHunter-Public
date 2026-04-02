@@ -24,6 +24,7 @@ internal sealed class AlbIpSummaryJobManager
     public bool TryStart(
         IReadOnlyList<string> requestedIps,
         bool exportXlsx,
+        bool chartOnly,
         AlbTopIpsInputSourceSelection inputSource,
         out AlbIpSummaryJobSnapshot snapshot,
         out string? error)
@@ -87,7 +88,7 @@ internal sealed class AlbIpSummaryJobManager
 
             snapshot = _snapshot;
             error = null;
-            _ = RunAsync(_snapshot.JobId, files, requestedIps, exportXlsx);
+            _ = RunAsync(_snapshot.JobId, files, requestedIps, exportXlsx, chartOnly);
             return true;
         }
     }
@@ -188,7 +189,7 @@ internal sealed class AlbIpSummaryJobManager
         }
     }
 
-    private async Task RunAsync(string jobId, List<string> files, IReadOnlyList<string> requestedIps, bool exportXlsx)
+    private async Task RunAsync(string jobId, List<string> files, IReadOnlyList<string> requestedIps, bool exportXlsx, bool chartOnly)
     {
         var outputFolder = AppFolders.Output;
         Directory.CreateDirectory(outputFolder);
@@ -204,6 +205,12 @@ internal sealed class AlbIpSummaryJobManager
 
         AlbIpSummaryExportSqlite.Writer? sharedSqliteWriter = null;
         bool sqliteAutoApproved = false;
+
+        if (chartOnly)
+        {
+            foreach (var result in resultsByIp.Values)
+                result.ApplyGlobalDetailMode(AlbIpSummaryScanner.DetailRetentionMode.SummaryOnly);
+        }
 
         try
         {
@@ -228,8 +235,8 @@ internal sealed class AlbIpSummaryJobManager
                     IpRowCounts = ipRowCounts
                 });
 
-                // Auto-approve SQLite when aggregate threshold reached
-                if (!sqliteAutoApproved)
+                // Auto-approve SQLite when aggregate threshold reached (skip in chart-only mode)
+                if (!chartOnly && !sqliteAutoApproved)
                 {
                     var aggregateRows = resultsByIp.Values
                         .Where(r => r.DetailMode == AlbIpSummaryScanner.DetailRetentionMode.BelowThreshold)

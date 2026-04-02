@@ -1144,7 +1144,7 @@
   let ipSummaryInputMode = 'manual';
   let ipSummaryExtractedIps = [];
   let ipSummarySelectedExtractedIps = new Set();
-  let ipSummaryExportMode = 'chart'; // 'chart' or 'export'
+  let ipSummaryExportMode = 'export'; // 'chart' or 'export'
 
   function setIpSummaryError(msg) {
     const node = byId('ipSummaryError');
@@ -1381,8 +1381,9 @@
       return;
     }
 
-    const exportXlsx = ipSummaryExportMode === 'export';
-    const body = { ips, exportXlsx, sourceType: ipSummarySourceType };
+    const isChartOnly = ipSummaryExportMode === 'chart';
+    const exportXlsx = !isChartOnly;
+    const body = { ips, exportXlsx, chartOnly: isChartOnly, sourceType: ipSummarySourceType };
 
     if (ipSummarySourceType === 'folder' && ipSummaryServerSelection?.rootPath) {
       body.serverPath = ipSummaryServerSelection.rootPath;
@@ -1512,8 +1513,9 @@
       openReport.classList.toggle('primary', hasReport);
     }
     if (openExport) {
-      openExport.disabled = !hasExport;
-      openExport.classList.toggle('primary', hasExport);
+      const chartOnly = ipSummaryExportMode === 'chart';
+      openExport.disabled = chartOnly || !hasExport;
+      openExport.classList.toggle('primary', !chartOnly && hasExport);
       openExport.textContent = snap.sqlitePath && !snap.excelPath ? 'Open SQLite' : 'Open Excel';
     }
 
@@ -1609,6 +1611,14 @@
     const btnExport = byId('ipSummaryModeExport');
     if (btnChart) btnChart.classList.toggle('active', mode === 'chart');
     if (btnExport) btnExport.classList.toggle('active', mode === 'export');
+
+    const openExport = byId('ipSummaryOpenExport');
+    if (openExport) {
+      if (mode === 'chart') {
+        openExport.disabled = true;
+        openExport.classList.remove('primary');
+      }
+    }
   }
 
   function initializeIpSummaryPage() {
