@@ -143,6 +143,10 @@ internal static class AlbIpSummarySqliteViewerPage
       word-break: break-word;
       color: #bfdbfe;
     }
+    td code.nowrap {
+      white-space: nowrap;
+      word-break: normal;
+    }
     .pagination {
       display: flex;
       align-items: center;
@@ -447,7 +451,7 @@ internal static class AlbIpSummarySqliteViewerPage
           <td>${escapeHtml(row.elbResponseCode ?? '')}</td>
           <td>${escapeHtml(row.feResponseCode ?? '')}</td>
           <td><code>${escapeHtml(row.targetEndpoint)}</code></td>
-          <td><code>${escapeHtml(row.rawRequest)}</code></td>
+          <td><code class="nowrap">${escapeHtml(row.rawRequest)}</code></td>
           <td>${escapeHtml(row.actionsExecuted)}</td>
           <td>${escapeHtml(row.userAgent)}</td>
           <td>${escapeHtml(row.requestProcessingTimeSeconds ?? '')}</td>

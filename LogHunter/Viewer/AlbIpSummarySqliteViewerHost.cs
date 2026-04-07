@@ -29,7 +29,7 @@ internal sealed class AlbIpSummarySqliteViewerHost : IDisposable
     private readonly int _port;
     private readonly string _baseUrl;
 
-    public AlbIpSummarySqliteViewerHost(string dbPath, string? requestedIp)
+    public AlbIpSummarySqliteViewerHost(string dbPath, string? requestedIp, int? port = null)
     {
         _dbPath = Path.GetFullPath(dbPath);
         _requestedIp = string.IsNullOrWhiteSpace(requestedIp) ? null : requestedIp.Trim();
@@ -39,7 +39,7 @@ internal sealed class AlbIpSummarySqliteViewerHost : IDisposable
 
         _connection = new SqliteConnection($"Data Source={_dbPath};Mode=ReadOnly");
         _connection.Open();
-        _port = GetFreePort();
+        _port = port is > 0 ? port.Value : GetFreePort();
         _baseUrl = $"http://127.0.0.1:{_port}/";
         _listener.Prefixes.Add(_baseUrl);
     }
@@ -52,9 +52,10 @@ internal sealed class AlbIpSummarySqliteViewerHost : IDisposable
         Console.WriteLine($"SQLite deep analysis viewer ready for {metadata.DatabaseName}");
         Console.WriteLine($"Viewer URL: {_baseUrl}");
         Console.WriteLine("Press Ctrl+C in this viewer process to stop the local server.");
-        TryOpenBrowser(_baseUrl);
 
         var getContextTask = _listener.GetContextAsync();
+        await Task.Delay(350).ConfigureAwait(false);
+        TryOpenBrowser(_baseUrl);
         while (!stopRequested())
         {
             HttpListenerContext? context = null;
@@ -453,6 +454,7 @@ ORDER BY {MapSortField(request.SortField)} {MapSortDirection(request.SortDirecti
             return false;
         }
     }
+
 
     private static int GetFreePort()
     {

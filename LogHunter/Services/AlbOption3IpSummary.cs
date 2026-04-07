@@ -74,6 +74,8 @@ public static partial class AlbOptions
             foreach (var result in resultsByIp.Values)
                 result.CompleteStreamingExports();
             sharedSqliteWriter?.Complete();
+            sharedSqliteWriter?.Dispose();
+            sharedSqliteWriter = null;
 
             var anyHits = resultsByIp.Values.Any(r => r.TotalRows > 0);
             if (!anyHits)

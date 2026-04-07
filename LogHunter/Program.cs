@@ -54,6 +54,7 @@ internal static class Program
         string? rootOverride = null;
         string? viewerSqlitePath = null;
         string? viewerIp = null;
+        int? viewerPort = null;
         string? albDownloadJobPath = null;
         var consoleMode = !DefaultToWebMode;
         var launchBrowser = true;
@@ -134,6 +135,28 @@ internal static class Program
                 continue;
             }
 
+            if (a == "--viewer-port")
+            {
+                if (i + 1 >= args.Length)
+                {
+                    Console.WriteLine("Missing value for --viewer-port");
+                    Console.WriteLine();
+                    ShowHelp(version);
+                    return;
+                }
+
+                if (!int.TryParse(args[++i], out var parsedViewerPort) || parsedViewerPort <= 0 || parsedViewerPort > 65535)
+                {
+                    Console.WriteLine("Invalid value for --viewer-port");
+                    Console.WriteLine();
+                    ShowHelp(version);
+                    return;
+                }
+
+                viewerPort = parsedViewerPort;
+                continue;
+            }
+
             if (a == "--run-alb-download-job")
             {
                 if (i + 1 >= args.Length)
@@ -179,12 +202,12 @@ internal static class Program
                 {
                     if (viewerKind == "iis")
                     {
-                        using var viewerHost = new IisIpSummarySqliteViewerHost(viewerSqlitePath, viewerIp);
+                        using var viewerHost = new IisIpSummarySqliteViewerHost(viewerSqlitePath, viewerIp, viewerPort);
                         await viewerHost.RunAsync(() => _ctrlCRequested).ConfigureAwait(false);
                     }
                     else
                     {
-                        using var viewerHost = new AlbIpSummarySqliteViewerHost(viewerSqlitePath, viewerIp);
+                        using var viewerHost = new AlbIpSummarySqliteViewerHost(viewerSqlitePath, viewerIp, viewerPort);
                         await viewerHost.RunAsync(() => _ctrlCRequested).ConfigureAwait(false);
                     }
                 }
@@ -263,6 +286,7 @@ internal static class Program
         Console.WriteLine("  --no-browser            In web mode, do not auto-open the default browser");
         Console.WriteLine("  --viewer-sqlite <path>  Start the SQLite viewer for the specified database");
         Console.WriteLine("  --viewer-ip <ip>        Optional selected IP shown in viewer metadata");
+        Console.WriteLine("  --viewer-port <port>    Optional local port for the SQLite viewer server");
         Console.WriteLine("  --version, -v           Print version and exit");
         Console.WriteLine("  --help, -h              Show this help");
     }

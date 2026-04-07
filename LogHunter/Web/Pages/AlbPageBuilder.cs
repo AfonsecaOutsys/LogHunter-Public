@@ -12,7 +12,7 @@ internal static class AlbPageBuilder
     [
         new(1, "/alb/download-logs", "Download logs from S3", "Download ALB logs into the workspace using AWS CLI and your current credentials/session.", true),
         new(2, "/alb/top-ips-top-paths", "Top IPs + top full paths for endpoint/path fragment", "Match a fragment, rank top IPs, then show top full URI paths per IP.", true),
-        new(3, "/alb/ip-summary", "IP Summary", "Review one or more client IPs with shared charts and exports.", false),
+        new(3, "/alb/ip-summary", "IP Summary", "Review one or more client IPs with shared charts and exports.", true),
         new(4, "/alb/top-50-ips", "Top 50 IPs overall", "Scan logs and show the top 50 client IPs across the selected range.", false),
         new(5, "/alb/top-50-ips-by-uri", "Top 50 IPs by URI (no query)", "Group top IP activity by URI path without query strings.", false),
         new(6, "/alb/top-50-avg-duration", "Top 50 requests by AVG duration", "Find the slowest request paths ordered by average duration.", false),
@@ -43,6 +43,14 @@ internal static class AlbPageBuilder
         {
             page = new WebPageDefinition("/alb/top-ips-top-paths", "/alb", "ALB", "ALB / Top IPs + Top Full Paths", "Workflow", "Match an endpoint fragment, rank the top matching IPs, and inspect top full paths per IP.");
             mainContent = BuildTopIpsTopPathsContent();
+            extraScriptPath = "/assets/alb.js";
+            return true;
+        }
+
+        if (string.Equals(path, "/alb/ip-summary", StringComparison.OrdinalIgnoreCase))
+        {
+            page = new WebPageDefinition("/alb/ip-summary", "/alb", "ALB", "ALB / IP Summary", "Workflow", "Review one or more client IPs with per-minute charts, status breakdowns, and shared exports.");
+            mainContent = BuildIpSummaryContent();
             extraScriptPath = "/assets/alb.js";
             return true;
         }
@@ -388,6 +396,132 @@ internal static class AlbPageBuilder
               </div>
             </div>
             <div id="albOption2TopUris" class="stack"></div>
+          </section>
+        </section>
+      </section>
+""";
+    }
+
+    private static string BuildIpSummaryContent()
+    {
+        return """
+      <section class="stack" data-alb-ip-summary-page="true">
+        <section class="hero">
+          <div class="hero-grid">
+            <div>
+              <h1>IP Summary</h1>
+              <p>Enter client IPs, scan ALB logs, and review per-minute charts with status breakdowns.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="module-two-column">
+          <section class="panel form-panel">
+            <h2>Scan inputs</h2>
+            <div id="ipSummaryError" class="inline-error" hidden></div>
+
+            <div class="field-group">
+              <label class="field-label">IP input</label>
+              <div class="button-row source-action-row">
+                <button id="ipSummaryModeManual" class="source-btn active" type="button">Manual entry</button>
+                <button id="ipSummaryModeFile" class="source-btn" type="button">From output file</button>
+                <button id="ipSummaryModeBurst" class="source-btn" type="button" disabled title="IIS burst session (not yet available)">IIS burst</button>
+                <button id="ipSummaryModePlatform" class="source-btn" type="button" disabled title="Platform suspicious cache (not yet available)">Platform cache</button>
+              </div>
+            </div>
+
+            <div id="ipSummaryManualSection" class="field-group">
+              <div class="field">
+                <label for="ipSummaryIpText">Client IPs (one per line, max 10)</label>
+                <textarea id="ipSummaryIpText" rows="5" placeholder="10.0.0.1&#10;192.168.1.100&#10;172.16.0.5"></textarea>
+              </div>
+            </div>
+
+            <div id="ipSummaryFileSection" class="field-group" hidden>
+              <div class="field">
+                <label for="ipSummaryFileSelect">Output file (CSV/XLSX)</label>
+                <select id="ipSummaryFileSelect">
+                  <option value="">Loading files...</option>
+                </select>
+              </div>
+              <button id="ipSummaryExtractBtn" class="button-link primary button-like compact" type="button">Extract IPs</button>
+              <div id="ipSummaryExtractResult" hidden>
+                <div id="ipSummaryExtractInfo" class="source-chip"></div>
+                <div class="field">
+                  <label>Extracted IPs (select up to 10)</label>
+                  <div id="ipSummaryExtractedList" class="ip-extract-list"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="field-group source-group">
+              <label class="field-label">Log source</label>
+              <div class="button-row source-action-row">
+                <button id="ipSummaryUseDefault" class="source-btn active" type="button">Default folder</button>
+                <button id="ipSummarySelectFolder" class="source-btn" type="button">Select folder</button>
+                <button id="ipSummarySelectFiles" class="source-btn" type="button">Select files</button>
+                <button id="ipSummaryClearSelection" class="source-btn source-btn--clear" type="button" hidden>Clear</button>
+              </div>
+              <div id="ipSummarySourceChip" class="source-chip">Loading...</div>
+            </div>
+
+            <div class="field-group source-group">
+              <label class="field-label">Output mode</label>
+              <div class="button-row source-action-row">
+                <button id="ipSummaryModeExport" class="source-btn active" type="button">Export output</button>
+                <button id="ipSummaryModeChart" class="source-btn" type="button">Chart summary</button>
+              </div>
+            </div>
+
+            <div class="button-row">
+              <button id="ipSummaryRun" class="button-link primary button-like" type="button">Run scan</button>
+            </div>
+          </section>
+
+          <section class="panel panel-tight">
+            <h2>Scan status</h2>
+            <div class="status-block">
+              <div class="status-pill"><span>Status</span><strong id="ipSummaryState">idle</strong></div>
+              <div class="status-pill"><span>Phase</span><strong id="ipSummaryPhase">idle</strong></div>
+              <div class="status-pill"><span>IPs</span><strong id="ipSummaryIpCount">0</strong></div>
+            </div>
+            <p id="ipSummaryMessage" class="page-copy">Idle.</p>
+            <div id="ipSummaryMeta" class="footer-note"></div>
+            <div class="export-row">
+              <div id="ipSummaryExportInfo" class="footer-note"></div>
+              <button id="ipSummaryOpenReport" class="button-link button-like compact" type="button" disabled>Open report</button>
+              <button id="ipSummaryOpenExport" class="button-link button-like compact" type="button" disabled>Open Excel</button>
+            </div>
+            <div class="result-card progress-card-compact">
+              <div class="progress-card-head">
+                <div class="info-label">Scan progress</div>
+                <div id="ipSummaryStageBadge" class="kicker">idle</div>
+              </div>
+              <div id="ipSummarySummary" class="info-value">Waiting for a scan to start.</div>
+              <div class="progress-track"><div id="ipSummaryBar" class="progress-fill" style="width:0%"></div></div>
+              <div id="ipSummaryBarMeta" class="footer-note">No scan running.</div>
+            </div>
+
+            <div id="ipSummaryIpProgress" class="expandable-stack" hidden>
+              <details class="expandable-panel" open>
+                <summary>Per-IP row counts</summary>
+                <div class="expandable-body">
+                  <div id="ipSummaryIpRows" class="result-summary-body"></div>
+                </div>
+              </details>
+            </div>
+          </section>
+        </section>
+
+        <section id="ipSummaryResults" class="stack" hidden>
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">Results</div>
+                <h2>Per-IP summary</h2>
+              </div>
+            </div>
+            <div id="ipSummaryPerIp" class="stack"></div>
           </section>
         </section>
       </section>

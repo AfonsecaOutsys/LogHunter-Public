@@ -1,7 +1,8 @@
 using System;
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
 
 namespace LogHunter.Services;
 
@@ -16,12 +17,13 @@ public static class AlbIpSummarySqliteViewerLauncher
         if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
             return false;
 
+        var viewerPort = GetFreePort();
         try
         {
             var startInfo = new ProcessStartInfo
             {
                 FileName = executablePath,
-                Arguments = BuildArguments(dbPath, requestedIp),
+                Arguments = BuildArguments(dbPath, requestedIp, viewerPort),
                 UseShellExecute = true,
                 WorkingDirectory = AppContext.BaseDirectory
             };
@@ -35,12 +37,19 @@ public static class AlbIpSummarySqliteViewerLauncher
         }
     }
 
-    private static string BuildArguments(string dbPath, string? requestedIp)
+    private static string BuildArguments(string dbPath, string? requestedIp, int viewerPort)
     {
-        var args = $"--viewer-sqlite {QuoteArg(Path.GetFullPath(dbPath))}";
+        var args = $"--viewer-sqlite {QuoteArg(Path.GetFullPath(dbPath))} --viewer-port {viewerPort}";
         if (!string.IsNullOrWhiteSpace(requestedIp))
             args += $" --viewer-ip {QuoteArg(requestedIp)}";
         return args;
+    }
+
+    private static int GetFreePort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
     private static string QuoteArg(string value)

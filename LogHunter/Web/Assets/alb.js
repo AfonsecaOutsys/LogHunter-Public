@@ -1133,13 +1133,539 @@
     loadAlbOption2Meta().catch((error) => setAlbOption2Error(String(error)));
   }
 
+  // ── IP Summary (option 3) ─────────────────────────────────────
+
+  let ipSummarySourceType = 'default';
+  let ipSummaryDefaultSelection = null;
+  let ipSummarySelection = null;
+  let ipSummaryServerSelection = null;
+  let ipSummaryPolling = null;
+  let ipSummaryJobId = '';
+  let ipSummaryInputMode = 'manual';
+  let ipSummaryExtractedIps = [];
+  let ipSummarySelectedExtractedIps = new Set();
+  let ipSummaryExportMode = 'export'; // 'chart' or 'export'
+
+  function setIpSummaryError(msg) {
+    const node = byId('ipSummaryError');
+    if (!node) return;
+    node.textContent = msg || '';
+    node.hidden = !msg;
+  }
+
+  function setIpSummarySourceType(type) { ipSummarySourceType = type; }
+
+  function renderIpSummarySource() {
+    const chip = byId('ipSummarySourceChip');
+    const clearBtn = byId('ipSummaryClearSelection');
+    const st = ipSummarySourceType;
+    const sel = ipSummarySelection && ipSummarySelection.sourceType === st ? ipSummarySelection : null;
+
+    const btnDef = byId('ipSummaryUseDefault');
+    const btnFol = byId('ipSummarySelectFolder');
+    const btnFil = byId('ipSummarySelectFiles');
+    if (btnDef) btnDef.classList.toggle('active', st === 'default');
+    if (btnFol) btnFol.classList.toggle('active', st === 'folder');
+    if (btnFil) btnFil.classList.toggle('active', st === 'files');
+    setHidden(clearBtn, st === 'default');
+
+    if (st === 'default') {
+      if (chip) {
+        const d = ipSummaryDefaultSelection;
+        chip.textContent = d
+          ? `${d.selectionLabel || 'Default folder'} | ${d.fileCount || 0} files | ${formatBytes(d.totalBytes || 0)}`
+          : 'Default folder';
+      }
+      return;
+    }
+
+    if (!sel) {
+      if (chip) chip.textContent = st === 'folder' ? 'No folder selected' : 'No files selected';
+      return;
+    }
+
+    if (chip) {
+      chip.textContent = st === 'files'
+        ? `${sel.fileCount} file${sel.fileCount === 1 ? '' : 's'} | ${formatBytes(sel.totalBytes)}`
+        : `${sel.selectionLabel || 'Selected folder'} | ${sel.fileCount} file${sel.fileCount === 1 ? '' : 's'} | ${formatBytes(sel.totalBytes)}`;
+    }
+  }
+
+  function setIpSummaryInputMode(mode) {
+    ipSummaryInputMode = mode;
+    const btnManual = byId('ipSummaryModeManual');
+    const btnFile = byId('ipSummaryModeFile');
+    const btnBurst = byId('ipSummaryModeBurst');
+    const btnPlatform = byId('ipSummaryModePlatform');
+    if (btnManual) btnManual.classList.toggle('active', mode === 'manual');
+    if (btnFile) btnFile.classList.toggle('active', mode === 'file');
+    if (btnBurst) btnBurst.classList.toggle('active', mode === 'burst');
+    if (btnPlatform) btnPlatform.classList.toggle('active', mode === 'platform');
+
+    setHidden(byId('ipSummaryManualSection'), mode !== 'manual');
+    setHidden(byId('ipSummaryFileSection'), mode !== 'file');
+  }
+
+  async function loadIpSummaryMeta() {
+    const payload = await fetchJson('/api/alb/ip-summary/meta', { method: 'GET', headers: { 'Accept': 'application/json' } });
+    ipSummaryDefaultSelection = cloneSelection(payload.defaultSelection);
+    renderIpSummarySource();
+
+    if (payload.currentJob) {
+      renderIpSummarySnapshot(payload.currentJob);
+      ipSummaryJobId = payload.currentJob.jobId || ipSummaryJobId;
+      if (payload.currentJob.state === 'running') {
+        startIpSummaryPolling();
+      }
+    }
+  }
+
+  async function loadIpSummaryOutputFiles() {
+    const sel = byId('ipSummaryFileSelect');
+    if (!sel) return;
+    try {
+      const payload = await fetchJson('/api/alb/ip-summary/output-files', { method: 'GET', headers: { 'Accept': 'application/json' } });
+      sel.innerHTML = '<option value="">Select a file...</option>';
+      (payload.files || []).forEach(f => {
+        const opt = document.createElement('option');
+        opt.value = f.path;
+        opt.textContent = `${f.createdUtc} - ${f.name} (${formatBytes(f.size)})`;
+        sel.appendChild(opt);
+      });
+    } catch {
+      sel.innerHTML = '<option value="">Failed to load files</option>';
+    }
+  }
+
+  async function extractIpsFromFile() {
+    const sel = byId('ipSummaryFileSelect');
+    const filePath = sel?.value;
+    if (!filePath) {
+      setIpSummaryError('Select an output file first.');
+      return;
+    }
+
+    setIpSummaryError('');
+    try {
+      const payload = await fetchJson('/api/alb/ip-summary/extract-ips', {
+        method: 'POST',
+        body: JSON.stringify({ filePath })
+      });
+
+      if (!payload.ok) {
+        setIpSummaryError(payload.error || 'Failed to extract IPs.');
+        return;
+      }
+
+      ipSummaryExtractedIps = payload.ips || [];
+      ipSummarySelectedExtractedIps = new Set(ipSummaryExtractedIps.slice(0, 10).map(x => x.ip));
+
+      const info = byId('ipSummaryExtractInfo');
+      if (info) info.textContent = `Column: ${payload.ipColumn} | ${ipSummaryExtractedIps.length} IPs found`;
+
+      renderExtractedIpList();
+      setHidden(byId('ipSummaryExtractResult'), false);
+    } catch (err) {
+      setIpSummaryError(String(err));
+    }
+  }
+
+  function renderExtractedIpList() {
+    const container = byId('ipSummaryExtractedList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    ipSummaryExtractedIps.forEach(item => {
+      const label = document.createElement('label');
+      label.className = 'ip-extract-item';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = ipSummarySelectedExtractedIps.has(item.ip);
+      cb.disabled = !cb.checked && ipSummarySelectedExtractedIps.size >= 10;
+      cb.addEventListener('change', () => {
+        if (cb.checked) {
+          if (ipSummarySelectedExtractedIps.size >= 10) {
+            cb.checked = false;
+            return;
+          }
+          ipSummarySelectedExtractedIps.add(item.ip);
+        } else {
+          ipSummarySelectedExtractedIps.delete(item.ip);
+        }
+        renderExtractedIpList();
+      });
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(` ${item.ip} (${Number(item.hits).toLocaleString('en-US')})`));
+      container.appendChild(label);
+    });
+  }
+
+  function getIpSummaryIps() {
+    if (ipSummaryInputMode === 'file') {
+      return Array.from(ipSummarySelectedExtractedIps);
+    }
+    const text = byId('ipSummaryIpText')?.value || '';
+    return text.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+  }
+
+  async function selectIpSummaryFolder() {
+    setIpSummaryError('');
+    setIpSummarySourceType('folder');
+    renderIpSummarySource();
+    await new Promise(r => setTimeout(r, 0));
+
+    try {
+      const payload = await fetchJson('/api/alb/ip-summary/browse-folder', { method: 'POST' });
+      if (!payload.ok) {
+        if (payload.cancelled) {
+          setIpSummarySourceType('default');
+          renderIpSummarySource();
+          return;
+        }
+        throw new Error(payload.error || 'Failed to browse folder.');
+      }
+      ipSummaryServerSelection = payload.selection;
+      ipSummarySelection = payload.selection;
+      renderIpSummarySource();
+    } catch (error) {
+      setIpSummarySourceType('default');
+      renderIpSummarySource();
+      setIpSummaryError(String(error));
+    }
+  }
+
+  async function selectIpSummaryFiles() {
+    setIpSummaryError('');
+    setIpSummarySourceType('files');
+    renderIpSummarySource();
+    await new Promise(r => setTimeout(r, 0));
+
+    try {
+      const payload = await fetchJson('/api/alb/ip-summary/browse-files', { method: 'POST' });
+      if (!payload.ok) {
+        if (payload.cancelled) {
+          setIpSummarySourceType('default');
+          renderIpSummarySource();
+          return;
+        }
+        throw new Error(payload.error || 'Failed to browse files.');
+      }
+      ipSummaryServerSelection = payload.selection;
+      ipSummarySelection = payload.selection;
+      renderIpSummarySource();
+    } catch (error) {
+      setIpSummarySourceType('default');
+      renderIpSummarySource();
+      setIpSummaryError(String(error));
+    }
+  }
+
+  function clearIpSummarySelection() {
+    setIpSummaryError('');
+    setIpSummarySourceType('default');
+    ipSummarySelection = null;
+    ipSummaryServerSelection = null;
+    renderIpSummarySource();
+  }
+
+  async function runIpSummary() {
+    setIpSummaryError('');
+
+    const ips = getIpSummaryIps();
+    if (ips.length === 0) {
+      setIpSummaryError('Enter at least one IP address.');
+      return;
+    }
+    if (ips.length > 10) {
+      setIpSummaryError('Maximum 10 IPs per scan.');
+      return;
+    }
+
+    const isChartOnly = ipSummaryExportMode === 'chart';
+    const exportXlsx = !isChartOnly;
+    const body = { ips, exportXlsx, chartOnly: isChartOnly, sourceType: ipSummarySourceType };
+
+    if (ipSummarySourceType === 'folder' && ipSummaryServerSelection?.rootPath) {
+      body.serverPath = ipSummaryServerSelection.rootPath;
+    } else if (ipSummarySourceType === 'files' && ipSummaryServerSelection?.filePaths?.length) {
+      body.serverFilePaths = ipSummaryServerSelection.filePaths;
+    }
+
+    try {
+      const payload = await fetchJson('/api/alb/ip-summary/run', {
+        method: 'POST',
+        body: JSON.stringify(body)
+      });
+
+      if (!payload.ok) {
+        setIpSummaryError(payload.error || 'Failed to start scan.');
+        return;
+      }
+
+      ipSummaryJobId = payload.snapshot?.jobId || '';
+      renderIpSummarySnapshot(payload.snapshot);
+      startIpSummaryPolling();
+    } catch (err) {
+      setIpSummaryError(String(err));
+    }
+  }
+
+  function startIpSummaryPolling() {
+    stopIpSummaryPolling();
+    ipSummaryPolling = setInterval(pollIpSummaryJob, 1500);
+  }
+
+  function stopIpSummaryPolling() {
+    if (ipSummaryPolling) {
+      clearInterval(ipSummaryPolling);
+      ipSummaryPolling = null;
+    }
+  }
+
+  async function pollIpSummaryJob() {
+    try {
+      const snapshot = await fetchJson('/api/alb/ip-summary/job', { method: 'GET', headers: { 'Accept': 'application/json' } });
+      renderIpSummarySnapshot(snapshot);
+      if (snapshot.state !== 'running') {
+        stopIpSummaryPolling();
+      }
+    } catch {
+      stopIpSummaryPolling();
+    }
+  }
+
+  function renderIpSummarySnapshot(snap) {
+    if (!snap) return;
+
+    const state = snap.state || 'idle';
+    const phase = snap.phase || 'idle';
+    const currentStep = Number(snap.currentStep || 0);
+    const totalSteps = Number(snap.totalSteps || 0);
+    const createdUtc = snap.createdUtc ? new Date(snap.createdUtc) : null;
+    const now = new Date();
+
+    setText('ipSummaryState', state);
+    setText('ipSummaryPhase', phase);
+    setText('ipSummaryIpCount', String((snap.requestedIps || []).length));
+    setText('ipSummaryMessage', snap.error ? `${snap.message} ${snap.error}` : (snap.message || ''));
+    setText('ipSummaryStageBadge', phase);
+
+    ipSummaryJobId = snap.jobId || ipSummaryJobId;
+
+    // Progress bar + ETA
+    const pct = totalSteps > 0 ? Math.round((currentStep / totalSteps) * 100) : 0;
+    const bar = byId('ipSummaryBar');
+    if (bar) bar.style.width = pct + '%';
+
+    let etaText = 'n/a';
+    if (state === 'running' && createdUtc && !Number.isNaN(createdUtc.getTime()) && currentStep > 0 && totalSteps > currentStep) {
+      const elapsedSeconds = Math.max(1, (now.getTime() - createdUtc.getTime()) / 1000);
+      const secondsPerStep = elapsedSeconds / currentStep;
+      etaText = formatEta(secondsPerStep * (totalSteps - currentStep));
+    }
+
+    const isExporting = phase === 'building-excel' || phase === 'building-sqlite' || phase === 'building-report';
+
+    if (state === 'completed') {
+      setText('ipSummarySummary', 'Scan complete.');
+      setText('ipSummaryBarMeta', `100% | ${snap.filesTotal || 0} files scanned`);
+      if (bar) bar.style.width = '100%';
+    } else if (state === 'failed') {
+      setText('ipSummarySummary', 'Scan failed.');
+      setText('ipSummaryBarMeta', snap.error || '');
+    } else if (isExporting) {
+      const exportLabel = phase === 'building-excel' ? 'Building Excel workbook...'
+        : phase === 'building-sqlite' ? 'Finalizing SQLite database...'
+        : 'Building chart report...';
+      setText('ipSummarySummary', exportLabel);
+      setText('ipSummaryBarMeta', `100% | ${exportLabel}`);
+      if (bar) bar.style.width = '100%';
+    } else if (state === 'running') {
+      setText('ipSummarySummary', `${pct}% — ${snap.filesProcessed || 0} / ${snap.filesTotal || 0} files`);
+      setText('ipSummaryBarMeta', `${pct}% | ETA ${etaText} | ${snap.filesProcessed || 0} / ${snap.filesTotal || 0} files`);
+    } else {
+      setText('ipSummarySummary', 'Waiting for a scan to start.');
+      setText('ipSummaryBarMeta', 'No scan running.');
+    }
+
+    // Per-IP row counts
+    const ipCounts = snap.ipRowCounts || {};
+    const ipProgressSection = byId('ipSummaryIpProgress');
+    const ipRowsContainer = byId('ipSummaryIpRows');
+    const hasIps = Object.keys(ipCounts).length > 0;
+    setHidden(ipProgressSection, !hasIps);
+
+    if (ipRowsContainer && hasIps) {
+      ipRowsContainer.innerHTML = Object.entries(ipCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([ip, count]) => `<div class="status-pill"><span>${escHtml(ip)}</span><strong>${Number(count).toLocaleString('en-US')}</strong></div>`)
+        .join('');
+    }
+
+    // Export buttons — always visible, disabled until artifacts ready
+    const openReport = byId('ipSummaryOpenReport');
+    const openExport = byId('ipSummaryOpenExport');
+    const hasReport = Boolean(snap.htmlReportPath);
+    const hasExport = Boolean(snap.excelPath || snap.sqlitePath);
+
+    if (openReport) {
+      openReport.disabled = !hasReport;
+      openReport.classList.toggle('primary', hasReport);
+    }
+    if (openExport) {
+      const chartOnly = ipSummaryExportMode === 'chart';
+      openExport.disabled = chartOnly || !hasExport;
+      openExport.classList.toggle('primary', !chartOnly && hasExport);
+      openExport.textContent = snap.sqlitePath && !snap.excelPath ? 'Open SQLite' : 'Open Excel';
+    }
+
+    const exportInfo = byId('ipSummaryExportInfo');
+    if (exportInfo) {
+      if (snap.detailMode === 'sqlite') {
+        exportInfo.textContent = 'Detail mode: SQLite (exceeded 1M rows)';
+      } else if (snap.excelPath) {
+        exportInfo.textContent = 'Excel workbook exported.';
+      } else if (state === 'completed' && hasReport && !hasExport) {
+        exportInfo.textContent = 'Chart summary only (no data export).';
+      } else {
+        exportInfo.textContent = '';
+      }
+    }
+
+    // Error
+    if (snap.error) {
+      const meta = byId('ipSummaryMeta');
+      if (meta) meta.textContent = snap.error;
+    }
+
+    // Results
+    renderIpSummaryResults(snap);
+  }
+
+  function renderIpSummaryResults(snap) {
+    const container = byId('ipSummaryPerIp');
+    const section = byId('ipSummaryResults');
+    if (!container || !section) return;
+
+    if (snap.state !== 'completed' || !snap.perIpSummaries || snap.perIpSummaries.length === 0) {
+      setHidden(section, true);
+      return;
+    }
+
+    setHidden(section, false);
+    container.innerHTML = snap.perIpSummaries.map(ip => {
+      const hasHits = ip.totalRows > 0;
+      const mismatchRows = [
+        { label: 'FE 5xx while ELB 2xx/3xx', value: ip.fe5xxWhileElb2xx3xx },
+        { label: 'FE 4xx while ELB 2xx/3xx', value: ip.fe4xxWhileElb2xx3xx },
+        { label: 'ELB 5xx while FE 2xx/3xx', value: ip.elb5xxWhileFe2xx3xx },
+        { label: 'ELB 4xx while FE 2xx/3xx', value: ip.elb4xxWhileFe2xx3xx }
+      ];
+      const endpointRows = (ip.topEndpoints || []).map(e =>
+        `<tr><td style="font-family:monospace;word-break:break-all">${escHtml(e.endpoint)}</td><td style="text-align:right">${Number(e.hits).toLocaleString('en-US')}</td></tr>`
+      ).join('') || '<tr><td colspan="2">(none)</td></tr>';
+
+      if (!hasHits) {
+        return `<div class="result-card"><div class="status-pill"><span>${escHtml(ip.ip)}</span><strong>0 hits</strong></div><p class="page-copy">No ALB hits found for this IP.</p></div>`;
+      }
+
+      return `
+        <details class="expandable-panel" open>
+          <summary>${escHtml(ip.ip)} — ${Number(ip.totalRows).toLocaleString('en-US')} hits</summary>
+          <div class="expandable-body">
+            <div class="status-block">
+              <div class="status-pill"><span>Total</span><strong>${Number(ip.totalRows).toLocaleString('en-US')}</strong></div>
+              <div class="status-pill"><span>Files</span><strong>${ip.filesWithHits}</strong></div>
+              <div class="status-pill"><span>First hit</span><strong>${ip.firstHitUtc || '-'} UTC</strong></div>
+              <div class="status-pill"><span>Last hit</span><strong>${ip.lastHitUtc || '-'} UTC</strong></div>
+            </div>
+            <div class="ip-summary-grid">
+              <div class="result-card">
+                <h4>ELB Response totals</h4>
+                <table class="mini-table"><tr><td>2xx/3xx</td><td>${fmt(ip.elb2xx3xx)}</td></tr><tr><td>4xx</td><td>${fmt(ip.elb4xx)}</td></tr><tr><td>5xx</td><td>${fmt(ip.elb5xx)}</td></tr></table>
+              </div>
+              <div class="result-card">
+                <h4>FE Response totals</h4>
+                <table class="mini-table"><tr><td>2xx/3xx</td><td>${fmt(ip.fe2xx3xx)}</td></tr><tr><td>4xx</td><td>${fmt(ip.fe4xx)}</td></tr><tr><td>5xx</td><td>${fmt(ip.fe5xx)}</td></tr></table>
+              </div>
+              <div class="result-card">
+                <h4>Interesting mismatches</h4>
+                <table class="mini-table">${mismatchRows.map(m => `<tr><td>${escHtml(m.label)}</td><td>${fmt(m.value)}</td></tr>`).join('')}</table>
+              </div>
+              <div class="result-card">
+                <h4>Top 10 FE endpoints</h4>
+                <table class="mini-table">${endpointRows}</table>
+              </div>
+            </div>
+          </div>
+        </details>`;
+    }).join('');
+  }
+
+  function fmt(v) { return Number(v || 0).toLocaleString('en-US'); }
+  function escHtml(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+  function setIpSummaryExportMode(mode) {
+    ipSummaryExportMode = mode;
+    const btnChart = byId('ipSummaryModeChart');
+    const btnExport = byId('ipSummaryModeExport');
+    if (btnChart) btnChart.classList.toggle('active', mode === 'chart');
+    if (btnExport) btnExport.classList.toggle('active', mode === 'export');
+
+    const openExport = byId('ipSummaryOpenExport');
+    if (openExport) {
+      if (mode === 'chart') {
+        openExport.disabled = true;
+        openExport.classList.remove('primary');
+      }
+    }
+  }
+
+  function initializeIpSummaryPage() {
+    if (!document.querySelector('[data-alb-ip-summary-page]')) return;
+
+    byId('ipSummaryModeManual')?.addEventListener('click', () => setIpSummaryInputMode('manual'));
+    byId('ipSummaryModeFile')?.addEventListener('click', () => {
+      setIpSummaryInputMode('file');
+      loadIpSummaryOutputFiles();
+    });
+
+    byId('ipSummaryModeChart')?.addEventListener('click', () => setIpSummaryExportMode('chart'));
+    byId('ipSummaryModeExport')?.addEventListener('click', () => setIpSummaryExportMode('export'));
+
+    byId('ipSummaryExtractBtn')?.addEventListener('click', extractIpsFromFile);
+
+    byId('ipSummaryUseDefault')?.addEventListener('click', clearIpSummarySelection);
+    byId('ipSummarySelectFolder')?.addEventListener('click', selectIpSummaryFolder);
+    byId('ipSummarySelectFiles')?.addEventListener('click', selectIpSummaryFiles);
+    byId('ipSummaryClearSelection')?.addEventListener('click', clearIpSummarySelection);
+
+    byId('ipSummaryRun')?.addEventListener('click', runIpSummary);
+
+    byId('ipSummaryOpenReport')?.addEventListener('click', async () => {
+      const btn = byId('ipSummaryOpenReport');
+      if (btn?.disabled) return;
+      try { await fetchJson('/api/alb/ip-summary/open-report', { method: 'POST' }); } catch (err) { setIpSummaryError(String(err)); }
+    });
+
+    byId('ipSummaryOpenExport')?.addEventListener('click', async () => {
+      const btn = byId('ipSummaryOpenExport');
+      if (btn?.disabled) return;
+      try { await fetchJson('/api/alb/ip-summary/open-export', { method: 'POST' }); } catch (err) { setIpSummaryError(String(err)); }
+    });
+
+    loadIpSummaryMeta().catch(err => setIpSummaryError(String(err)));
+  }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       initializeAlbPage();
       initializeAlbOption2Page();
+      initializeIpSummaryPage();
     });
   } else {
     initializeAlbPage();
     initializeAlbOption2Page();
+    initializeIpSummaryPage();
   }
 })();
