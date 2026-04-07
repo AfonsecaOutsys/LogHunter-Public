@@ -12,7 +12,7 @@ internal static class WebShellPageBuilder
     [
         new("/", "/", "Home", "LogHunter 2.0", "Local Web UI", "Start here to navigate the new browser-based shell for LogHunter."),
         new("/alb", "/alb", "ALB", "ALB", "Module Landing", "AWS Application Load Balancer workflows and future drill-down flows."),
-        new("/iis", "/iis", "IIS", "IIS", "Section Placeholder", "Future home for IIS burst analysis, pivots, exports, and request investigation."),
+        new("/iis", "/iis", "IIS", "IIS", "Module Landing", "W3C log analysis, IP summaries, status pivots, burst detection, bandwidth, and payload investigation."),
         new("/platform-logs", "/platform-logs", "Platform Logs", "Platform Logs", "Section Placeholder", "Future home for platform log review, suspicious patterns, and authenticated activity checks."),
         new("/abuseipdb", "/abuseipdb", "AbuseIPDB", "AbuseIPDB", "Section Placeholder", "Future home for IP reputation lookups and export workflows.")
     ];
@@ -22,6 +22,12 @@ internal static class WebShellPageBuilder
         if (AlbPageBuilder.TryBuild(context, path, out var albPage, out var albContent, out var albScriptPath))
         {
             html = BuildLayout(context, albPage, albContent, albScriptPath);
+            return true;
+        }
+
+        if (IisPageBuilder.TryBuild(context, path, out var iisPage, out var iisContent, out var iisScriptPath))
+        {
+            html = BuildLayout(context, iisPage, iisContent, iisScriptPath);
             return true;
         }
 

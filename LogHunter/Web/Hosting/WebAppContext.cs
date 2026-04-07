@@ -17,6 +17,10 @@ internal sealed class WebAppContext
         AlbTopIps = new AlbTopIpsJobManager(rootPath);
         AlbTopIpsStaging = new AlbTopIpsStagingManager(AppFolders.WebAlbOption2Staging);
         AlbIpSummary = new AlbIpSummaryJobManager();
+        IisIpSummary = new IisIpSummaryJobManager();
+        IisStatusPivot = new IisStatusPivotJobManager();
+        IisBurstPatterns = new IisBurstPatternsJobManager();
+        IisBytesIntel = new IisBytesIntelJobManager();
     }
 
     public string AppName { get; }
@@ -33,4 +37,8 @@ internal sealed class WebAppContext
     public AlbTopIpsJobManager AlbTopIps { get; }
     public AlbTopIpsStagingManager AlbTopIpsStaging { get; }
     public AlbIpSummaryJobManager AlbIpSummary { get; }
+    public IisIpSummaryJobManager IisIpSummary { get; }
+    public IisStatusPivotJobManager IisStatusPivot { get; }
+    public IisBurstPatternsJobManager IisBurstPatterns { get; }
+    public IisBytesIntelJobManager IisBytesIntel { get; }
 }
