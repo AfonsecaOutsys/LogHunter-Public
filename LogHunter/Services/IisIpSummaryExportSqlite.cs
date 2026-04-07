@@ -23,7 +23,7 @@ public static class IisIpSummaryExportSqlite
             if (File.Exists(dbPath))
                 File.Delete(dbPath);
 
-            _connection = new SqliteConnection($"Data Source={dbPath}");
+            _connection = new SqliteConnection($"Data Source={dbPath};Pooling=false");
             _connection.Open();
 
             using (var pragma = _connection.CreateCommand())

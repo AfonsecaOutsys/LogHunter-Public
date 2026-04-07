@@ -90,6 +90,8 @@ public static class IisOption_IpSummary
             foreach (var result in resultsByIp.Values)
                 result.CompleteStreamingExports();
             sharedSqliteWriter?.Complete();
+            sharedSqliteWriter?.Dispose();
+            sharedSqliteWriter = null;
 
             var artifactsByIp = new Dictionary<string, DetailArtifact>(StringComparer.OrdinalIgnoreCase);
             var anySqlite = resultsByIp.Values.Any(r => r.DetailMode == IisIpSummaryScanner.DetailRetentionMode.SqliteApproved);
