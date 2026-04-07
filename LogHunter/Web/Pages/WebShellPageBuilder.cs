@@ -25,6 +25,12 @@ internal static class WebShellPageBuilder
             return true;
         }
 
+        if (AbuseIpPageBuilder.TryBuild(context, path, out var abuseIpPage, out var abuseIpContent, out var abuseIpScriptPath))
+        {
+            html = BuildLayout(context, abuseIpPage, abuseIpContent, abuseIpScriptPath);
+            return true;
+        }
+
         var page = Pages.FirstOrDefault(static x => string.Equals(x.Path, "/", StringComparison.Ordinal));
         if (!string.IsNullOrWhiteSpace(path))
             page = Pages.FirstOrDefault(x => string.Equals(x.Path, path, StringComparison.OrdinalIgnoreCase));

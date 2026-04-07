@@ -17,6 +17,7 @@ internal sealed class WebAppContext
         AlbTopIps = new AlbTopIpsJobManager(rootPath);
         AlbTopIpsStaging = new AlbTopIpsStagingManager(AppFolders.WebAlbOption2Staging);
         AlbIpSummary = new AlbIpSummaryJobManager();
+        AbuseIpChecks = new AbuseIpCheckJobManager(rootPath);
     }
 
     public string AppName { get; }
@@ -33,4 +34,5 @@ internal sealed class WebAppContext
     public AlbTopIpsJobManager AlbTopIps { get; }
     public AlbTopIpsStagingManager AlbTopIpsStaging { get; }
     public AlbIpSummaryJobManager AlbIpSummary { get; }
+    public AbuseIpCheckJobManager AbuseIpChecks { get; }
 }
