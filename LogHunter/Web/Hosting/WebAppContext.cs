@@ -30,6 +30,7 @@ internal sealed class WebAppContext
         IisBytesIntel = new IisBytesIntelJobManager();
         PlatformSuspicious = new PlatformSuspiciousJobManager(session);
         PlatformAuth = new PlatformAuthJobManager(session);
+        AbuseIpChecks = new AbuseIpCheckJobManager(rootPath);
     }
 
     public string AppName { get; }
@@ -59,4 +60,5 @@ internal sealed class WebAppContext
     public IisBytesIntelJobManager IisBytesIntel { get; }
     public PlatformSuspiciousJobManager PlatformSuspicious { get; }
     public PlatformAuthJobManager PlatformAuth { get; }
+    public AbuseIpCheckJobManager AbuseIpChecks { get; }
 }

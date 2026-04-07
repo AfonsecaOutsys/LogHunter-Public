@@ -113,6 +113,11 @@ internal sealed class WebAppHost : IDisposable
             return;
         }
 
+        if (await AbuseIpApi.TryHandleAsync(_context, context).ConfigureAwait(false))
+        {
+            return;
+        }
+
         if (TryServeAsset(path, context.Response))
         {
             return;
@@ -181,6 +186,11 @@ internal sealed class WebAppHost : IDisposable
         else if (string.Equals(path, "/assets/platform.js", StringComparison.OrdinalIgnoreCase))
         {
             suffix = ".Web.Assets.platform.js";
+            contentType = "application/javascript; charset=utf-8";
+        }
+        else if (string.Equals(path, "/assets/abuseip.js", StringComparison.OrdinalIgnoreCase))
+        {
+            suffix = ".Web.Assets.abuseip.js";
             contentType = "application/javascript; charset=utf-8";
         }
         else

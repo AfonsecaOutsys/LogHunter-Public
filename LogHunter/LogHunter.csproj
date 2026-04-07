@@ -38,6 +38,7 @@
 		<EmbeddedResource Include="Web\Assets\alb.js" />
 		<EmbeddedResource Include="Web\Assets\iis.js" />
 		<EmbeddedResource Include="Web\Assets\platform.js" />
+		<EmbeddedResource Include="Web\Assets\abuseip.js" />
 		<None Update="Resources\Tabulator\tabulator.min.js" CopyToOutputDirectory="Never" />
 		<None Update="Resources\Tabulator\tabulator.min.css" CopyToOutputDirectory="Never" />
 		<None Update="Web\Assets\site.css" CopyToOutputDirectory="Never" />
@@ -45,6 +46,7 @@
 		<None Update="Web\Assets\alb.js" CopyToOutputDirectory="Never" />
 		<None Update="Web\Assets\iis.js" CopyToOutputDirectory="Never" />
 		<None Update="Web\Assets\platform.js" CopyToOutputDirectory="Never" />
+		<None Update="Web\Assets\abuseip.js" CopyToOutputDirectory="Never" />
 	</ItemGroup>
 
 	<ItemGroup>
