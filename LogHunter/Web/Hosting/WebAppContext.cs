@@ -28,6 +28,8 @@ internal sealed class WebAppContext
         IisStatusPivot = new IisStatusPivotJobManager();
         IisBurstPatterns = new IisBurstPatternsJobManager();
         IisBytesIntel = new IisBytesIntelJobManager();
+        PlatformSuspicious = new PlatformSuspiciousJobManager(session);
+        PlatformAuth = new PlatformAuthJobManager(session);
     }
 
     public string AppName { get; }
@@ -55,4 +57,6 @@ internal sealed class WebAppContext
     public IisStatusPivotJobManager IisStatusPivot { get; }
     public IisBurstPatternsJobManager IisBurstPatterns { get; }
     public IisBytesIntelJobManager IisBytesIntel { get; }
+    public PlatformSuspiciousJobManager PlatformSuspicious { get; }
+    public PlatformAuthJobManager PlatformAuth { get; }
 }

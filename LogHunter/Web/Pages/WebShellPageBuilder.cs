@@ -31,6 +31,12 @@ internal static class WebShellPageBuilder
             return true;
         }
 
+        if (PlatformPageBuilder.TryBuild(context, path, out var platformPage, out var platformContent, out var platformScriptPath))
+        {
+            html = BuildLayout(context, platformPage, platformContent, platformScriptPath);
+            return true;
+        }
+
         var page = Pages.FirstOrDefault(static x => string.Equals(x.Path, "/", StringComparison.Ordinal));
         if (!string.IsNullOrWhiteSpace(path))
             page = Pages.FirstOrDefault(x => string.Equals(x.Path, path, StringComparison.OrdinalIgnoreCase));
