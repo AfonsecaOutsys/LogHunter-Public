@@ -24,6 +24,10 @@ internal sealed class WebAppContext
         AlbRequestsPerIp5Min = new AlbGenericScanJobManager();
         AlbWafBlockedSummary = new AlbGenericScanJobManager();
         AlbWafBlockedChart = new AlbGenericScanJobManager();
+        IisIpSummary = new IisIpSummaryJobManager();
+        IisStatusPivot = new IisStatusPivotJobManager();
+        IisBurstPatterns = new IisBurstPatternsJobManager();
+        IisBytesIntel = new IisBytesIntelJobManager();
     }
 
     public string AppName { get; }
@@ -47,4 +51,8 @@ internal sealed class WebAppContext
     public AlbGenericScanJobManager AlbRequestsPerIp5Min { get; }
     public AlbGenericScanJobManager AlbWafBlockedSummary { get; }
     public AlbGenericScanJobManager AlbWafBlockedChart { get; }
+    public IisIpSummaryJobManager IisIpSummary { get; }
+    public IisStatusPivotJobManager IisStatusPivot { get; }
+    public IisBurstPatternsJobManager IisBurstPatterns { get; }
+    public IisBytesIntelJobManager IisBytesIntel { get; }
 }

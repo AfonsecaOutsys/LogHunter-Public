@@ -103,6 +103,11 @@ internal sealed class WebAppHost : IDisposable
             return;
         }
 
+        if (await IisApi.TryHandleAsync(_context, context).ConfigureAwait(false))
+        {
+            return;
+        }
+
         if (TryServeAsset(path, context.Response))
         {
             return;
@@ -161,6 +166,11 @@ internal sealed class WebAppHost : IDisposable
         else if (string.Equals(path, "/assets/alb.js", StringComparison.OrdinalIgnoreCase))
         {
             suffix = ".Web.Assets.alb.js";
+            contentType = "application/javascript; charset=utf-8";
+        }
+        else if (string.Equals(path, "/assets/iis.js", StringComparison.OrdinalIgnoreCase))
+        {
+            suffix = ".Web.Assets.iis.js";
             contentType = "application/javascript; charset=utf-8";
         }
         else
