@@ -17,6 +17,13 @@ internal sealed class WebAppContext
         AlbTopIps = new AlbTopIpsJobManager(rootPath);
         AlbTopIpsStaging = new AlbTopIpsStagingManager(AppFolders.WebAlbOption2Staging);
         AlbIpSummary = new AlbIpSummaryJobManager();
+        Alb5xxMismatch = new AlbGenericScanJobManager();
+        AlbTop50Ips = new AlbGenericScanJobManager();
+        AlbTop50IpUri = new AlbGenericScanJobManager();
+        AlbTop50AvgDuration = new AlbGenericScanJobManager();
+        AlbRequestsPerIp5Min = new AlbGenericScanJobManager();
+        AlbWafBlockedSummary = new AlbGenericScanJobManager();
+        AlbWafBlockedChart = new AlbGenericScanJobManager();
     }
 
     public string AppName { get; }
@@ -33,4 +40,11 @@ internal sealed class WebAppContext
     public AlbTopIpsJobManager AlbTopIps { get; }
     public AlbTopIpsStagingManager AlbTopIpsStaging { get; }
     public AlbIpSummaryJobManager AlbIpSummary { get; }
+    public AlbGenericScanJobManager Alb5xxMismatch { get; }
+    public AlbGenericScanJobManager AlbTop50Ips { get; }
+    public AlbGenericScanJobManager AlbTop50IpUri { get; }
+    public AlbGenericScanJobManager AlbTop50AvgDuration { get; }
+    public AlbGenericScanJobManager AlbRequestsPerIp5Min { get; }
+    public AlbGenericScanJobManager AlbWafBlockedSummary { get; }
+    public AlbGenericScanJobManager AlbWafBlockedChart { get; }
 }

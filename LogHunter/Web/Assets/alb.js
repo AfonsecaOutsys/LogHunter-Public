@@ -1657,15 +1657,738 @@
     loadIpSummaryMeta().catch(err => setIpSummaryError(String(err)));
   }
 
+  // ── Generic scan pages (options 4-10) ────────────────────────
+
+  function initializeGenericScanPage(prefix, apiBase) {
+    var scanEl = document.querySelector('[data-alb-generic-scan="' + prefix + '"]');
+    if (!scanEl) return;
+
+    var sourceType = 'default';
+    var defaultSelection = null;
+    var selection = null;
+    var serverSelection = null;
+    var polling = null;
+    var jobId = '';
+
+    function setErr(msg) {
+      var node = byId(prefix + 'Error');
+      if (!node) return;
+      node.textContent = msg || '';
+      node.hidden = !msg;
+    }
+
+    function renderSource() {
+      var chip = byId(prefix + 'SourceChip');
+      var clearBtn = byId(prefix + 'ClearSelection');
+      var sel = selection && selection.sourceType === sourceType ? selection : null;
+
+      var btnDef = byId(prefix + 'UseDefault');
+      var btnFol = byId(prefix + 'SelectFolder');
+      var btnFil = byId(prefix + 'SelectFiles');
+      if (btnDef) btnDef.classList.toggle('active', sourceType === 'default');
+      if (btnFol) btnFol.classList.toggle('active', sourceType === 'folder');
+      if (btnFil) btnFil.classList.toggle('active', sourceType === 'files');
+      setHidden(clearBtn, sourceType === 'default');
+
+      if (sourceType === 'default') {
+        if (chip) {
+          var d = defaultSelection;
+          chip.textContent = d
+            ? (d.selectionLabel || 'Default folder') + ' | ' + (d.fileCount || 0) + ' files | ' + formatBytes(d.totalBytes || 0)
+            : 'Default folder';
+        }
+        return;
+      }
+
+      if (!sel) {
+        if (chip) chip.textContent = sourceType === 'folder' ? 'No folder selected' : 'No files selected';
+        return;
+      }
+
+      if (chip) {
+        chip.textContent = sourceType === 'files'
+          ? sel.fileCount + ' file' + (sel.fileCount === 1 ? '' : 's') + ' | ' + formatBytes(sel.totalBytes)
+          : (sel.selectionLabel || 'Selected folder') + ' | ' + sel.fileCount + ' file' + (sel.fileCount === 1 ? '' : 's') + ' | ' + formatBytes(sel.totalBytes);
+      }
+    }
+
+    function renderSnapshot(snap) {
+      if (!snap) return;
+
+      var state = snap.state || 'idle';
+      var phase = snap.phase || 'idle';
+      var currentStep = Number(snap.currentStep || 0);
+      var totalSteps = Number(snap.totalSteps || 0);
+      var createdUtc = snap.createdUtc ? new Date(snap.createdUtc) : null;
+      var now = new Date();
+      var result = snap.result;
+      var exportPath = snap.exportPath || '';
+      var chartPath = result && result.chartHtmlPath ? result.chartHtmlPath : '';
+
+      jobId = snap.jobId || jobId;
+      setText(prefix + 'State', state);
+      setText(prefix + 'Phase', phase);
+      setText(prefix + 'StageBadge', phase);
+      setText(prefix + 'Message', snap.error ? (snap.message + ' ' + snap.error) : (snap.message || ''));
+      setText(prefix + 'Meta', snap.inputSourceSummary || '');
+      setText(prefix + 'ExportPath', exportPath ? 'Exported: ' + exportPath : '');
+      setText(prefix + 'Count', String(result ? result.totalMatches || 0 : 0));
+      setHidden(byId(prefix + 'OpenExport'), !exportPath);
+      setHidden(byId(prefix + 'OpenChart'), !chartPath);
+
+      var pct = totalSteps > 0 ? Math.round((currentStep / totalSteps) * 100) : 0;
+      var bar = byId(prefix + 'Bar');
+      if (bar) bar.style.width = pct + '%';
+
+      var etaText = 'n/a';
+      if (state === 'running' && createdUtc && !Number.isNaN(createdUtc.getTime()) && currentStep > 0 && totalSteps > currentStep) {
+        var elapsedSeconds = Math.max(1, (now.getTime() - createdUtc.getTime()) / 1000);
+        var secondsPerStep = elapsedSeconds / currentStep;
+        etaText = formatEta(secondsPerStep * (totalSteps - currentStep));
+      }
+
+      if (state === 'completed') {
+        setText(prefix + 'Summary', result ? result.completionMessage || 'Scan complete.' : 'Scan complete.');
+        setText(prefix + 'BarMeta', '100% | ' + (snap.filesTotal || 0) + ' files scanned');
+        if (bar) bar.style.width = '100%';
+        renderResults(result);
+      } else if (state === 'failed') {
+        setText(prefix + 'Summary', 'Scan failed.');
+        setText(prefix + 'BarMeta', snap.error || '');
+      } else if (state === 'running') {
+        setText(prefix + 'Summary', pct + '% — ' + (snap.filesProcessed || 0) + ' / ' + (snap.filesTotal || 0) + ' files');
+        setText(prefix + 'BarMeta', pct + '% | ETA ' + etaText);
+      } else {
+        setText(prefix + 'Summary', 'Waiting for a scan to start.');
+        setText(prefix + 'BarMeta', 'No scan running.');
+      }
+    }
+
+    function renderResults(result) {
+      var section = byId(prefix + 'Results');
+      var body = byId(prefix + 'ResultsBody');
+      if (!section || !body) return;
+
+      if (!result || !result.rows || result.rows.length === 0) {
+        setHidden(section, true);
+        return;
+      }
+
+      setHidden(section, false);
+      var cols = result.columns || [];
+      var rows = result.rows || [];
+
+      // Check if rows have a "Section" column (status mismatch multi-table)
+      var sectionIdx = cols.indexOf('Section');
+      if (sectionIdx >= 0) {
+        body.innerHTML = renderSectionedTable(cols, rows, sectionIdx);
+        return;
+      }
+
+      var html = '<table class="mini-table"><thead><tr>';
+      cols.forEach(function (c) { html += '<th>' + escapeHtml(c) + '</th>'; });
+      html += '</tr></thead><tbody>';
+      rows.forEach(function (row) {
+        html += '<tr>';
+        var vals = row.values || row;
+        vals.forEach(function (v) { html += '<td>' + escapeHtml(v) + '</td>'; });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      body.innerHTML = html;
+    }
+
+    function renderSectionedTable(cols, rows, sectionIdx) {
+      var sections = {};
+      var sectionOrder = [];
+      var displayCols = cols.filter(function (_, i) { return i !== sectionIdx; });
+
+      rows.forEach(function (row) {
+        var vals = row.values || row;
+        var sectionName = vals[sectionIdx] || 'Other';
+        if (!sections[sectionName]) {
+          sections[sectionName] = [];
+          sectionOrder.push(sectionName);
+        }
+        sections[sectionName].push(vals.filter(function (_, i) { return i !== sectionIdx; }));
+      });
+
+      var sectionLabels = {
+        'status-pair': 'Top status pairs',
+        'uri': 'Top URIs',
+        'client-ip': 'Top client IPs'
+      };
+
+      var html = '';
+      sectionOrder.forEach(function (sn) {
+        var label = sectionLabels[sn] || sn;
+        html += '<div class="result-card"><h4>' + escapeHtml(label) + '</h4>';
+        html += '<table class="mini-table"><thead><tr>';
+        displayCols.forEach(function (c) { html += '<th>' + escapeHtml(c) + '</th>'; });
+        html += '</tr></thead><tbody>';
+        sections[sn].forEach(function (vals) {
+          html += '<tr>';
+          vals.forEach(function (v) { html += '<td>' + escapeHtml(v) + '</td>'; });
+          html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+      });
+
+      return html;
+    }
+
+    async function loadMeta() {
+      var payload = await fetchJson('/api/' + apiBase + '/meta', { method: 'GET', headers: { 'Accept': 'application/json' } });
+      defaultSelection = cloneSelection(payload.defaultSelection);
+      renderSource();
+
+      if (payload.currentJob) {
+        renderSnapshot(payload.currentJob);
+        jobId = payload.currentJob.jobId || jobId;
+        if (payload.currentJob.state === 'running') {
+          startPolling();
+        }
+      }
+    }
+
+    function startPolling() {
+      stopPolling();
+      polling = setInterval(async function () {
+        try {
+          var snap = await fetchJson('/api/' + apiBase + '/job', { method: 'GET', headers: { 'Accept': 'application/json' } });
+          renderSnapshot(snap);
+          if (snap.state !== 'running') stopPolling();
+        } catch (e) {
+          stopPolling();
+        }
+      }, 1500);
+    }
+
+    function stopPolling() {
+      if (polling) { clearInterval(polling); polling = null; }
+    }
+
+    async function browseFolder() {
+      setErr('');
+      sourceType = 'folder';
+      renderSource();
+      await new Promise(function (r) { setTimeout(r, 0); });
+      try {
+        var payload = await fetchJson('/api/' + apiBase + '/browse-folder', { method: 'POST' });
+        if (!payload.ok) {
+          if (payload.cancelled) { sourceType = 'default'; renderSource(); return; }
+          throw new Error(payload.error || 'Failed to browse folder.');
+        }
+        serverSelection = payload.selection;
+        selection = payload.selection;
+        renderSource();
+      } catch (e) {
+        sourceType = 'default';
+        renderSource();
+        setErr(String(e));
+      }
+    }
+
+    async function browseFiles() {
+      setErr('');
+      sourceType = 'files';
+      renderSource();
+      await new Promise(function (r) { setTimeout(r, 0); });
+      try {
+        var payload = await fetchJson('/api/' + apiBase + '/browse-files', { method: 'POST' });
+        if (!payload.ok) {
+          if (payload.cancelled) { sourceType = 'default'; renderSource(); return; }
+          throw new Error(payload.error || 'Failed to browse files.');
+        }
+        serverSelection = payload.selection;
+        selection = payload.selection;
+        renderSource();
+      } catch (e) {
+        sourceType = 'default';
+        renderSource();
+        setErr(String(e));
+      }
+    }
+
+    function clearSelection() {
+      setErr('');
+      sourceType = 'default';
+      selection = null;
+      serverSelection = null;
+      renderSource();
+    }
+
+    async function runScan() {
+      setErr('');
+      var body = { sourceType: sourceType };
+
+      if (serverSelection && sourceType !== 'default') {
+        if (sourceType === 'folder' && serverSelection.rootPath) {
+          body.serverPath = serverSelection.rootPath;
+        } else if (serverSelection.filePaths) {
+          body.serverFilePaths = serverSelection.filePaths;
+        }
+      }
+
+      try {
+        var payload = await fetchJson('/api/' + apiBase + '/run', {
+          method: 'POST',
+          body: JSON.stringify(body)
+        });
+
+        if (!payload.ok) {
+          setErr(payload.error || 'Failed to start scan.');
+          return;
+        }
+
+        renderSnapshot(payload.snapshot);
+        startPolling();
+      } catch (e) {
+        setErr(String(e));
+      }
+    }
+
+    async function openExport() {
+      setErr('');
+      try {
+        await fetchJson('/api/' + apiBase + '/open-export', { method: 'POST' });
+      } catch (e) {
+        setErr(String(e));
+      }
+    }
+
+    async function openChart() {
+      setErr('');
+      try {
+        await fetchJson('/api/' + apiBase + '/open-chart', { method: 'POST' });
+      } catch (e) {
+        setErr(String(e));
+      }
+    }
+
+    byId(prefix + 'UseDefault')?.addEventListener('click', clearSelection);
+    byId(prefix + 'SelectFolder')?.addEventListener('click', browseFolder);
+    byId(prefix + 'SelectFiles')?.addEventListener('click', browseFiles);
+    byId(prefix + 'ClearSelection')?.addEventListener('click', clearSelection);
+    byId(prefix + 'Run')?.addEventListener('click', runScan);
+    byId(prefix + 'OpenExport')?.addEventListener('click', openExport);
+    byId(prefix + 'OpenChart')?.addEventListener('click', openChart);
+
+    loadMeta().catch(function (e) { setErr(String(e)); });
+  }
+
+  // ── Requests over time per IP (option 8) ────────────────────
+
+  function initializeReqOverTimePage() {
+    var scanEl = document.querySelector('[data-alb-generic-scan="albReqOverTime"]');
+    if (!scanEl) return;
+
+    var prefix = 'albReqOverTime';
+    var apiBase = 'alb/requests-over-time';
+
+    var sourceType = 'default';
+    var defaultSelection = null;
+    var selection = null;
+    var serverSelection = null;
+    var polling = null;
+    var jobId = '';
+    var inputMode = 'manual';
+    var extractedIps = [];
+    var selectedExtractedIps = new Set();
+
+    function setErr(msg) {
+      var node = byId(prefix + 'Error');
+      if (!node) return;
+      node.textContent = msg || '';
+      node.hidden = !msg;
+    }
+
+    function setInputMode(mode) {
+      inputMode = mode;
+      var btnManual = byId(prefix + 'ModeManual');
+      var btnFile = byId(prefix + 'ModeFile');
+      if (btnManual) btnManual.classList.toggle('active', mode === 'manual');
+      if (btnFile) btnFile.classList.toggle('active', mode === 'file');
+
+      setHidden(byId(prefix + 'ManualSection'), mode !== 'manual');
+      setHidden(byId(prefix + 'FileSection'), mode !== 'file');
+    }
+
+    function renderSource() {
+      var chip = byId(prefix + 'SourceChip');
+      var clearBtn = byId(prefix + 'ClearSelection');
+      var sel = selection && selection.sourceType === sourceType ? selection : null;
+
+      var btnDef = byId(prefix + 'UseDefault');
+      var btnFol = byId(prefix + 'SelectFolder');
+      var btnFil = byId(prefix + 'SelectFiles');
+      if (btnDef) btnDef.classList.toggle('active', sourceType === 'default');
+      if (btnFol) btnFol.classList.toggle('active', sourceType === 'folder');
+      if (btnFil) btnFil.classList.toggle('active', sourceType === 'files');
+      setHidden(clearBtn, sourceType === 'default');
+
+      if (sourceType === 'default') {
+        if (chip) {
+          var d = defaultSelection;
+          chip.textContent = d
+            ? (d.selectionLabel || 'Default folder') + ' | ' + (d.fileCount || 0) + ' files | ' + formatBytes(d.totalBytes || 0)
+            : 'Default folder';
+        }
+        return;
+      }
+
+      if (!sel) {
+        if (chip) chip.textContent = sourceType === 'folder' ? 'No folder selected' : 'No files selected';
+        return;
+      }
+
+      if (chip) {
+        chip.textContent = sourceType === 'files'
+          ? sel.fileCount + ' file' + (sel.fileCount === 1 ? '' : 's') + ' | ' + formatBytes(sel.totalBytes)
+          : (sel.selectionLabel || 'Selected folder') + ' | ' + sel.fileCount + ' file' + (sel.fileCount === 1 ? '' : 's') + ' | ' + formatBytes(sel.totalBytes);
+      }
+    }
+
+    function getIps() {
+      if (inputMode === 'file') {
+        return Array.from(selectedExtractedIps);
+      }
+      var text = byId(prefix + 'IpText')?.value || '';
+      return text.split(/[\n,;]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    }
+
+    function renderSnapshot(snap) {
+      if (!snap) return;
+
+      var state = snap.state || 'idle';
+      var phase = snap.phase || 'idle';
+      var currentStep = Number(snap.currentStep || 0);
+      var totalSteps = Number(snap.totalSteps || 0);
+      var createdUtc = snap.createdUtc ? new Date(snap.createdUtc) : null;
+      var now = new Date();
+      var result = snap.result;
+      var exportPath = snap.exportPath || '';
+      var chartPath = result && result.chartHtmlPath ? result.chartHtmlPath : '';
+
+      jobId = snap.jobId || jobId;
+      setText(prefix + 'State', state);
+      setText(prefix + 'Phase', phase);
+      setText(prefix + 'StageBadge', phase);
+      setText(prefix + 'Message', snap.error ? (snap.message + ' ' + snap.error) : (snap.message || ''));
+      setText(prefix + 'Meta', snap.inputSourceSummary || '');
+      setText(prefix + 'ExportPath', exportPath ? 'Exported: ' + exportPath : '');
+      setText(prefix + 'Count', String(result ? result.totalMatches || 0 : 0));
+      setHidden(byId(prefix + 'OpenExport'), !exportPath);
+      setHidden(byId(prefix + 'OpenChart'), !chartPath);
+
+      var pct = totalSteps > 0 ? Math.round((currentStep / totalSteps) * 100) : 0;
+      var bar = byId(prefix + 'Bar');
+      if (bar) bar.style.width = pct + '%';
+
+      var etaText = 'n/a';
+      if (state === 'running' && createdUtc && !Number.isNaN(createdUtc.getTime()) && currentStep > 0 && totalSteps > currentStep) {
+        var elapsedSeconds = Math.max(1, (now.getTime() - createdUtc.getTime()) / 1000);
+        var secondsPerStep = elapsedSeconds / currentStep;
+        etaText = formatEta(secondsPerStep * (totalSteps - currentStep));
+      }
+
+      if (state === 'completed') {
+        setText(prefix + 'Summary', result ? result.completionMessage || 'Scan complete.' : 'Scan complete.');
+        setText(prefix + 'BarMeta', '100% | ' + (snap.filesTotal || 0) + ' files scanned');
+        if (bar) bar.style.width = '100%';
+        renderResults(result);
+      } else if (state === 'failed') {
+        setText(prefix + 'Summary', 'Scan failed.');
+        setText(prefix + 'BarMeta', snap.error || '');
+      } else if (state === 'running') {
+        setText(prefix + 'Summary', pct + '% — ' + (snap.filesProcessed || 0) + ' / ' + (snap.filesTotal || 0) + ' files');
+        setText(prefix + 'BarMeta', pct + '% | ETA ' + etaText);
+      } else {
+        setText(prefix + 'Summary', 'Waiting for a scan to start.');
+        setText(prefix + 'BarMeta', 'No scan running.');
+      }
+    }
+
+    function renderResults(result) {
+      var section = byId(prefix + 'Results');
+      var body = byId(prefix + 'ResultsBody');
+      if (!section || !body) return;
+
+      if (!result || !result.rows || result.rows.length === 0) {
+        setHidden(section, true);
+        return;
+      }
+
+      setHidden(section, false);
+      var cols = result.columns || [];
+      var rows = result.rows || [];
+
+      var html = '<table class="mini-table"><thead><tr>';
+      cols.forEach(function (c) { html += '<th>' + escapeHtml(c) + '</th>'; });
+      html += '</tr></thead><tbody>';
+      rows.forEach(function (row) {
+        html += '<tr>';
+        var vals = row.values || row;
+        vals.forEach(function (v) { html += '<td>' + escapeHtml(v) + '</td>'; });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      body.innerHTML = html;
+    }
+
+    async function loadMetaData() {
+      var payload = await fetchJson('/api/' + apiBase + '/meta', { method: 'GET', headers: { 'Accept': 'application/json' } });
+      defaultSelection = cloneSelection(payload.defaultSelection);
+      renderSource();
+
+      if (payload.currentJob) {
+        renderSnapshot(payload.currentJob);
+        jobId = payload.currentJob.jobId || jobId;
+        if (payload.currentJob.state === 'running') {
+          startPolling();
+        }
+      }
+    }
+
+    async function loadOutputFiles() {
+      var sel = byId(prefix + 'FileSelect');
+      if (!sel) return;
+      try {
+        var payload = await fetchJson('/api/' + apiBase + '/output-files', { method: 'GET', headers: { 'Accept': 'application/json' } });
+        sel.innerHTML = '<option value="">Select a file...</option>';
+        (payload.files || []).forEach(function (f) {
+          var opt = document.createElement('option');
+          opt.value = f.path;
+          opt.textContent = f.createdUtc + ' - ' + f.name + ' (' + formatBytes(f.size) + ')';
+          sel.appendChild(opt);
+        });
+      } catch (e) {
+        sel.innerHTML = '<option value="">Failed to load files</option>';
+      }
+    }
+
+    async function extractIps() {
+      var sel = byId(prefix + 'FileSelect');
+      var filePath = sel?.value;
+      if (!filePath) {
+        setErr('Select an output file first.');
+        return;
+      }
+
+      setErr('');
+      try {
+        var payload = await fetchJson('/api/' + apiBase + '/extract-ips', {
+          method: 'POST',
+          body: JSON.stringify({ filePath: filePath })
+        });
+
+        if (!payload.ok) {
+          setErr(payload.error || 'Failed to extract IPs.');
+          return;
+        }
+
+        extractedIps = payload.ips || [];
+        selectedExtractedIps = new Set(extractedIps.slice(0, 20).map(function (x) { return x.ip; }));
+
+        var info = byId(prefix + 'ExtractInfo');
+        if (info) info.textContent = 'Column: ' + payload.ipColumn + ' | ' + extractedIps.length + ' IPs found';
+
+        renderExtractedList();
+        setHidden(byId(prefix + 'ExtractResult'), false);
+      } catch (e) {
+        setErr(String(e));
+      }
+    }
+
+    function renderExtractedList() {
+      var container = byId(prefix + 'ExtractedList');
+      if (!container) return;
+      container.innerHTML = '';
+
+      extractedIps.forEach(function (item) {
+        var label = document.createElement('label');
+        label.className = 'ip-extract-item';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = selectedExtractedIps.has(item.ip);
+        cb.disabled = !cb.checked && selectedExtractedIps.size >= 20;
+        cb.addEventListener('change', function () {
+          if (cb.checked) {
+            if (selectedExtractedIps.size >= 20) { cb.checked = false; return; }
+            selectedExtractedIps.add(item.ip);
+          } else {
+            selectedExtractedIps.delete(item.ip);
+          }
+          renderExtractedList();
+        });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(' ' + item.ip + ' (' + Number(item.hits).toLocaleString('en-US') + ')'));
+        container.appendChild(label);
+      });
+    }
+
+    function startPolling() {
+      stopPolling();
+      polling = setInterval(async function () {
+        try {
+          var snap = await fetchJson('/api/' + apiBase + '/job', { method: 'GET', headers: { 'Accept': 'application/json' } });
+          renderSnapshot(snap);
+          if (snap.state !== 'running') stopPolling();
+        } catch (e) {
+          stopPolling();
+        }
+      }, 1500);
+    }
+
+    function stopPolling() {
+      if (polling) { clearInterval(polling); polling = null; }
+    }
+
+    async function browseFolder() {
+      setErr('');
+      sourceType = 'folder';
+      renderSource();
+      await new Promise(function (r) { setTimeout(r, 0); });
+      try {
+        var payload = await fetchJson('/api/' + apiBase + '/browse-folder', { method: 'POST' });
+        if (!payload.ok) {
+          if (payload.cancelled) { sourceType = 'default'; renderSource(); return; }
+          throw new Error(payload.error || 'Failed to browse folder.');
+        }
+        serverSelection = payload.selection;
+        selection = payload.selection;
+        renderSource();
+      } catch (e) {
+        sourceType = 'default';
+        renderSource();
+        setErr(String(e));
+      }
+    }
+
+    async function browseFiles() {
+      setErr('');
+      sourceType = 'files';
+      renderSource();
+      await new Promise(function (r) { setTimeout(r, 0); });
+      try {
+        var payload = await fetchJson('/api/' + apiBase + '/browse-files', { method: 'POST' });
+        if (!payload.ok) {
+          if (payload.cancelled) { sourceType = 'default'; renderSource(); return; }
+          throw new Error(payload.error || 'Failed to browse files.');
+        }
+        serverSelection = payload.selection;
+        selection = payload.selection;
+        renderSource();
+      } catch (e) {
+        sourceType = 'default';
+        renderSource();
+        setErr(String(e));
+      }
+    }
+
+    function clearSel() {
+      setErr('');
+      sourceType = 'default';
+      selection = null;
+      serverSelection = null;
+      renderSource();
+    }
+
+    async function runScan() {
+      setErr('');
+      var ips = getIps();
+      if (ips.length === 0) {
+        setErr('Enter at least one IP address.');
+        return;
+      }
+      if (ips.length > 20) {
+        setErr('Maximum 20 IPs per scan.');
+        return;
+      }
+
+      var body = { ips: ips, sourceType: sourceType };
+
+      if (serverSelection && sourceType !== 'default') {
+        if (sourceType === 'folder' && serverSelection.rootPath) {
+          body.serverPath = serverSelection.rootPath;
+        } else if (serverSelection.filePaths) {
+          body.serverFilePaths = serverSelection.filePaths;
+        }
+      }
+
+      try {
+        var payload = await fetchJson('/api/' + apiBase + '/run', {
+          method: 'POST',
+          body: JSON.stringify(body)
+        });
+
+        if (!payload.ok) {
+          setErr(payload.error || 'Failed to start scan.');
+          return;
+        }
+
+        renderSnapshot(payload.snapshot);
+        startPolling();
+      } catch (e) {
+        setErr(String(e));
+      }
+    }
+
+    async function openExport() {
+      setErr('');
+      try { await fetchJson('/api/' + apiBase + '/open-export', { method: 'POST' }); } catch (e) { setErr(String(e)); }
+    }
+
+    async function openChart() {
+      setErr('');
+      try { await fetchJson('/api/' + apiBase + '/open-chart', { method: 'POST' }); } catch (e) { setErr(String(e)); }
+    }
+
+    byId(prefix + 'ModeManual')?.addEventListener('click', function () { setInputMode('manual'); });
+    byId(prefix + 'ModeFile')?.addEventListener('click', function () {
+      setInputMode('file');
+      loadOutputFiles();
+    });
+    byId(prefix + 'ExtractBtn')?.addEventListener('click', extractIps);
+    byId(prefix + 'UseDefault')?.addEventListener('click', clearSel);
+    byId(prefix + 'SelectFolder')?.addEventListener('click', browseFolder);
+    byId(prefix + 'SelectFiles')?.addEventListener('click', browseFiles);
+    byId(prefix + 'ClearSelection')?.addEventListener('click', clearSel);
+    byId(prefix + 'Run')?.addEventListener('click', runScan);
+    byId(prefix + 'OpenExport')?.addEventListener('click', openExport);
+    byId(prefix + 'OpenChart')?.addEventListener('click', openChart);
+
+    loadMetaData().catch(function (e) { setErr(String(e)); });
+  }
+
+  function initializeAllGenericScanPages() {
+    var genericPageDefs = [
+      { prefix: 'alb5xxMismatch', apiBase: 'alb/5xx-mismatch' },
+      { prefix: 'albTop50Ips', apiBase: 'alb/top-50-ips' },
+      { prefix: 'albTop50IpUri', apiBase: 'alb/top-50-ips-by-uri' },
+      { prefix: 'albTop50AvgDuration', apiBase: 'alb/top-50-avg-duration' },
+      { prefix: 'albWafBlockedSummary', apiBase: 'alb/waf-blocked-summary' },
+      { prefix: 'albWafBlockedChart', apiBase: 'alb/waf-blocks-over-time' }
+    ];
+
+    genericPageDefs.forEach(function (def) {
+      initializeGenericScanPage(def.prefix, def.apiBase);
+    });
+
+    initializeReqOverTimePage();
+  }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       initializeAlbPage();
       initializeAlbOption2Page();
       initializeIpSummaryPage();
+      initializeAllGenericScanPages();
     });
   } else {
     initializeAlbPage();
     initializeAlbOption2Page();
     initializeIpSummaryPage();
+    initializeAllGenericScanPages();
   }
 })();

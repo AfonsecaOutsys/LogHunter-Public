@@ -13,12 +13,13 @@ internal static class AlbPageBuilder
         new(1, "/alb/download-logs", "Download logs from S3", "Download ALB logs into the workspace using AWS CLI and your current credentials/session.", true),
         new(2, "/alb/top-ips-top-paths", "Top IPs + top full paths for endpoint/path fragment", "Match a fragment, rank top IPs, then show top full URI paths per IP.", true),
         new(3, "/alb/ip-summary", "IP Summary", "Review one or more client IPs with shared charts and exports.", true),
-        new(4, "/alb/top-50-ips", "Top 50 IPs overall", "Scan logs and show the top 50 client IPs across the selected range.", false),
-        new(5, "/alb/top-50-ips-by-uri", "Top 50 IPs by URI (no query)", "Group top IP activity by URI path without query strings.", false),
-        new(6, "/alb/top-50-avg-duration", "Top 50 requests by AVG duration", "Find the slowest request paths ordered by average duration.", false),
-        new(7, "/alb/requests-over-time", "ALB requests over time per selected IP (5-minute buckets)", "Build a per-IP request timeline from exported ALB selections.", false),
-        new(8, "/alb/waf-blocked-summary", "WAF blocked summary + top blocked requests", "Summarize WAF-blocked traffic and blocked request patterns.", false),
-        new(9, "/alb/waf-blocks-over-time", "WAF blocks over time (per minute) (chart)", "Chart WAF blocks per minute using the summary definition.", false)
+        new(4, "/alb/5xx-mismatch", "5xx while backend succeeded", "Find ALB requests where the customer-facing response was 5xx but the backend returned 2xx/3xx.", true),
+        new(5, "/alb/top-50-ips", "Top 50 IPs overall", "Scan logs and show the top 50 client IPs across the selected range.", true),
+        new(6, "/alb/top-50-ips-by-uri", "Top 50 IPs by URI (no query)", "Group top IP activity by URI path without query strings.", true),
+        new(7, "/alb/top-50-avg-duration", "Top 50 requests by AVG duration", "Find the slowest request paths ordered by average duration.", true),
+        new(8, "/alb/requests-over-time", "ALB requests over time per selected IP (5-minute buckets)", "Build a per-IP request timeline from exported ALB selections.", true),
+        new(9, "/alb/waf-blocked-summary", "WAF blocked summary + top blocked requests", "Summarize WAF-blocked traffic and blocked request patterns.", true),
+        new(10, "/alb/waf-blocks-over-time", "WAF blocks over time (per minute) (chart)", "Chart WAF blocks per minute using the summary definition.", true)
     ];
 
     public static bool TryBuild(WebAppContext context, string path, out WebPageDefinition page, out string mainContent, out string? extraScriptPath)
@@ -51,6 +52,62 @@ internal static class AlbPageBuilder
         {
             page = new WebPageDefinition("/alb/ip-summary", "/alb", "ALB", "ALB / IP Summary", "Workflow", "Review one or more client IPs with per-minute charts, status breakdowns, and shared exports.");
             mainContent = BuildIpSummaryContent();
+            extraScriptPath = "/assets/alb.js";
+            return true;
+        }
+
+        if (string.Equals(path, "/alb/5xx-mismatch", StringComparison.OrdinalIgnoreCase))
+        {
+            page = new WebPageDefinition("/alb/5xx-mismatch", "/alb", "ALB", "ALB / 5xx while backend succeeded", "Workflow", "Find ALB requests where the customer-facing response was 5xx but the backend returned 2xx/3xx.");
+            mainContent = BuildGenericScanContent("alb5xxMismatch", "5xx while backend succeeded", "Find requests where ELB returned 5xx but the backend/target returned 2xx/3xx.", "alb/5xx-mismatch", "Matches");
+            extraScriptPath = "/assets/alb.js";
+            return true;
+        }
+
+        if (string.Equals(path, "/alb/top-50-ips", StringComparison.OrdinalIgnoreCase))
+        {
+            page = new WebPageDefinition("/alb/top-50-ips", "/alb", "ALB", "ALB / Top 50 IPs overall", "Workflow", "Scan logs and show the top 50 client IPs across the selected range.");
+            mainContent = BuildGenericScanContent("albTop50Ips", "Top 50 IPs overall", "Scan ALB logs and rank the top 50 client IPs by request count.", "alb/top-50-ips", "IPs");
+            extraScriptPath = "/assets/alb.js";
+            return true;
+        }
+
+        if (string.Equals(path, "/alb/top-50-ips-by-uri", StringComparison.OrdinalIgnoreCase))
+        {
+            page = new WebPageDefinition("/alb/top-50-ips-by-uri", "/alb", "ALB", "ALB / Top 50 IPs by URI", "Workflow", "Group top IP activity by URI path without query strings.");
+            mainContent = BuildGenericScanContent("albTop50IpUri", "Top 50 IPs by URI (no query)", "Show top IPs per URI with query strings removed to group requests by route.", "alb/top-50-ips-by-uri", "Pairs");
+            extraScriptPath = "/assets/alb.js";
+            return true;
+        }
+
+        if (string.Equals(path, "/alb/top-50-avg-duration", StringComparison.OrdinalIgnoreCase))
+        {
+            page = new WebPageDefinition("/alb/top-50-avg-duration", "/alb", "ALB", "ALB / Top 50 by AVG duration", "Workflow", "Find the slowest request paths ordered by average duration.");
+            mainContent = BuildGenericScanContent("albTop50AvgDuration", "Top 50 requests by AVG duration", "Find the slowest request paths (query removed), ordered by average target processing time.", "alb/top-50-avg-duration", "URIs");
+            extraScriptPath = "/assets/alb.js";
+            return true;
+        }
+
+        if (string.Equals(path, "/alb/requests-over-time", StringComparison.OrdinalIgnoreCase))
+        {
+            page = new WebPageDefinition("/alb/requests-over-time", "/alb", "ALB", "ALB / Requests over time per IP", "Workflow", "Build a per-IP request timeline from ALB logs in 5-minute buckets.");
+            mainContent = BuildRequestsOverTimeContent();
+            extraScriptPath = "/assets/alb.js";
+            return true;
+        }
+
+        if (string.Equals(path, "/alb/waf-blocked-summary", StringComparison.OrdinalIgnoreCase))
+        {
+            page = new WebPageDefinition("/alb/waf-blocked-summary", "/alb", "ALB", "ALB / WAF blocked summary", "Workflow", "Summarize WAF-blocked traffic and blocked request patterns.");
+            mainContent = BuildGenericScanContent("albWafBlockedSummary", "WAF blocked summary", "Summarize WAF-blocked traffic and show the top blocked request patterns.", "alb/waf-blocked-summary", "Blocked");
+            extraScriptPath = "/assets/alb.js";
+            return true;
+        }
+
+        if (string.Equals(path, "/alb/waf-blocks-over-time", StringComparison.OrdinalIgnoreCase))
+        {
+            page = new WebPageDefinition("/alb/waf-blocks-over-time", "/alb", "ALB", "ALB / WAF blocks over time", "Workflow", "Chart WAF blocks per minute using the summary definition.");
+            mainContent = BuildGenericScanContent("albWafBlockedChart", "WAF blocks over time (per minute)", "Chart WAF blocks per minute using the same blocked definition as the summary view.", "alb/waf-blocks-over-time", "Blocked");
             extraScriptPath = "/assets/alb.js";
             return true;
         }
@@ -522,6 +579,188 @@ internal static class AlbPageBuilder
               </div>
             </div>
             <div id="ipSummaryPerIp" class="stack"></div>
+          </section>
+        </section>
+      </section>
+""";
+    }
+
+    private static string BuildGenericScanContent(string prefix, string title, string description, string apiBase, string countLabel)
+    {
+        return $$"""
+      <section class="stack" data-alb-generic-scan="{{Html(prefix)}}">
+        <section class="hero">
+          <div class="hero-grid">
+            <div>
+              <h1>{{Html(title)}}</h1>
+              <p>{{Html(description)}}</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="module-two-column">
+          <section class="panel form-panel">
+            <h2>Scan inputs</h2>
+            <div id="{{Html(prefix)}}Error" class="inline-error" hidden></div>
+
+            <div class="field-group source-group">
+              <label class="field-label">Log source</label>
+              <div class="button-row source-action-row">
+                <button id="{{Html(prefix)}}UseDefault" class="source-btn active" type="button">Default folder</button>
+                <button id="{{Html(prefix)}}SelectFolder" class="source-btn" type="button">Select folder</button>
+                <button id="{{Html(prefix)}}SelectFiles" class="source-btn" type="button">Select files</button>
+                <button id="{{Html(prefix)}}ClearSelection" class="source-btn source-btn--clear" type="button" hidden>Clear</button>
+              </div>
+              <div id="{{Html(prefix)}}SourceChip" class="source-chip">Loading...</div>
+            </div>
+
+            <div class="button-row">
+              <button id="{{Html(prefix)}}Run" class="button-link primary button-like" type="button">Run scan</button>
+            </div>
+          </section>
+
+          <section class="panel panel-tight">
+            <h2>Scan status</h2>
+            <div class="status-block">
+              <div class="status-pill"><span>Status</span><strong id="{{Html(prefix)}}State">idle</strong></div>
+              <div class="status-pill"><span>Phase</span><strong id="{{Html(prefix)}}Phase">idle</strong></div>
+              <div class="status-pill"><span>{{Html(countLabel)}}</span><strong id="{{Html(prefix)}}Count">0</strong></div>
+            </div>
+            <p id="{{Html(prefix)}}Message" class="page-copy">Idle.</p>
+            <div id="{{Html(prefix)}}Meta" class="footer-note"></div>
+            <div class="export-row">
+              <div id="{{Html(prefix)}}ExportPath" class="footer-note"></div>
+              <button id="{{Html(prefix)}}OpenExport" class="button-link primary button-like compact" type="button" hidden>Open export</button>
+              <button id="{{Html(prefix)}}OpenChart" class="button-link button-like compact" type="button" hidden>Open chart</button>
+            </div>
+            <div class="result-card progress-card-compact">
+              <div class="progress-card-head">
+                <div class="info-label">Scan progress</div>
+                <div id="{{Html(prefix)}}StageBadge" class="kicker">idle</div>
+              </div>
+              <div id="{{Html(prefix)}}Summary" class="info-value">Waiting for a scan to start.</div>
+              <div class="progress-track"><div id="{{Html(prefix)}}Bar" class="progress-fill" style="width:0%"></div></div>
+              <div id="{{Html(prefix)}}BarMeta" class="footer-note">No scan running.</div>
+            </div>
+          </section>
+        </section>
+
+        <section id="{{Html(prefix)}}Results" class="stack" hidden>
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">Results</div>
+                <h2 id="{{Html(prefix)}}ResultsHeading">Scan results</h2>
+              </div>
+            </div>
+            <div id="{{Html(prefix)}}ResultsBody" class="result-summary-body"></div>
+          </section>
+        </section>
+      </section>
+""";
+    }
+
+    private static string BuildRequestsOverTimeContent()
+    {
+        return """
+      <section class="stack" data-alb-generic-scan="albReqOverTime">
+        <section class="hero">
+          <div class="hero-grid">
+            <div>
+              <h1>ALB requests over time per selected IP</h1>
+              <p>Choose IPs (manual or from output files), scan ALB logs, and build a per-IP 5-minute request timeline with chart.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="module-two-column">
+          <section class="panel form-panel">
+            <h2>Scan inputs</h2>
+            <div id="albReqOverTimeError" class="inline-error" hidden></div>
+
+            <div class="field-group">
+              <label class="field-label">IP input</label>
+              <div class="button-row source-action-row">
+                <button id="albReqOverTimeModeManual" class="source-btn active" type="button">Manual entry</button>
+                <button id="albReqOverTimeModeFile" class="source-btn" type="button">From output file</button>
+              </div>
+            </div>
+
+            <div id="albReqOverTimeManualSection" class="field-group">
+              <div class="field">
+                <label for="albReqOverTimeIpText">Client IPs (one per line, max 20)</label>
+                <textarea id="albReqOverTimeIpText" rows="5" placeholder="10.0.0.1&#10;192.168.1.100&#10;172.16.0.5"></textarea>
+              </div>
+            </div>
+
+            <div id="albReqOverTimeFileSection" class="field-group" hidden>
+              <div class="field">
+                <label for="albReqOverTimeFileSelect">Output file (CSV/XLSX)</label>
+                <select id="albReqOverTimeFileSelect">
+                  <option value="">Loading files...</option>
+                </select>
+              </div>
+              <button id="albReqOverTimeExtractBtn" class="button-link primary button-like compact" type="button">Extract IPs</button>
+              <div id="albReqOverTimeExtractResult" hidden>
+                <div id="albReqOverTimeExtractInfo" class="source-chip"></div>
+                <div class="field">
+                  <label>Extracted IPs (select up to 20)</label>
+                  <div id="albReqOverTimeExtractedList" class="ip-extract-list"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="field-group source-group">
+              <label class="field-label">Log source</label>
+              <div class="button-row source-action-row">
+                <button id="albReqOverTimeUseDefault" class="source-btn active" type="button">Default folder</button>
+                <button id="albReqOverTimeSelectFolder" class="source-btn" type="button">Select folder</button>
+                <button id="albReqOverTimeSelectFiles" class="source-btn" type="button">Select files</button>
+                <button id="albReqOverTimeClearSelection" class="source-btn source-btn--clear" type="button" hidden>Clear</button>
+              </div>
+              <div id="albReqOverTimeSourceChip" class="source-chip">Loading...</div>
+            </div>
+
+            <div class="button-row">
+              <button id="albReqOverTimeRun" class="button-link primary button-like" type="button">Run scan</button>
+            </div>
+          </section>
+
+          <section class="panel panel-tight">
+            <h2>Scan status</h2>
+            <div class="status-block">
+              <div class="status-pill"><span>Status</span><strong id="albReqOverTimeState">idle</strong></div>
+              <div class="status-pill"><span>Phase</span><strong id="albReqOverTimePhase">idle</strong></div>
+              <div class="status-pill"><span>Hits</span><strong id="albReqOverTimeCount">0</strong></div>
+            </div>
+            <p id="albReqOverTimeMessage" class="page-copy">Idle.</p>
+            <div id="albReqOverTimeMeta" class="footer-note"></div>
+            <div class="export-row">
+              <div id="albReqOverTimeExportPath" class="footer-note"></div>
+              <button id="albReqOverTimeOpenExport" class="button-link primary button-like compact" type="button" hidden>Open CSV</button>
+              <button id="albReqOverTimeOpenChart" class="button-link button-like compact" type="button" hidden>Open chart</button>
+            </div>
+            <div class="result-card progress-card-compact">
+              <div class="progress-card-head">
+                <div class="info-label">Scan progress</div>
+                <div id="albReqOverTimeStageBadge" class="kicker">idle</div>
+              </div>
+              <div id="albReqOverTimeSummary" class="info-value">Waiting for a scan to start.</div>
+              <div class="progress-track"><div id="albReqOverTimeBar" class="progress-fill" style="width:0%"></div></div>
+              <div id="albReqOverTimeBarMeta" class="footer-note">No scan running.</div>
+            </div>
+          </section>
+        </section>
+
+        <section id="albReqOverTimeResults" class="stack" hidden>
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">Results</div>
+                <h2 id="albReqOverTimeResultsHeading">Top time buckets by total requests</h2>
+              </div>
+            </div>
+            <div id="albReqOverTimeResultsBody" class="result-summary-body"></div>
           </section>
         </section>
       </section>
