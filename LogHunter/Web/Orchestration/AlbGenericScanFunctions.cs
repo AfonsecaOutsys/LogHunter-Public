@@ -363,26 +363,6 @@ internal static class AlbGenericScanFunctions
             }
 
             Directory.CreateDirectory(outputFolder);
-            var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-            var csvPath = Path.Combine(outputFolder, $"ALB_RequestsPer5Min_{stamp}.csv");
-
-            using (var w = new StreamWriter(csvPath, false, Encoding.UTF8))
-            {
-                w.Write("BucketStartUtc");
-                foreach (var ip in ips) w.Write($",{ip}");
-                w.WriteLine();
-
-                foreach (var b in allBuckets)
-                {
-                    w.Write(b.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture));
-                    foreach (var ip in ips)
-                    {
-                        bucketsByIp[ip].TryGetValue(b, out var c);
-                        w.Write($",{c}");
-                    }
-                    w.WriteLine();
-                }
-            }
 
             // Build chart
             var times = allBuckets.ToArray();
@@ -443,7 +423,7 @@ internal static class AlbGenericScanFunctions
 
             return new AlbGenericScanResult(
                 CompletionMessage: $"Scan complete. {totalHits:N0} total hits across {ips.Count} IPs in {allBuckets.Count} time buckets.",
-                ExportPath: csvPath,
+                ExportPath: null,
                 Rows: rows,
                 Columns: new[] { "BucketStartUtc" }.Concat(ips).ToArray(),
                 TotalMatches: totalHits,

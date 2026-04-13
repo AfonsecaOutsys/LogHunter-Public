@@ -737,8 +737,6 @@ internal static class AlbPageBuilder
             <p id="albReqOverTimeMessage" class="page-copy">Idle.</p>
             <div id="albReqOverTimeMeta" class="footer-note"></div>
             <div class="export-row">
-              <div id="albReqOverTimeExportPath" class="footer-note"></div>
-              <button id="albReqOverTimeOpenExport" class="button-link primary button-like compact" type="button" hidden>Open CSV</button>
               <button id="albReqOverTimeOpenChart" class="button-link button-like compact" type="button" hidden>Open chart</button>
             </div>
             <div class="result-card progress-card-compact">
