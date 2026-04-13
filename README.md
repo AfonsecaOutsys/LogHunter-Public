@@ -46,6 +46,17 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 1.6
+
+- Adds AbuseIPDB check workflow with dedicated settings management and IP selection from multiple sources (ALB, IIS burst, Platform suspicious cache).
+- Adds IIS Bytes Intel module with Top Bandwidth IPs & URIs (sc-bytes) and Uploads/Payload Attempts (cs-bytes) analysis.
+- Adds IIS Burst Patterns detection for identifying high-frequency request bursts.
+- Adds IIS Status Pivot for response code analysis across IPs and endpoints.
+- Adds Platform authenticated activity check to cross-reference suspicious IPs against authenticated sessions.
+- Adds Platform suspicious request extraction from CSV/XLSX log exports.
+- Improves ALB scan options with generic scan framework covering Top 50 IPs overall, Top 50 IPs by URI, Top 50 requests by AVG duration, and WAF blocked summary.
+- Updates version metadata to `1.6`.
+
 ### 1.5.0.1
 
 - Tightens IIS Burst detection so it is less broad and less noisy on normal clustered traffic.

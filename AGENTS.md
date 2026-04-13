@@ -41,6 +41,16 @@ At the end of a coding session:
 - Unless the user says otherwise, keep these backnotes internal-only and do not mirror them to `LogHunter-Public`.
 - These release-note carry-forward rules should stay aligned across branches unless the user explicitly changes them.
 
+## Public Release Flow (LogHunter-Public)
+
+- The public repo remote is named `public` and points to `https://github.com/AfonsecaOutsys/LogHunter-Public.git`.
+- Public releases only happen when the user explicitly asks for them.
+- Before pushing to `public`, update `README.md` release notes for the new version. Exclude any Web UI references — the public release notes should only cover console-facing features and improvements.
+- Push `main` branch and the version tag (e.g. `v1.6.0`) to the `public` remote.
+- Create a GitHub release on the `public` remote using `gh release create` with the version tag.
+- Attach the published Release executable (`LogHunter.exe` from `C:\espaces`) to the GitHub release when available.
+- Do not mirror internal patch notes, backnotes, or web UI documentation to the public repo.
+
 ## Version Bump Rules
 
 - When work from a feature/fix branch is merged into `main`, bump the shipped version on `main`.
