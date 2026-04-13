@@ -2067,7 +2067,6 @@
       var createdUtc = snap.createdUtc ? new Date(snap.createdUtc) : null;
       var now = new Date();
       var result = snap.result;
-      var exportPath = snap.exportPath || '';
       var chartPath = result && result.chartHtmlPath ? result.chartHtmlPath : '';
 
       jobId = snap.jobId || jobId;
@@ -2076,9 +2075,7 @@
       setText(prefix + 'StageBadge', phase);
       setText(prefix + 'Message', snap.error ? (snap.message + ' ' + snap.error) : (snap.message || ''));
       setText(prefix + 'Meta', snap.inputSourceSummary || '');
-      setText(prefix + 'ExportPath', exportPath ? 'Exported: ' + exportPath : '');
       setText(prefix + 'Count', String(result ? result.totalMatches || 0 : 0));
-      setHidden(byId(prefix + 'OpenExport'), !exportPath);
       setHidden(byId(prefix + 'OpenChart'), !chartPath);
 
       var pct = totalSteps > 0 ? Math.round((currentStep / totalSteps) * 100) : 0;
@@ -2334,11 +2331,6 @@
       }
     }
 
-    async function openExport() {
-      setErr('');
-      try { await fetchJson('/api/' + apiBase + '/open-export', { method: 'POST' }); } catch (e) { setErr(String(e)); }
-    }
-
     async function openChart() {
       setErr('');
       try { await fetchJson('/api/' + apiBase + '/open-chart', { method: 'POST' }); } catch (e) { setErr(String(e)); }
@@ -2355,7 +2347,6 @@
     byId(prefix + 'SelectFiles')?.addEventListener('click', browseFiles);
     byId(prefix + 'ClearSelection')?.addEventListener('click', clearSel);
     byId(prefix + 'Run')?.addEventListener('click', runScan);
-    byId(prefix + 'OpenExport')?.addEventListener('click', openExport);
     byId(prefix + 'OpenChart')?.addEventListener('click', openChart);
 
     loadMetaData().catch(function (e) { setErr(String(e)); });

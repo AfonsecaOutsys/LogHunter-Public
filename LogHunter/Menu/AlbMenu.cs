@@ -45,7 +45,7 @@ public sealed class AlbMenu : IMenu
 
             new ConsoleEx.MenuItem(
                 "ALB requests over time per selected IP (5-minute buckets)",
-                "ALB-native timeline analysis: choose IPs from ALB exports (or manual fallback), then scan ALB logs and build chart/CSV."),
+                "ALB-native timeline analysis: choose IPs from ALB exports (or manual fallback), then scan ALB logs and build a chart."),
 
             new ConsoleEx.MenuItem(
                 "WAF blocked summary + top blocked requests",
