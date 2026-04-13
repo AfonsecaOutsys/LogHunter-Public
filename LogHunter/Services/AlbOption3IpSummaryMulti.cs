@@ -478,8 +478,8 @@ select { background:#0b0f14; color:#e6edf3; border:1px solid rgba(255,255,255,.1
 .seriesToggle { display:inline-flex; align-items:center; gap:8px; padding:5px 9px; border-radius:999px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.03); cursor:pointer; font-size:12px; user-select:none; }
 .seriesToggle.off { opacity:.45; }
 .sw { width:10px; height:10px; border-radius:3px; display:inline-block; }
-.chart-meta { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; margin-bottom:10px; }
-.hover-card { min-width:320px; flex:1 1 360px; background:#111827; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px 12px; }
+.chart-meta { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; margin-bottom:10px; position:relative; min-height:140px; }
+.hover-card { position:absolute; top:0; right:0; width:min(100%, 520px); min-width:320px; background:#111827; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px 12px; }
 .hover-title { font-size:13px; font-weight:600; margin:0 0 6px 0; }
 .hover-subtitle { font-size:12px; opacity:.78; margin-bottom:8px; }
 .hover-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:8px; }
