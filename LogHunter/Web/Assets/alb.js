@@ -1195,12 +1195,8 @@
     ipSummaryInputMode = mode;
     const btnManual = byId('ipSummaryModeManual');
     const btnFile = byId('ipSummaryModeFile');
-    const btnBurst = byId('ipSummaryModeBurst');
-    const btnPlatform = byId('ipSummaryModePlatform');
     if (btnManual) btnManual.classList.toggle('active', mode === 'manual');
     if (btnFile) btnFile.classList.toggle('active', mode === 'file');
-    if (btnBurst) btnBurst.classList.toggle('active', mode === 'burst');
-    if (btnPlatform) btnPlatform.classList.toggle('active', mode === 'platform');
 
     setHidden(byId('ipSummaryManualSection'), mode !== 'manual');
     setHidden(byId('ipSummaryFileSection'), mode !== 'file');
@@ -1669,6 +1665,7 @@
     var serverSelection = null;
     var polling = null;
     var jobId = '';
+    var chartAutoOpened = false;
 
     function setErr(msg) {
       var node = byId(prefix + 'Error');
@@ -1752,10 +1749,17 @@
         setText(prefix + 'BarMeta', '100% | ' + (snap.filesTotal || 0) + ' files scanned');
         if (bar) bar.style.width = '100%';
         renderResults(result);
+
+        // Auto-open chart on completion for scans that produce a chart as their primary output
+        if (chartPath && !chartAutoOpened && prefix === 'albWafBlockedChart') {
+          chartAutoOpened = true;
+          openChart();
+        }
       } else if (state === 'failed') {
         setText(prefix + 'Summary', 'Scan failed.');
         setText(prefix + 'BarMeta', snap.error || '');
       } else if (state === 'running') {
+        chartAutoOpened = false;
         setText(prefix + 'Summary', pct + '% — ' + (snap.filesProcessed || 0) + ' / ' + (snap.filesTotal || 0) + ' files');
         setText(prefix + 'BarMeta', pct + '% | ETA ' + etaText);
       } else {

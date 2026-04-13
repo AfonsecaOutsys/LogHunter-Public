@@ -107,7 +107,7 @@ internal static class AlbPageBuilder
         if (string.Equals(path, "/alb/waf-blocks-over-time", StringComparison.OrdinalIgnoreCase))
         {
             page = new WebPageDefinition("/alb/waf-blocks-over-time", "/alb", "ALB", "ALB / WAF blocks over time", "Workflow", "Chart WAF blocks per minute using the summary definition.");
-            mainContent = BuildGenericScanContent("albWafBlockedChart", "WAF blocks over time (per minute)", "Chart WAF blocks per minute using the same blocked definition as the summary view.", "alb/waf-blocks-over-time", "Blocked");
+            mainContent = BuildGenericScanContent("albWafBlockedChart", "WAF blocks over time (per minute)", "Chart WAF blocks per minute using the same blocked definition as the summary view.", "alb/waf-blocks-over-time", "Blocked", showChart: true);
             extraScriptPath = "/assets/alb.js";
             return true;
         }
@@ -482,8 +482,6 @@ internal static class AlbPageBuilder
               <div class="button-row source-action-row">
                 <button id="ipSummaryModeManual" class="source-btn active" type="button">Manual entry</button>
                 <button id="ipSummaryModeFile" class="source-btn" type="button">From output file</button>
-                <button id="ipSummaryModeBurst" class="source-btn" type="button" disabled title="IIS burst session (not yet available)">IIS burst</button>
-                <button id="ipSummaryModePlatform" class="source-btn" type="button" disabled title="Platform suspicious cache (not yet available)">Platform cache</button>
               </div>
             </div>
 
@@ -585,8 +583,12 @@ internal static class AlbPageBuilder
 """;
     }
 
-    private static string BuildGenericScanContent(string prefix, string title, string description, string apiBase, string countLabel)
+    private static string BuildGenericScanContent(string prefix, string title, string description, string apiBase, string countLabel, bool showChart = false)
     {
+        var chartButton = showChart
+            ? $"\n              <button id=\"{Html(prefix)}OpenChart\" class=\"button-link button-like compact\" type=\"button\" hidden>Open chart</button>"
+            : string.Empty;
+
         return $$"""
       <section class="stack" data-alb-generic-scan="{{Html(prefix)}}">
         <section class="hero">
@@ -630,8 +632,7 @@ internal static class AlbPageBuilder
             <div id="{{Html(prefix)}}Meta" class="footer-note"></div>
             <div class="export-row">
               <div id="{{Html(prefix)}}ExportPath" class="footer-note"></div>
-              <button id="{{Html(prefix)}}OpenExport" class="button-link primary button-like compact" type="button" hidden>Open export</button>
-              <button id="{{Html(prefix)}}OpenChart" class="button-link button-like compact" type="button" hidden>Open chart</button>
+              <button id="{{Html(prefix)}}OpenExport" class="button-link primary button-like compact" type="button" hidden>Open export</button>{{chartButton}}
             </div>
             <div class="result-card progress-card-compact">
               <div class="progress-card-head">

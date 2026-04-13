@@ -171,7 +171,8 @@ kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fon
         sb.AppendLine("<button class=\"btn\" id=\"btnTop5\">Top 5</button>");
         sb.AppendLine("<button class=\"btn\" id=\"btnTop10\">Top 10</button>");
         sb.AppendLine("<button class=\"btn\" id=\"btnResetZoom\">Reset zoom</button>");
-        sb.AppendLine("<input id=\"search\" class=\"search\" type=\"text\" placeholder=\"Filter IP...\" />");
+        if (series.Count > 1)
+            sb.AppendLine("<input id=\"search\" class=\"search\" type=\"text\" placeholder=\"Filter IP...\" />");
         sb.AppendLine("</div>");
 
         sb.AppendLine("<div class=\"summaryWrap\"><table class=\"summary\" id=\"summary\"></table></div>");
@@ -309,7 +310,7 @@ function toggleSeries(i){
 }
 
 function passesFilter(name){
-  const q = (search.value || '').trim().toLowerCase();
+  const q = (search ? search.value || '' : '').trim().toLowerCase();
   return q.length === 0 || name.toLowerCase().includes(q);
 }
 
@@ -443,7 +444,7 @@ document.getElementById('btnHideAll').addEventListener('click', hideAll);
 document.getElementById('btnTop5').addEventListener('click', () => showTopN(5));
 document.getElementById('btnTop10').addEventListener('click', () => showTopN(10));
 document.getElementById('btnResetZoom').addEventListener('click', () => { resetZoom(); draw(); });
-search.addEventListener('input', () => { buildLegend(); buildSummary(); draw(); });
+if (search) search.addEventListener('input', () => { buildLegend(); buildSummary(); draw(); });
 
 function syncUi(){ buildLegend(); buildSummary(); draw(); }
 
