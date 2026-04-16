@@ -1143,6 +1143,35 @@ code {
   gap: 18px;
 }
 
+.results-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 20px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.results-toggle-btn:hover {
+  color: var(--text);
+  background: var(--accent-soft);
+  border-color: var(--line-strong);
+}
+.results-toggle-icon {
+  font-size: 0.7rem;
+}
+.results-collapsible {
+  margin-top: 16px;
+}
+
 .button-row {
   display: flex;
   gap: 12px;

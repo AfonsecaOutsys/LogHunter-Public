@@ -1,4 +1,4 @@
-# AGENTS
+# CLAUDE
 
 At the end of a coding session:
 
@@ -7,7 +7,7 @@ At the end of a coding session:
 - Never merge to `main`.
 - Only merge into `main` when explicitly asked to do it.
 - Only produce a Release build to `C:\espaces` when explicitly asked to do it.
-- These rules must be treated as the expected behavior across branches so `AGENTS.md` stays aligned between branch lines unless the user explicitly changes it.
+- These rules must be treated as the expected behavior across branches so `CLAUDE.md` stays aligned between branch lines unless the user explicitly changes it.
 
 ## Session Flow Rules
 

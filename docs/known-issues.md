@@ -6,13 +6,13 @@ Issues ranked by complexity (low → high).
 
 ## Low Complexity
 
-### 1. IP Summary - Remove IIS Burst and Platform Cache Buttons
+### 1. ✅ IP Summary - Remove IIS Burst and Platform Cache Buttons
 Both ALB and IIS IP Summary views have IIS Burst and Platform Cache buttons that are not wired up in the web UI. These should be removed.
 
-### 2. WAF Blocks Over Time - Should Auto-Open Chart
+### 2. ✅ WAF Blocks Over Time - Should Auto-Open Chart
 The WAF blocks over time (per minute) scan produces a chart but doesn't open it automatically on completion. Since the chart is the main output of this scan, it should auto-open once ready.
 
-### 3. ALB - "Open Chart" Button Shown on Pages Without Charts
+### 3. ✅ ALB - "Open Chart" Button Shown on Pages Without Charts
 The "Open chart" button is rendered on all ALB generic scan pages via a shared template, but only two scans actually produce charts. The button should only exist on pages that support it:
 - **Requests over time** — has chart (keep button)
 - **WAF blocks over time (per minute)** — has chart (keep button)
@@ -22,19 +22,19 @@ The "Open chart" button is rendered on all ALB generic scan pages via a shared t
 - **Top 50 requests by AVG duration** — no chart (remove button)
 - **WAF blocked summary** — no chart (remove button)
 
-### 4. ALB Option 2 (5xx While Backend Succeeded) - Excel Table Formatting Needs Tightening
+### 4. ✅ ALB Option 2 (5xx While Backend Succeeded) - Excel Table Formatting Needs Tightening
 The Excel export for the 5xx while backend succeeded scan has tables that need tighter formatting for better readability (column widths, alignment, spacing).
 
-### 5. ALB Requests Over Time Per Selected IP - Remove CSV Export, Keep Only Chart
+### 5. ✅ ALB Requests Over Time Per Selected IP - Remove CSV Export, Keep Only Chart
 The 5-minute bucket CSV output for "Requests over time per selected IP" is meaningless to the user. Remove the CSV export and keep only the chart output.
 
-### 6. WAF Blocks Over Time Chart - Remove IP Filter
+### 6. ✅ WAF Blocks Over Time Chart - Remove IP Filter
 The WAF blocks over time (per minute) chart page has an IP filter dropdown, but this scan only shows blocked requests over time with no IP breakdown. The IP filter should be removed from this page.
 
-### 7. Web UI IP Summary Chart - Missing Hover Inspect Bucket Feature
+### 7. ✅ Web UI IP Summary Chart - Missing Hover Inspect Bucket Feature
 The Web UI IP Summary chart is missing the "Hover: inspect bucket" feature that exists in the console-generated HTML chart. The console version shows a "Nearest bucket" detail panel on hover with per-status-code breakdown (ELB 2xx/3xx, FE 2xx/3xx, 4xx, 5xx counts). The Web UI chart needs to be brought to parity with this.
 
-### 8. Chart Summary - Tooltip Causes Layout Shift
+### 8. ✅ Chart Summary - Tooltip Causes Layout Shift
 Hovering over the chart causes the tooltip bubble above to expand, shifting the entire page layout. The tooltip should use a fixed-size overlay or absolute positioning to avoid reflowing the page.
 
 ---
@@ -97,7 +97,7 @@ After the scan completes, there is no feedback to the user while the engine buil
 The ALB "Requests over time per selected IP" chart should use the same file picker flow as the IP Summary pages (single file picker instead of file list from folder).
 
 ### 26. ALB/IIS IP Summary UI - Source File Selection
-When selecting "from source" in the ALB IP Summary UI, the current implementation shows a list of files from the folder. This should be tightened to a single selectable file picker instead. This same issue also occurs in the IIS IP Summary flow. Additionally, once a file is selected (via the future file picker), the radio boxes for choosing which IPs to run should be cleaned up to be neat and well formatted.
+When selecting "from source" in the ALB IP Summary UI, the current implementation shows a list of files from the folder. This should be tightened to a single selectable file picker instead. The IIS IP Summary is missing the files input form entirely — it needs the same file selection UI that ALB IP Summary has. Additionally, once a file is selected, the IP selection should use a popup modal with a scrollable list of IPs, each showing the hit count for easy identification. The list should be ranked by hits (descending) and support multi-select so the user can choose which IPs to run in one go.
 
 ### 27. WAF Blocked Summary + Top Blocked Requests - Improve Output
 The WAF blocked summary and top blocked requests outputs need analysis and rework. The blocked summary results are buried in the scan status card and only show a list of top blocks. Both outputs need to be moved to the results section and presented in a more meaningful way (e.g. aggregate stats, visual breakdown). Requires hands-on analysis of the current output before deciding on the approach.

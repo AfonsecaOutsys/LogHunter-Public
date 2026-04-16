@@ -107,7 +107,7 @@ internal static class AlbPageBuilder
         if (string.Equals(path, "/alb/waf-blocks-over-time", StringComparison.OrdinalIgnoreCase))
         {
             page = new WebPageDefinition("/alb/waf-blocks-over-time", "/alb", "ALB", "ALB / WAF blocks over time", "Workflow", "Chart WAF blocks per minute using the summary definition.");
-            mainContent = BuildGenericScanContent("albWafBlockedChart", "WAF blocks over time (per minute)", "Chart WAF blocks per minute using the same blocked definition as the summary view.", "alb/waf-blocks-over-time", "Blocked", showChart: true);
+            mainContent = BuildGenericScanContent("albWafBlockedChart", "WAF blocks over time (per minute)", "Chart WAF blocks per minute using the same blocked definition as the summary view.", "alb/waf-blocks-over-time", "Blocked", showChart: true, collapseResults: true);
             extraScriptPath = "/assets/alb.js";
             return true;
         }
@@ -583,11 +583,45 @@ internal static class AlbPageBuilder
 """;
     }
 
-    private static string BuildGenericScanContent(string prefix, string title, string description, string apiBase, string countLabel, bool showChart = false)
+    private static string BuildGenericScanContent(string prefix, string title, string description, string apiBase, string countLabel, bool showChart = false, bool collapseResults = false)
     {
         var chartButton = showChart
-            ? $"\n              <button id=\"{Html(prefix)}OpenChart\" class=\"button-link button-like compact\" type=\"button\" hidden>Open chart</button>"
+            ? $"\n              <button id=\"{Html(prefix)}OpenChart\" class=\"button-link button-like compact\" type=\"button\" disabled>Open chart</button>"
             : string.Empty;
+
+        var resultsSection = collapseResults
+            ? $$"""
+        <section id="{{Html(prefix)}}Results" class="stack" hidden>
+          <section class="panel">
+            <button id="{{Html(prefix)}}ResultsToggle" class="results-toggle-btn" type="button">
+              <span id="{{Html(prefix)}}ResultsToggleIcon" class="results-toggle-icon">&#9654;</span>
+              <span id="{{Html(prefix)}}ResultsToggleText">Show detailed results</span>
+            </button>
+            <div id="{{Html(prefix)}}ResultsCollapse" class="results-collapsible" hidden>
+              <div class="section-heading">
+                <div>
+                  <div class="eyebrow">Results</div>
+                  <h2 id="{{Html(prefix)}}ResultsHeading">Scan results</h2>
+                </div>
+              </div>
+              <div id="{{Html(prefix)}}ResultsBody" class="result-summary-body"></div>
+            </div>
+          </section>
+        </section>
+"""
+            : $$"""
+        <section id="{{Html(prefix)}}Results" class="stack" hidden>
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">Results</div>
+                <h2 id="{{Html(prefix)}}ResultsHeading">Scan results</h2>
+              </div>
+            </div>
+            <div id="{{Html(prefix)}}ResultsBody" class="result-summary-body"></div>
+          </section>
+        </section>
+""";
 
         return $$"""
       <section class="stack" data-alb-generic-scan="{{Html(prefix)}}">
@@ -632,7 +666,7 @@ internal static class AlbPageBuilder
             <div id="{{Html(prefix)}}Meta" class="footer-note"></div>
             <div class="export-row">
               <div id="{{Html(prefix)}}ExportPath" class="footer-note"></div>
-              <button id="{{Html(prefix)}}OpenExport" class="button-link primary button-like compact" type="button" hidden>Open export</button>{{chartButton}}
+              <button id="{{Html(prefix)}}OpenExport" class="button-link button-like compact" type="button" disabled>Open export</button>{{chartButton}}
             </div>
             <div class="result-card progress-card-compact">
               <div class="progress-card-head">
@@ -646,18 +680,7 @@ internal static class AlbPageBuilder
           </section>
         </section>
 
-        <section id="{{Html(prefix)}}Results" class="stack" hidden>
-          <section class="panel">
-            <div class="section-heading">
-              <div>
-                <div class="eyebrow">Results</div>
-                <h2 id="{{Html(prefix)}}ResultsHeading">Scan results</h2>
-              </div>
-            </div>
-            <div id="{{Html(prefix)}}ResultsBody" class="result-summary-body"></div>
-          </section>
-        </section>
-      </section>
+{{resultsSection}}      </section>
 """;
     }
 
