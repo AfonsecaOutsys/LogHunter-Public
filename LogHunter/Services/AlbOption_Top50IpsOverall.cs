@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using ClosedXML.Excel;
 using LogHunter.Utils;
 using Spectre.Console;
 
@@ -82,12 +83,29 @@ public static partial class AlbOptions
         {
             Directory.CreateDirectory(outputFolder);
             var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            var outFile = Path.Combine(outputFolder, $"ALB_Top50_IPs_{stamp}.csv");
+            var outFile = Path.Combine(outputFolder, $"ALB_Top50_IPs_{stamp}.xlsx");
 
-            using var swCsv = new StreamWriter(outFile, false, Encoding.UTF8);
-            swCsv.WriteLine("Rank,IP,Hits");
-            foreach (var row in top)
-                swCsv.WriteLine($"{row.Rank},{row.IP},{row.Hits}");
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Top 50 IPs");
+            ExcelHelper.WriteHeaderRow(ws, 1, new[] { "Rank", "IP", "Hits" });
+            ws.SheetView.FreezeRows(1);
+
+            var dataRow = 2;
+            foreach (var row in top) {
+                ws.Cell(dataRow, 1).Value = row.Rank;
+                ws.Cell(dataRow, 2).Value = row.IP;
+                ws.Cell(dataRow, 3).Value = row.Hits;
+                dataRow++;
+            }
+
+            if (dataRow > 2) {
+                var xlTable = ws.Range(1, 1, dataRow - 1, 3).CreateTable("AlbTop50IpsOverall");
+                xlTable.Theme = XLTableTheme.TableStyleMedium2;
+                xlTable.ShowAutoFilter = true;
+            }
+
+            ExcelHelper.AutoFitColumns(ws);
+            wb.SaveAs(outFile);
 
             ConsoleEx.Success($"Exported: {outFile}");
         }

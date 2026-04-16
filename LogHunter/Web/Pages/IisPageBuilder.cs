@@ -184,6 +184,10 @@ internal static class IisPageBuilder
                 <div class="eyebrow">Results</div>
                 <h2>Per-IP summary</h2>
               </div>
+              <div class="export-row">
+                <button id="iisIpSummaryResultsOpenReport" class="button-link button-like compact" type="button" disabled>Open report</button>
+                <button id="iisIpSummaryResultsOpenExport" class="button-link button-like compact" type="button" disabled>Open Excel</button>
+              </div>
             </div>
             <div id="iisIpSummaryPerIp" class="stack"></div>
           </section>
@@ -269,6 +273,9 @@ internal static class IisPageBuilder
               <div>
                 <div class="eyebrow">Error-side summary</div>
                 <h2>Top error IPs</h2>
+              </div>
+              <div class="export-row">
+                <button id="iisStatusPivotResultsOpenExport" class="button-link button-like compact" type="button" disabled>Open export</button>
               </div>
             </div>
             <div id="iisStatusPivotTopIps" class="result-summary-body"></div>
@@ -411,6 +418,9 @@ internal static class IisPageBuilder
               <div>
                 <div class="eyebrow">Results</div>
                 <h2>Top IPs</h2>
+              </div>
+              <div class="export-row">
+                <button id="{{prefix}}ResultsOpenExport" class="button-link button-like compact" type="button" disabled>Open export</button>
               </div>
             </div>
             <div id="{{prefix}}TopIps" class="result-summary-body"></div>

@@ -95,6 +95,10 @@
     if (openExportBtn) {
       openExportBtn.addEventListener('click', openExport);
     }
+    var resultsOpenExportBtn = byId('abuseipResultsOpenExport');
+    if (resultsOpenExportBtn) {
+      resultsOpenExportBtn.addEventListener('click', openExport);
+    }
 
     loadMeta();
   }
@@ -249,25 +253,41 @@
       : snapshot.error || 'Error';
     setText('abuseipBarMeta', barMeta);
 
+    // Lock inputs while running
     var runBtn = byId('abuseipRun');
     if (runBtn) {
       runBtn.disabled = state === 'running';
     }
+    var abuseIpText = byId('abuseipIpText');
+    if (abuseIpText) abuseIpText.disabled = state === 'running';
+    var abuseMaxAge = byId('abuseipMaxAge');
+    if (abuseMaxAge) abuseMaxAge.disabled = state === 'running';
+    var abuseKeyDefault = byId('abuseipKeyDefault');
+    if (abuseKeyDefault) abuseKeyDefault.disabled = state === 'running';
+    var abuseKeyOverride = byId('abuseipKeyOverride');
+    if (abuseKeyOverride) abuseKeyOverride.disabled = state === 'running';
 
     // Export button
     var exportBtn = byId('abuseipOpenExport');
+    var resultsExportBtn = byId('abuseipResultsOpenExport');
     var exportInfo = byId('abuseipExportInfo');
-    if (exportBtn) {
-      var hasExport = state === 'completed' && snapshot.csvExportPath;
-      exportBtn.disabled = !hasExport;
-      if (exportInfo && hasExport) {
-        exportInfo.textContent = snapshot.csvExportPath;
-      }
+    var hasExport = state === 'completed' && snapshot.csvExportPath;
+    [exportBtn, resultsExportBtn].forEach(function (btn) {
+      if (btn) { btn.disabled = !hasExport; btn.classList.toggle('primary', !!hasExport); }
+    });
+    if (exportInfo && hasExport) {
+      exportInfo.textContent = snapshot.csvExportPath;
     }
 
     // Results
     if (state === 'completed' || (state === 'failed' && results.length > 0)) {
       renderResults(results, failures);
+
+      // Auto-scroll to results
+      var abuseResultsEl = byId('abuseipResults');
+      if (abuseResultsEl && !abuseResultsEl.hidden) {
+        setTimeout(function () { abuseResultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 200);
+      }
     }
   }
 

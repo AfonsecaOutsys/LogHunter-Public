@@ -65,8 +65,11 @@ public static class AlbIpSummaryExportExcel
             table.ShowAutoFilter = true;
         }
 
-        ApplyOuterBorder(ws.RangeUsed());
-        ws.Columns().AdjustToContents();
+        var usedRange = ws.RangeUsed();
+        if (usedRange is not null)
+            usedRange.Style.Alignment.WrapText = false;
+        ApplyOuterBorder(usedRange);
+        ExcelHelper.AutoFitColumns(ws);
     }
 
     private static void WriteIpSheet(IXLWorksheet ws, AlbIpSummaryScanner.ScanResult result)
@@ -88,7 +91,7 @@ public static class AlbIpSummaryExportExcel
         WriteMetricRow(ws, row++, "Files with hits", result.SourceFiles.Count);
         WriteMetricRow(ws, row++, "First hit UTC", result.FirstHitUtc?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "-");
         WriteMetricRow(ws, row++, "Last hit UTC", result.LastHitUtc?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "-");
-        StyleMetricBlock(ws.Range(summaryStartRow, 1, row - 1, 2));
+        StyleMetricBlock(ws.Range(summaryStartRow, 1, row - 1, 4));
         row += 1;
 
         WriteStatusTable(ws, row, 1, "ELB Response totals", result.ElbResponseTotals);
@@ -100,8 +103,11 @@ public static class AlbIpSummaryExportExcel
 
         _ = WriteTopCounts(ws, row, 1, "Top 10 target endpoints", result.TopTargetEndpoints(10));
 
+        var usedRange = ws.RangeUsed();
+        if (usedRange is not null)
+            usedRange.Style.Alignment.WrapText = false;
         ws.SheetView.FreezeRows(1);
-        ws.Columns().AdjustToContents(10, 80);
+        ExcelHelper.AutoFitColumns(ws);
     }
 
     private static void WriteHitsSheet(IXLWorksheet ws, IReadOnlyList<AlbIpSummaryScanner.ScanResult> results)
@@ -155,8 +161,11 @@ public static class AlbIpSummaryExportExcel
             table.ShowAutoFilter = true;
         }
 
-        ApplyOuterBorder(ws.RangeUsed());
-        ws.Columns(1, headers.Length).AdjustToContents(10, 80);
+        var usedRange = ws.RangeUsed();
+        if (usedRange is not null)
+            usedRange.Style.Alignment.WrapText = false;
+        ApplyOuterBorder(usedRange);
+        ExcelHelper.AutoFitColumns(ws, 1, headers.Length);
     }
 
     private static void WriteStatusTable(IXLWorksheet ws, int row, int col, string title, AlbIpSummaryScanner.StatusGroupCounts counts)
@@ -261,7 +270,9 @@ public static class AlbIpSummaryExportExcel
         ws.Cell(row, 1).Value = label;
         ws.Cell(row, 1).Style.Font.Bold = true;
         ws.Cell(row, 1).Style.Fill.BackgroundColor = LabelFill;
+        ws.Range(row, 2, row, 4).Merge();
         ws.Cell(row, 2).Value = XLCellValue.FromObject(value);
+        ws.Cell(row, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
     }
 
     private static void StyleMetricBlock(IXLRange range)

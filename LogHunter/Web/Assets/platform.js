@@ -99,6 +99,10 @@
       etaText = formatEta(secondsPerStep * (totalSteps - currentStep));
     }
 
+    // Lock inputs while running
+    var suspRunBtn = byId('platformSuspiciousRun');
+    if (suspRunBtn) suspRunBtn.disabled = state === 'running';
+
     if (state === 'completed') {
       setText('platformSuspiciousSummary', 'Scan complete.');
       setText('platformSuspiciousBarMeta', '100% | ' + fmt(snap.filesScanned) + ' files scanned');
@@ -121,6 +125,14 @@
     }
 
     renderSuspiciousResults(snap);
+
+    // Auto-scroll to results on completion
+    if (state === 'completed') {
+      var suspResultsEl = byId('platformSuspiciousResults');
+      if (suspResultsEl && !suspResultsEl.hidden) {
+        setTimeout(function () { suspResultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 200);
+      }
+    }
   }
 
   function renderSuspiciousResults(snap) {
@@ -316,6 +328,10 @@
       etaText = formatEta(secondsPerStep * (totalSteps - currentStep));
     }
 
+    // Lock inputs while running
+    var authRunBtn = byId('platformAuthRun');
+    if (authRunBtn) authRunBtn.disabled = state === 'running';
+
     if (state === 'completed') {
       setText('platformAuthSummary', 'Check complete.');
       setText('platformAuthBarMeta', '100% | ' + fmt(snap.filesScanned) + ' files scanned');
@@ -338,6 +354,14 @@
     }
 
     renderAuthResults(snap);
+
+    // Auto-scroll to results on completion
+    if (state === 'completed') {
+      var authResultsEl = byId('platformAuthResults');
+      if (authResultsEl && !authResultsEl.hidden) {
+        setTimeout(function () { authResultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 200);
+      }
+    }
   }
 
   function renderAuthResults(snap) {

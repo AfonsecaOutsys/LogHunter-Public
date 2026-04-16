@@ -1002,6 +1002,9 @@
     setText('albOption2Matches', String(result?.totalMatchingIps || 0));
     setHidden(byId('albOption2OpenExport'), !exportPath);
 
+    // Lock inputs while running
+    setOption2InputsLocked(state === 'running');
+
     if (state === 'completed') {
       setText('albOption2Summary', result && result.totalMatchingIps > 0
         ? `${result.totalMatchingIps} matching IPs found`
@@ -1010,6 +1013,12 @@
       setBar('albOption2Bar', totalSteps > 0 ? totalSteps : 1, totalSteps > 0 ? totalSteps : 1);
       if (result) {
         renderOption2Result(result, exportPath);
+      }
+
+      // Auto-scroll to results
+      const option2Results = byId('albOption2Results');
+      if (option2Results && !option2Results.hidden) {
+        setTimeout(() => option2Results.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
       }
       return;
     }
@@ -1025,6 +1034,13 @@
       setText('albOption2BarMeta', `ETA ${etaText}`);
       setBar('albOption2Bar', currentStep, totalSteps);
     }
+  }
+
+  function setOption2InputsLocked(locked) {
+    ['albOption2Run', 'albOption2UseDefault', 'albOption2SelectFolder', 'albOption2SelectFiles', 'albOption2ClearSelection'].forEach(id => {
+      const el = byId(id);
+      if (el) el.disabled = locked;
+    });
   }
 
   async function pollAlbOption2Status() {
@@ -1504,16 +1520,19 @@
     const hasReport = Boolean(snap.htmlReportPath);
     const hasExport = Boolean(snap.excelPath || snap.sqlitePath);
 
-    if (openReport) {
-      openReport.disabled = !hasReport;
-      openReport.classList.toggle('primary', hasReport);
-    }
-    if (openExport) {
-      const chartOnly = ipSummaryExportMode === 'chart';
-      openExport.disabled = chartOnly || !hasExport;
-      openExport.classList.toggle('primary', !chartOnly && hasExport);
-      openExport.textContent = snap.sqlitePath && !snap.excelPath ? 'Open SQLite' : 'Open Excel';
-    }
+    const resultsOpenReport = byId('ipSummaryResultsOpenReport');
+    const resultsOpenExport = byId('ipSummaryResultsOpenExport');
+    [openReport, resultsOpenReport].forEach(btn => {
+      if (btn) { btn.disabled = !hasReport; btn.classList.toggle('primary', hasReport); }
+    });
+    const chartOnly = ipSummaryExportMode === 'chart';
+    [openExport, resultsOpenExport].forEach(btn => {
+      if (btn) {
+        btn.disabled = chartOnly || !hasExport;
+        btn.classList.toggle('primary', !chartOnly && hasExport);
+        btn.textContent = snap.sqlitePath && !snap.excelPath ? 'Open SQLite' : 'Open Excel';
+      }
+    });
 
     const exportInfo = byId('ipSummaryExportInfo');
     if (exportInfo) {
@@ -1528,6 +1547,9 @@
       }
     }
 
+    // Lock inputs while running
+    setIpSummaryInputsLocked(state === 'running');
+
     // Error
     if (snap.error) {
       const meta = byId('ipSummaryMeta');
@@ -1536,6 +1558,23 @@
 
     // Results
     renderIpSummaryResults(snap);
+
+    // Auto-scroll to results on completion
+    if (state === 'completed') {
+      const resultsEl = byId('ipSummaryResults');
+      if (resultsEl && !resultsEl.hidden) {
+        setTimeout(() => resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
+      }
+    }
+  }
+
+  function setIpSummaryInputsLocked(locked) {
+    ['ipSummaryRun', 'ipSummaryModeChart', 'ipSummaryModeExport', 'ipSummarySelectFolder', 'ipSummarySelectFiles', 'ipSummaryClearSelection'].forEach(id => {
+      const el = byId(id);
+      if (el) el.disabled = locked;
+    });
+    const ipText = byId('ipSummaryIpText');
+    if (ipText) ipText.disabled = locked;
   }
 
   function renderIpSummaryResults(snap) {
@@ -1558,7 +1597,7 @@
         { label: 'ELB 4xx while FE 2xx/3xx', value: ip.elb4xxWhileFe2xx3xx }
       ];
       const endpointRows = (ip.topEndpoints || []).map(e =>
-        `<tr><td style="font-family:monospace;word-break:break-all">${escHtml(e.endpoint)}</td><td style="text-align:right">${Number(e.hits).toLocaleString('en-US')}</td></tr>`
+        `<tr><td class="uri-cell" title="${escHtml(e.endpoint)}">${escHtml(e.endpoint)}</td><td style="text-align:right">${Number(e.hits).toLocaleString('en-US')}</td></tr>`
       ).join('') || '<tr><td colspan="2">(none)</td></tr>';
 
       if (!hasHits) {
@@ -1638,17 +1677,16 @@
 
     byId('ipSummaryRun')?.addEventListener('click', runIpSummary);
 
-    byId('ipSummaryOpenReport')?.addEventListener('click', async () => {
-      const btn = byId('ipSummaryOpenReport');
-      if (btn?.disabled) return;
+    const openIpSummaryReport = async () => {
       try { await fetchJson('/api/alb/ip-summary/open-report', { method: 'POST' }); } catch (err) { setIpSummaryError(String(err)); }
-    });
-
-    byId('ipSummaryOpenExport')?.addEventListener('click', async () => {
-      const btn = byId('ipSummaryOpenExport');
-      if (btn?.disabled) return;
+    };
+    const openIpSummaryExport = async () => {
       try { await fetchJson('/api/alb/ip-summary/open-export', { method: 'POST' }); } catch (err) { setIpSummaryError(String(err)); }
-    });
+    };
+    byId('ipSummaryOpenReport')?.addEventListener('click', openIpSummaryReport);
+    byId('ipSummaryResultsOpenReport')?.addEventListener('click', openIpSummaryReport);
+    byId('ipSummaryOpenExport')?.addEventListener('click', openIpSummaryExport);
+    byId('ipSummaryResultsOpenExport')?.addEventListener('click', openIpSummaryExport);
 
     loadIpSummaryMeta().catch(err => setIpSummaryError(String(err)));
   }
@@ -1730,16 +1768,14 @@
       setText(prefix + 'Meta', snap.inputSourceSummary || '');
       setText(prefix + 'ExportPath', exportPath ? 'Exported: ' + exportPath : '');
       setText(prefix + 'Count', String(result ? result.totalMatches || 0 : 0));
-      var openExportBtn = byId(prefix + 'OpenExport');
-      if (openExportBtn) {
-        openExportBtn.disabled = !exportPath;
-        openExportBtn.classList.toggle('primary', !!exportPath);
-      }
-      var openChartBtn = byId(prefix + 'OpenChart');
-      if (openChartBtn) {
-        openChartBtn.disabled = !chartPath;
-        openChartBtn.classList.toggle('primary', !!chartPath);
-      }
+      [prefix + 'OpenExport', prefix + 'ResultsOpenExport'].forEach(function (id) {
+        var btn = byId(id);
+        if (btn) { btn.disabled = !exportPath; btn.classList.toggle('primary', !!exportPath); }
+      });
+      [prefix + 'OpenChart', prefix + 'ResultsOpenChart'].forEach(function (id) {
+        var btn = byId(id);
+        if (btn) { btn.disabled = !chartPath; btn.classList.toggle('primary', !!chartPath); }
+      });
 
       var pct = totalSteps > 0 ? Math.round((currentStep / totalSteps) * 100) : 0;
       var bar = byId(prefix + 'Bar');
@@ -1752,6 +1788,9 @@
         etaText = formatEta(secondsPerStep * (totalSteps - currentStep));
       }
 
+      // Lock inputs while running
+      setGenericInputsLocked(state === 'running');
+
       if (state === 'completed') {
         setText(prefix + 'Summary', result ? result.completionMessage || 'Scan complete.' : 'Scan complete.');
         setText(prefix + 'BarMeta', '100% | ' + (snap.filesTotal || 0) + ' files scanned');
@@ -1762,6 +1801,12 @@
         if (chartPath && !chartAutoOpened && prefix === 'albWafBlockedChart') {
           chartAutoOpened = true;
           openChart();
+        }
+
+        // Auto-scroll to results
+        var resultsEl = byId(prefix + 'Results');
+        if (resultsEl && !resultsEl.hidden) {
+          setTimeout(function () { resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 200);
         }
       } else if (state === 'failed') {
         setText(prefix + 'Summary', 'Scan failed.');
@@ -1774,6 +1819,13 @@
         setText(prefix + 'Summary', 'Waiting for a scan to start.');
         setText(prefix + 'BarMeta', 'No scan running.');
       }
+    }
+
+    function setGenericInputsLocked(locked) {
+      [prefix + 'Run', prefix + 'UseDefault', prefix + 'SelectFolder', prefix + 'SelectFiles', prefix + 'ClearSelection'].forEach(function (id) {
+        var el = byId(id);
+        if (el) el.disabled = locked;
+      });
     }
 
     var hasCollapsibleResults = !!byId(prefix + 'ResultsToggle');
@@ -2012,6 +2064,8 @@
     byId(prefix + 'Run')?.addEventListener('click', runScan);
     byId(prefix + 'OpenExport')?.addEventListener('click', openExport);
     byId(prefix + 'OpenChart')?.addEventListener('click', openChart);
+    byId(prefix + 'ResultsOpenExport')?.addEventListener('click', openExport);
+    byId(prefix + 'ResultsOpenChart')?.addEventListener('click', openChart);
 
     loadMeta().catch(function (e) { setErr(String(e)); });
   }
@@ -2133,6 +2187,9 @@
         etaText = formatEta(secondsPerStep * (totalSteps - currentStep));
       }
 
+      // Lock inputs while running
+      setReqOverTimeInputsLocked(state === 'running');
+
       if (state === 'completed') {
         setText(prefix + 'Summary', result ? result.completionMessage || 'Scan complete.' : 'Scan complete.');
         setText(prefix + 'BarMeta', '100% | ' + (snap.filesTotal || 0) + ' files scanned');
@@ -2152,6 +2209,16 @@
         setText(prefix + 'Summary', 'Waiting for a scan to start.');
         setText(prefix + 'BarMeta', 'No scan running.');
       }
+    }
+
+    function setReqOverTimeInputsLocked(locked) {
+      [prefix + 'Run', prefix + 'UseDefault', prefix + 'SelectFolder', prefix + 'SelectFiles', prefix + 'ClearSelection',
+       prefix + 'ModeManual', prefix + 'ModeFile', prefix + 'ExtractBtn'].forEach(function (id) {
+        var el = byId(id);
+        if (el) el.disabled = locked;
+      });
+      var ipText = byId(prefix + 'IpText');
+      if (ipText) ipText.disabled = locked;
     }
 
     function renderResults(result) {

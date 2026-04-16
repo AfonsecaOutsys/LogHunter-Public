@@ -199,9 +199,10 @@ internal static class AlbTopIpsForEndpointWorkflow
         }
 
         ws.SheetView.FreezeRows(6);
-        ws.Column(1).Width = 12;
-        ws.Column(2).Width = 12;
+        ws.Column(1).Width = 15;
+        ws.Column(2).Width = 15;
         ws.Column(3).AdjustToContents(20, 80);
+        ws.Column(3).Width = Math.Min(ws.Column(3).Width + 3, 80);
 
         wb.SaveAs(outFile);
         return outFile;

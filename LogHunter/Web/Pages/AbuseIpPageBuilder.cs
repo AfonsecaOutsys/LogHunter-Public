@@ -159,6 +159,9 @@ internal static class AbuseIpPageBuilder
                 <div class="eyebrow">Results</div>
                 <h2>IP reputation summary</h2>
               </div>
+              <div class="export-row">
+                <button id="abuseipResultsOpenExport" class="button-link button-like compact" type="button" disabled>Open export</button>
+              </div>
             </div>
             <div id="abuseipSummaryCards" class="status-block"></div>
             <div id="abuseipResultTable"></div>
