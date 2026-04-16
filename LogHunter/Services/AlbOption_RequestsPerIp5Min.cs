@@ -162,30 +162,7 @@ public static partial class AlbOptions
             return;
         }
 
-        // Export CSV
         Directory.CreateDirectory(outputFolder);
-        var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var csvFile = Path.Combine(outputFolder, $"ALB_RequestsPer5Min_{stamp}.csv");
-
-        using (var w = new StreamWriter(csvFile, false, Encoding.UTF8))
-        {
-            w.Write("BucketStartUtc");
-            foreach (var ip in ips) w.Write($",{ip}");
-            w.WriteLine();
-
-            foreach (var b in allBuckets)
-            {
-                w.Write(b.ToString("yyyy-MM-dd HH:mm:ss 'UTC'"));
-                foreach (var ip in ips)
-                {
-                    bucketsByIp[ip].TryGetValue(b, out var c);
-                    w.Write($",{c}");
-                }
-                w.WriteLine();
-            }
-        }
-
-        ConsoleEx.Success($"Exported CSV: {csvFile}");
 
         // Build series for chart (shared timeline)
         var times = allBuckets.ToArray();

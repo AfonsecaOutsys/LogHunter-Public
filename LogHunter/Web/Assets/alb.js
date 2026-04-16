@@ -1195,12 +1195,8 @@
     ipSummaryInputMode = mode;
     const btnManual = byId('ipSummaryModeManual');
     const btnFile = byId('ipSummaryModeFile');
-    const btnBurst = byId('ipSummaryModeBurst');
-    const btnPlatform = byId('ipSummaryModePlatform');
     if (btnManual) btnManual.classList.toggle('active', mode === 'manual');
     if (btnFile) btnFile.classList.toggle('active', mode === 'file');
-    if (btnBurst) btnBurst.classList.toggle('active', mode === 'burst');
-    if (btnPlatform) btnPlatform.classList.toggle('active', mode === 'platform');
 
     setHidden(byId('ipSummaryManualSection'), mode !== 'manual');
     setHidden(byId('ipSummaryFileSection'), mode !== 'file');
@@ -1669,6 +1665,7 @@
     var serverSelection = null;
     var polling = null;
     var jobId = '';
+    var chartAutoOpened = false;
 
     function setErr(msg) {
       var node = byId(prefix + 'Error');
@@ -1733,8 +1730,16 @@
       setText(prefix + 'Meta', snap.inputSourceSummary || '');
       setText(prefix + 'ExportPath', exportPath ? 'Exported: ' + exportPath : '');
       setText(prefix + 'Count', String(result ? result.totalMatches || 0 : 0));
-      setHidden(byId(prefix + 'OpenExport'), !exportPath);
-      setHidden(byId(prefix + 'OpenChart'), !chartPath);
+      var openExportBtn = byId(prefix + 'OpenExport');
+      if (openExportBtn) {
+        openExportBtn.disabled = !exportPath;
+        openExportBtn.classList.toggle('primary', !!exportPath);
+      }
+      var openChartBtn = byId(prefix + 'OpenChart');
+      if (openChartBtn) {
+        openChartBtn.disabled = !chartPath;
+        openChartBtn.classList.toggle('primary', !!chartPath);
+      }
 
       var pct = totalSteps > 0 ? Math.round((currentStep / totalSteps) * 100) : 0;
       var bar = byId(prefix + 'Bar');
@@ -1752,16 +1757,40 @@
         setText(prefix + 'BarMeta', '100% | ' + (snap.filesTotal || 0) + ' files scanned');
         if (bar) bar.style.width = '100%';
         renderResults(result);
+
+        // Auto-open chart on completion for scans that produce a chart as their primary output
+        if (chartPath && !chartAutoOpened && prefix === 'albWafBlockedChart') {
+          chartAutoOpened = true;
+          openChart();
+        }
       } else if (state === 'failed') {
         setText(prefix + 'Summary', 'Scan failed.');
         setText(prefix + 'BarMeta', snap.error || '');
       } else if (state === 'running') {
+        chartAutoOpened = false;
         setText(prefix + 'Summary', pct + '% — ' + (snap.filesProcessed || 0) + ' / ' + (snap.filesTotal || 0) + ' files');
         setText(prefix + 'BarMeta', pct + '% | ETA ' + etaText);
       } else {
         setText(prefix + 'Summary', 'Waiting for a scan to start.');
         setText(prefix + 'BarMeta', 'No scan running.');
       }
+    }
+
+    var hasCollapsibleResults = !!byId(prefix + 'ResultsToggle');
+    if (hasCollapsibleResults) {
+      (function () {
+        var toggleBtn = byId(prefix + 'ResultsToggle');
+        var collapse = byId(prefix + 'ResultsCollapse');
+        var toggleText = byId(prefix + 'ResultsToggleText');
+        var toggleIcon = byId(prefix + 'ResultsToggleIcon');
+        if (!toggleBtn || !collapse) return;
+        toggleBtn.addEventListener('click', function () {
+          var isHidden = collapse.hidden;
+          collapse.hidden = !isHidden;
+          if (toggleText) toggleText.textContent = isHidden ? 'Hide detailed results' : 'Show detailed results';
+          if (toggleIcon) toggleIcon.textContent = isHidden ? '\u25BC' : '\u25B6';
+        });
+      })();
     }
 
     function renderResults(result) {
@@ -1775,6 +1804,16 @@
       }
 
       setHidden(section, false);
+      // Reset collapsed state if collapsible
+      if (hasCollapsibleResults) {
+        var collapse = byId(prefix + 'ResultsCollapse');
+        var toggleText = byId(prefix + 'ResultsToggleText');
+        var toggleIcon = byId(prefix + 'ResultsToggleIcon');
+        if (collapse) collapse.hidden = true;
+        if (toggleText) toggleText.textContent = 'Show detailed results';
+        if (toggleIcon) toggleIcon.textContent = '\u25B6';
+      }
+
       var cols = result.columns || [];
       var rows = result.rows || [];
 
@@ -1995,6 +2034,7 @@
     var inputMode = 'manual';
     var extractedIps = [];
     var selectedExtractedIps = new Set();
+    var chartAutoOpened = false;
 
     function setErr(msg) {
       var node = byId(prefix + 'Error');
@@ -2067,7 +2107,6 @@
       var createdUtc = snap.createdUtc ? new Date(snap.createdUtc) : null;
       var now = new Date();
       var result = snap.result;
-      var exportPath = snap.exportPath || '';
       var chartPath = result && result.chartHtmlPath ? result.chartHtmlPath : '';
 
       jobId = snap.jobId || jobId;
@@ -2076,10 +2115,12 @@
       setText(prefix + 'StageBadge', phase);
       setText(prefix + 'Message', snap.error ? (snap.message + ' ' + snap.error) : (snap.message || ''));
       setText(prefix + 'Meta', snap.inputSourceSummary || '');
-      setText(prefix + 'ExportPath', exportPath ? 'Exported: ' + exportPath : '');
       setText(prefix + 'Count', String(result ? result.totalMatches || 0 : 0));
-      setHidden(byId(prefix + 'OpenExport'), !exportPath);
-      setHidden(byId(prefix + 'OpenChart'), !chartPath);
+      var openChartBtn2 = byId(prefix + 'OpenChart');
+      if (openChartBtn2) {
+        openChartBtn2.disabled = !chartPath;
+        openChartBtn2.classList.toggle('primary', !!chartPath);
+      }
 
       var pct = totalSteps > 0 ? Math.round((currentStep / totalSteps) * 100) : 0;
       var bar = byId(prefix + 'Bar');
@@ -2096,7 +2137,11 @@
         setText(prefix + 'Summary', result ? result.completionMessage || 'Scan complete.' : 'Scan complete.');
         setText(prefix + 'BarMeta', '100% | ' + (snap.filesTotal || 0) + ' files scanned');
         if (bar) bar.style.width = '100%';
-        renderResults(result);
+        // Suppress bucket table — chart is the primary output
+        if (chartPath && !chartAutoOpened) {
+          chartAutoOpened = true;
+          openChart();
+        }
       } else if (state === 'failed') {
         setText(prefix + 'Summary', 'Scan failed.');
         setText(prefix + 'BarMeta', snap.error || '');
@@ -2296,6 +2341,7 @@
 
     async function runScan() {
       setErr('');
+      chartAutoOpened = false;
       var ips = getIps();
       if (ips.length === 0) {
         setErr('Enter at least one IP address.');
@@ -2334,11 +2380,6 @@
       }
     }
 
-    async function openExport() {
-      setErr('');
-      try { await fetchJson('/api/' + apiBase + '/open-export', { method: 'POST' }); } catch (e) { setErr(String(e)); }
-    }
-
     async function openChart() {
       setErr('');
       try { await fetchJson('/api/' + apiBase + '/open-chart', { method: 'POST' }); } catch (e) { setErr(String(e)); }
@@ -2355,7 +2396,6 @@
     byId(prefix + 'SelectFiles')?.addEventListener('click', browseFiles);
     byId(prefix + 'ClearSelection')?.addEventListener('click', clearSel);
     byId(prefix + 'Run')?.addEventListener('click', runScan);
-    byId(prefix + 'OpenExport')?.addEventListener('click', openExport);
     byId(prefix + 'OpenChart')?.addEventListener('click', openChart);
 
     loadMetaData().catch(function (e) { setErr(String(e)); });
