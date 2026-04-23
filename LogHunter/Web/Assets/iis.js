@@ -159,6 +159,9 @@
 
     const isExporting = phase === 'building-excel' || phase === 'building-sqlite' || phase === 'building-report';
 
+    // Lock inputs while running
+    setIisIpSummaryInputsLocked(state === 'running' || isExporting);
+
     if (state === 'completed') {
       setText('iisIpSummarySummary', 'Scan complete.');
       setText('iisIpSummaryBarMeta', `100% | ${snap.filesTotal || 0} files scanned`);
@@ -200,13 +203,19 @@
     const openExport = byId('iisIpSummaryOpenExport');
     const hasReport = Boolean(snap.htmlReportPath);
     const hasExport = Boolean(snap.excelPath || snap.sqlitePath);
-    if (openReport) { openReport.disabled = !hasReport; openReport.classList.toggle('primary', hasReport); }
-    if (openExport) {
-      const chartOnly = iisIpSummaryExportMode === 'chart';
-      openExport.disabled = chartOnly || !hasExport;
-      openExport.classList.toggle('primary', !chartOnly && hasExport);
-      openExport.textContent = snap.sqlitePath && !snap.excelPath ? 'Open SQLite' : 'Open Excel';
-    }
+    const resultsOpenReport = byId('iisIpSummaryResultsOpenReport');
+    const resultsOpenExport = byId('iisIpSummaryResultsOpenExport');
+    [openReport, resultsOpenReport].forEach(btn => {
+      if (btn) { btn.disabled = !hasReport; btn.classList.toggle('primary', hasReport); }
+    });
+    const chartOnly = iisIpSummaryExportMode === 'chart';
+    [openExport, resultsOpenExport].forEach(btn => {
+      if (btn) {
+        btn.disabled = chartOnly || !hasExport;
+        btn.classList.toggle('primary', !chartOnly && hasExport);
+        btn.textContent = snap.sqlitePath && !snap.excelPath ? 'Open SQLite' : 'Open Excel';
+      }
+    });
 
     const exportInfo = byId('iisIpSummaryExportInfo');
     if (exportInfo) {
@@ -217,6 +226,23 @@
     }
 
     renderIisIpSummaryResults(snap);
+
+    // Auto-scroll to results on completion
+    if (state === 'completed') {
+      const resultsEl = byId('iisIpSummaryResults');
+      if (resultsEl && !resultsEl.hidden) {
+        setTimeout(() => resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
+      }
+    }
+  }
+
+  function setIisIpSummaryInputsLocked(locked) {
+    ['iisIpSummaryRun', 'iisIpSummaryModeChart', 'iisIpSummaryModeExport'].forEach(id => {
+      const el = byId(id);
+      if (el) el.disabled = locked;
+    });
+    const ipText = byId('iisIpSummaryIpText');
+    if (ipText) ipText.disabled = locked;
   }
 
   function renderIisIpSummaryResults(snap) {
@@ -236,7 +262,7 @@
       }
 
       const topUriRows = (ip.topUris || []).map(u =>
-        `<tr><td style="font-family:monospace;word-break:break-all">${escHtml(u.label)}</td><td style="text-align:right">${fmt(u.hits)}</td></tr>`
+        `<tr><td class="uri-cell" title="${escHtml(u.label)}">${escHtml(u.label)}</td><td style="text-align:right">${fmt(u.hits)}</td></tr>`
       ).join('') || '<tr><td colspan="2">(none)</td></tr>';
 
       const topMethodRows = (ip.topMethods || []).map(m =>
@@ -301,17 +327,18 @@
     byId('iisIpSummaryModeExport')?.addEventListener('click', () => setIisIpSummaryExportMode('export'));
     byId('iisIpSummaryRun')?.addEventListener('click', runIisIpSummary);
 
-    byId('iisIpSummaryOpenReport')?.addEventListener('click', async () => {
-      if (byId('iisIpSummaryOpenReport')?.disabled) return;
+    const openIisReport = async () => {
       try { await fetchJson('/api/iis/ip-summary/open-report', { method: 'POST' }); }
       catch (err) { setIisIpSummaryError(String(err)); }
-    });
-
-    byId('iisIpSummaryOpenExport')?.addEventListener('click', async () => {
-      if (byId('iisIpSummaryOpenExport')?.disabled) return;
+    };
+    const openIisExport = async () => {
       try { await fetchJson('/api/iis/ip-summary/open-export', { method: 'POST' }); }
       catch (err) { setIisIpSummaryError(String(err)); }
-    });
+    };
+    byId('iisIpSummaryOpenReport')?.addEventListener('click', openIisReport);
+    byId('iisIpSummaryResultsOpenReport')?.addEventListener('click', openIisReport);
+    byId('iisIpSummaryOpenExport')?.addEventListener('click', openIisExport);
+    byId('iisIpSummaryResultsOpenExport')?.addEventListener('click', openIisExport);
 
     loadIisIpSummaryMeta().catch(err => setIisIpSummaryError(String(err)));
   }
@@ -397,6 +424,9 @@
     setText('iisStatusPivotMessage', snap.error ? `${snap.message} ${snap.error}` : (snap.message || ''));
     setText('iisStatusPivotStageBadge', phase);
 
+    // Lock inputs while running
+    setIisStatusPivotInputsLocked(state === 'running');
+
     if (state === 'completed') {
       setText('iisStatusPivotSummary', `${snap.uniqueErrorIps || 0} error IPs found. ${fmt(snap.exportedLines || 0)} lines exported.`);
       setText('iisStatusPivotBarMeta', `100% | ${snap.filesTotal || 0} files`);
@@ -414,15 +444,37 @@
     }
 
     // Export button
-    const openExport = byId('iisStatusPivotOpenExport');
     const hasExport = Boolean(snap.exportPath);
-    if (openExport) { openExport.disabled = !hasExport; openExport.classList.toggle('primary', hasExport); }
+    ['iisStatusPivotOpenExport', 'iisStatusPivotResultsOpenExport'].forEach(id => {
+      const btn = byId(id);
+      if (btn) { btn.disabled = !hasExport; btn.classList.toggle('primary', hasExport); }
+    });
     const exportInfo = byId('iisStatusPivotExportInfo');
     if (exportInfo) {
       exportInfo.textContent = hasExport ? `Exported: ${snap.exportPath}` : '';
     }
 
     renderIisStatusPivotResults(snap);
+
+    // Auto-scroll to results on completion
+    if (state === 'completed') {
+      const resultsEl = byId('iisStatusPivotResults');
+      if (resultsEl && !resultsEl.hidden) {
+        setTimeout(() => resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
+      }
+    }
+  }
+
+  function setIisStatusPivotInputsLocked(locked) {
+    ['iisStatusPivotRun'].forEach(id => {
+      const el = byId(id);
+      if (el) el.disabled = locked;
+    });
+    document.querySelectorAll('.iis-pivot-filter-btn').forEach(btn => { btn.disabled = locked; });
+    const codesInput = byId('iisStatusPivotCodesInput');
+    if (codesInput) codesInput.disabled = locked;
+    const appScope = byId('iisStatusPivotAppScope');
+    if (appScope) appScope.disabled = locked;
   }
 
   function renderIisStatusPivotResults(snap) {
@@ -491,11 +543,12 @@
 
     byId('iisStatusPivotRun')?.addEventListener('click', runIisStatusPivot);
 
-    byId('iisStatusPivotOpenExport')?.addEventListener('click', async () => {
-      if (byId('iisStatusPivotOpenExport')?.disabled) return;
+    const openPivotExport = async () => {
       try { await fetchJson('/api/iis/status-pivot/open-export', { method: 'POST' }); }
       catch (err) { setIisStatusPivotError(String(err)); }
-    });
+    };
+    byId('iisStatusPivotOpenExport')?.addEventListener('click', openPivotExport);
+    byId('iisStatusPivotResultsOpenExport')?.addEventListener('click', openPivotExport);
 
     loadIisStatusPivotMeta().catch(err => setIisStatusPivotError(String(err)));
   }
@@ -566,6 +619,9 @@
     setText('iisBurstMessage', snap.error ? `${snap.message} ${snap.error}` : (snap.message || ''));
     setText('iisBurstStageBadge', phase);
 
+    // Lock inputs while running
+    setIisBurstInputsLocked(state === 'running');
+
     if (state === 'completed') {
       setText('iisBurstSummary', `${snap.candidateCount || 0} burst candidates found.`);
       setText('iisBurstBarMeta', `100% | ${snap.filesTotal || 0} files`);
@@ -583,6 +639,21 @@
     }
 
     renderIisBurstResults(snap);
+
+    // Auto-scroll to results on completion
+    if (state === 'completed') {
+      const resultsEl = byId('iisBurstResults');
+      if (resultsEl && !resultsEl.hidden) {
+        setTimeout(() => resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
+      }
+    }
+  }
+
+  function setIisBurstInputsLocked(locked) {
+    const el = byId('iisBurstRun');
+    if (el) el.disabled = locked;
+    const bucket = byId('iisBurstBucket');
+    if (bucket) bucket.disabled = locked;
   }
 
   function renderIisBurstResults(snap) {
@@ -667,7 +738,7 @@
 
   async function loadIisBytesIntelMeta() {
     const payload = await fetchJson('/api/iis/bytes-intel/meta');
-    if (payload.currentJob) {
+    if (payload.currentJob && payload.currentJob.mode === iisBytesIntelMode) {
       renderIisBytesIntelSnapshot(payload.currentJob);
       if (payload.currentJob.state === 'running') startIisBytesIntelPolling();
     }
@@ -698,6 +769,7 @@
   async function pollIisBytesIntel() {
     try {
       const snap = await fetchJson('/api/iis/bytes-intel/job');
+      if (snap.mode !== iisBytesIntelMode) { stopIisBytesIntelPolling(); return; }
       renderIisBytesIntelSnapshot(snap);
       if (snap.state !== 'running') stopIisBytesIntelPolling();
     } catch { stopIisBytesIntelPolling(); }
@@ -718,6 +790,9 @@
     setText(`${prefix}Message`, snap.error ? `${snap.message} ${snap.error}` : (snap.message || ''));
     setText(`${prefix}StageBadge`, phase);
 
+    // Lock inputs while running
+    setIisBytesIntelInputsLocked(state === 'running');
+
     if (state === 'completed') {
       const ipCount = snap.topIps ? snap.topIps.length : 0;
       setText(`${prefix}Summary`, `${ipCount} IPs found.`);
@@ -736,13 +811,29 @@
     }
 
     // Export button
-    const openExport = byId(`${prefix}OpenExport`);
-    const hasExport = Boolean(snap.exportPath);
-    if (openExport) { openExport.disabled = !hasExport; openExport.classList.toggle('primary', hasExport); }
+    const hasExport2 = Boolean(snap.exportPath);
+    [`${prefix}OpenExport`, `${prefix}ResultsOpenExport`].forEach(id => {
+      const btn = byId(id);
+      if (btn) { btn.disabled = !hasExport2; btn.classList.toggle('primary', hasExport2); }
+    });
     const exportInfo = byId(`${prefix}ExportInfo`);
-    if (exportInfo) exportInfo.textContent = hasExport ? `Exported: ${snap.exportPath}` : '';
+    if (exportInfo) exportInfo.textContent = hasExport2 ? `Exported: ${snap.exportPath}` : '';
 
     renderIisBytesIntelResults(snap, prefix);
+
+    // Auto-scroll to results on completion
+    if (state === 'completed') {
+      const resultsEl = byId(`${prefix}Results`);
+      if (resultsEl && !resultsEl.hidden) {
+        setTimeout(() => resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
+      }
+    }
+  }
+
+  function setIisBytesIntelInputsLocked(locked) {
+    const prefix = getBytesIntelPrefix();
+    const el = byId(`${prefix}Run`);
+    if (el) el.disabled = locked;
   }
 
   function renderIisBytesIntelResults(snap, prefix) {
@@ -792,11 +883,12 @@
 
     byId(`${prefix}Run`)?.addEventListener('click', runIisBytesIntel);
 
-    byId(`${prefix}OpenExport`)?.addEventListener('click', async () => {
-      if (byId(`${prefix}OpenExport`)?.disabled) return;
+    const openBytesExport = async () => {
       try { await fetchJson('/api/iis/bytes-intel/open-export', { method: 'POST' }); }
       catch (err) { setIisBytesIntelError(String(err)); }
-    });
+    };
+    byId(`${prefix}OpenExport`)?.addEventListener('click', openBytesExport);
+    byId(`${prefix}ResultsOpenExport`)?.addEventListener('click', openBytesExport);
 
     loadIisBytesIntelMeta().catch(err => setIisBytesIntelError(String(err)));
   }

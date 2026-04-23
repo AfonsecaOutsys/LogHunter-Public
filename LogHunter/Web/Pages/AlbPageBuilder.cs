@@ -441,6 +441,9 @@ internal static class AlbPageBuilder
                 <div class="eyebrow">Results</div>
                 <h2>Top matching IPs</h2>
               </div>
+              <div class="export-row">
+                <button id="albOption2ResultsOpenExport" class="button-link primary button-like compact" type="button" hidden>Open Excel</button>
+              </div>
             </div>
             <div id="albOption2TopIps" class="result-summary-body"></div>
           </section>
@@ -575,6 +578,10 @@ internal static class AlbPageBuilder
                 <div class="eyebrow">Results</div>
                 <h2>Per-IP summary</h2>
               </div>
+              <div class="export-row">
+                <button id="ipSummaryResultsOpenReport" class="button-link button-like compact" type="button" disabled>Open report</button>
+                <button id="ipSummaryResultsOpenExport" class="button-link button-like compact" type="button" disabled>Open Excel</button>
+              </div>
             </div>
             <div id="ipSummaryPerIp" class="stack"></div>
           </section>
@@ -589,10 +596,17 @@ internal static class AlbPageBuilder
             ? $"\n              <button id=\"{Html(prefix)}OpenChart\" class=\"button-link button-like compact\" type=\"button\" disabled>Open chart</button>"
             : string.Empty;
 
+        var resultsChartButton = showChart
+            ? $"\n                <button id=\"{Html(prefix)}ResultsOpenChart\" class=\"button-link button-like compact\" type=\"button\" disabled>Open chart</button>"
+            : string.Empty;
+
         var resultsSection = collapseResults
             ? $$"""
         <section id="{{Html(prefix)}}Results" class="stack" hidden>
           <section class="panel">
+            <div class="export-row">
+              <button id="{{Html(prefix)}}ResultsOpenExport" class="button-link button-like compact" type="button" disabled>Open export</button>{{resultsChartButton}}
+            </div>
             <button id="{{Html(prefix)}}ResultsToggle" class="results-toggle-btn" type="button">
               <span id="{{Html(prefix)}}ResultsToggleIcon" class="results-toggle-icon">&#9654;</span>
               <span id="{{Html(prefix)}}ResultsToggleText">Show detailed results</span>
@@ -616,6 +630,9 @@ internal static class AlbPageBuilder
               <div>
                 <div class="eyebrow">Results</div>
                 <h2 id="{{Html(prefix)}}ResultsHeading">Scan results</h2>
+              </div>
+              <div class="export-row">
+                <button id="{{Html(prefix)}}ResultsOpenExport" class="button-link button-like compact" type="button" disabled>Open export</button>{{resultsChartButton}}
               </div>
             </div>
             <div id="{{Html(prefix)}}ResultsBody" class="result-summary-body"></div>

@@ -329,6 +329,13 @@ internal sealed class IisIpSummaryJobManager
                 }
             }
 
+            Update(jobId, snapshot => snapshot with
+            {
+                Phase = "building-report",
+                Message = "Building chart report...",
+                UpdatedUtc = DateTime.UtcNow
+            });
+
             var orderedResults = resultsByIp.Values
                 .OrderBy(r => r.RequestedIp, StringComparer.OrdinalIgnoreCase)
                 .ToList();

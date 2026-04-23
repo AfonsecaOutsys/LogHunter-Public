@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using ClosedXML.Excel;
 using LogHunter.Services;
 using LogHunter.Utils;
 
@@ -102,7 +103,7 @@ internal sealed class IisBytesIntelJobManager
         var path = snapshot.ExportPath;
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
-            message = "The exported CSV file is not available.";
+            message = "The exported Excel file is not available.";
             return false;
         }
 
@@ -226,12 +227,12 @@ internal sealed class IisBytesIntelJobManager
                 });
             }
 
-            // Export CSV
+            // Export Excel
             var outDir = AppFolders.Output;
             Directory.CreateDirectory(outDir);
             var stamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-            var csvPath = Path.Combine(outDir, $"iis_top_bandwidth_ips_{stamp}.csv");
-            WriteBandwidthCsv(csvPath, top, perIpUris);
+            var xlsxPath = Path.Combine(outDir, $"iis_top_bandwidth_ips_{stamp}.xlsx");
+            WriteBandwidthExcel(xlsxPath, top, perIpUris);
 
             var topIpResults = top.Select((a, idx) =>
             {
@@ -262,7 +263,7 @@ internal sealed class IisBytesIntelJobManager
                 UpdatedUtc = DateTime.UtcNow,
                 CurrentStep = files.Count * 2,
                 FilesProcessed = files.Count,
-                ExportPath = csvPath,
+                ExportPath = xlsxPath,
                 TopIps = topIpResults
             });
         }
@@ -392,8 +393,8 @@ internal sealed class IisBytesIntelJobManager
             var outDir = AppFolders.Output;
             Directory.CreateDirectory(outDir);
             var stamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-            var csvPath = Path.Combine(outDir, $"iis_uploads_payload_ips_{stamp}.csv");
-            WriteUploadsCsv(csvPath, top, perIpEndpoints);
+            var xlsxPath = Path.Combine(outDir, $"iis_uploads_payload_ips_{stamp}.xlsx");
+            WriteUploadsExcel(xlsxPath, top, perIpEndpoints);
 
             var topIpResults = top.Select((a, idx) =>
             {
@@ -424,7 +425,7 @@ internal sealed class IisBytesIntelJobManager
                 UpdatedUtc = DateTime.UtcNow,
                 CurrentStep = files.Count * 2,
                 FilesProcessed = files.Count,
-                ExportPath = csvPath,
+                ExportPath = xlsxPath,
                 TopIps = topIpResults
             });
         }
@@ -518,65 +519,259 @@ internal sealed class IisBytesIntelJobManager
         return $"{b:0.##} {suf[i]}";
     }
 
-    private static string CsvEsc(string? s)
+    // ---- Excel styling (matches project patterns) ----
+
+    private static readonly XLColor HeaderFill = XLColor.FromHtml("#17324D");
+
+    private static void StyleHeaderRow(IXLRange range)
     {
-        if (string.IsNullOrEmpty(s)) return "";
-        if (s.IndexOfAny(new[] { ',', '"', '\n', '\r' }) < 0) return s;
-        return "\"" + s.Replace("\"", "\"\"") + "\"";
+        range.Style.Font.Bold = true;
+        range.Style.Fill.BackgroundColor = HeaderFill;
+        range.Style.Font.FontColor = XLColor.White;
+        range.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
     }
 
-    private static void WriteBandwidthCsv(string path, List<IpBandwidthAgg> top, Dictionary<string, Dictionary<string, UriAgg>> perIpUris)
+    private static bool LooksSensitiveOutSystems(string uriStem)
+    {
+        if (uriStem.StartsWith("/ServiceCenter", StringComparison.OrdinalIgnoreCase)) return true;
+        if (uriStem.StartsWith("/LifeTime", StringComparison.OrdinalIgnoreCase)) return true;
+        if (uriStem.Contains("PlatformServices", StringComparison.OrdinalIgnoreCase)) return true;
+        if (uriStem.Contains("/moduleservices", StringComparison.OrdinalIgnoreCase)) return true;
+        if (uriStem.Contains("/rest/", StringComparison.OrdinalIgnoreCase)) return true;
+        if (uriStem.Contains("/soap/", StringComparison.OrdinalIgnoreCase)) return true;
+        if (uriStem.Contains(".asmx", StringComparison.OrdinalIgnoreCase)) return true;
+        if (uriStem.Contains(".aspx", StringComparison.OrdinalIgnoreCase)) return true;
+        if (uriStem.StartsWith("/server.", StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
+    private static string FormatRatio(long scBytes, long csBytes)
+    {
+        if (scBytes <= 0 && csBytes <= 0) return "0";
+        if (csBytes <= 0) return "inf";
+        var r = (double)scBytes / csBytes;
+        if (r >= 1000) return r.ToString("0", CultureInfo.InvariantCulture);
+        if (r >= 100) return r.ToString("0.0", CultureInfo.InvariantCulture);
+        if (r >= 10) return r.ToString("0.00", CultureInfo.InvariantCulture);
+        return r.ToString("0.000", CultureInfo.InvariantCulture);
+    }
+
+    // ---- Excel export writers ----
+
+    private static void WriteBandwidthExcel(string path, List<IpBandwidthAgg> top, Dictionary<string, Dictionary<string, UriAgg>> perIpUris)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        using var fs = File.Create(path);
-        using var sw = new StreamWriter(fs, new UTF8Encoding(false));
-        sw.WriteLine("Rank,IP,Hits,TotalScBytes,TotalCsBytes,MaxScBytes,2xx,3xx,4xx,5xx,TopUri,TopUriScBytes");
+        using var wb = new XLWorkbook();
+
+        // Sheet 1: IPs Summary
+        var wsIps = wb.Worksheets.Add("IPs Summary");
+        var ipHeaders = new[] { "Rank", "IP", "Hits", "TotalScBytes", "TotalCsBytes", "ScOverCs", "MaxScBytes", "2xx", "3xx", "4xx", "5xx", "TopUri", "TopUriScBytes", "TopUriHits", "TopUriSensitive" };
+        for (int c = 0; c < ipHeaders.Length; c++)
+            wsIps.Cell(1, c + 1).Value = ipHeaders[c];
+        StyleHeaderRow(wsIps.Range(1, 1, 1, ipHeaders.Length));
+        wsIps.SheetView.FreezeRows(1);
+
         for (int i = 0; i < top.Count; i++)
         {
             var a = top[i];
-            var topUri = "";
+            int row = i + 2;
+
+            string topUri = "";
             long topBytes = 0;
+            long topHits = 0;
+            bool topSensitive = false;
             if (perIpUris.TryGetValue(a.Ip, out var m) && m.Count > 0)
             {
                 var best = m.OrderByDescending(kv => kv.Value.Bytes).First();
                 topUri = best.Key;
                 topBytes = best.Value.Bytes;
+                topHits = best.Value.Hits;
+                topSensitive = LooksSensitiveOutSystems(topUri);
             }
-            sw.WriteLine(string.Join(",",
-                (i + 1).ToString(CultureInfo.InvariantCulture), CsvEsc(a.Ip),
-                a.Hits.ToString(CultureInfo.InvariantCulture), a.TotalScBytes.ToString(CultureInfo.InvariantCulture),
-                a.TotalCsBytes.ToString(CultureInfo.InvariantCulture), a.MaxScBytes.ToString(CultureInfo.InvariantCulture),
-                a.C2xx.ToString(CultureInfo.InvariantCulture), a.C3xx.ToString(CultureInfo.InvariantCulture),
-                a.C4xx.ToString(CultureInfo.InvariantCulture), a.C5xx.ToString(CultureInfo.InvariantCulture),
-                CsvEsc(topUri), topBytes.ToString(CultureInfo.InvariantCulture)));
+
+            wsIps.Cell(row, 1).Value = i + 1;
+            wsIps.Cell(row, 2).Value = a.Ip;
+            wsIps.Cell(row, 3).Value = a.Hits;
+            wsIps.Cell(row, 4).Value = a.TotalScBytes;
+            wsIps.Cell(row, 5).Value = a.TotalCsBytes;
+            wsIps.Cell(row, 6).Value = FormatRatio(a.TotalScBytes, a.TotalCsBytes);
+            wsIps.Cell(row, 7).Value = a.MaxScBytes;
+            wsIps.Cell(row, 8).Value = a.C2xx;
+            wsIps.Cell(row, 9).Value = a.C3xx;
+            wsIps.Cell(row, 10).Value = a.C4xx;
+            wsIps.Cell(row, 11).Value = a.C5xx;
+            wsIps.Cell(row, 12).Value = topUri;
+            wsIps.Cell(row, 13).Value = topBytes;
+            wsIps.Cell(row, 14).Value = topHits;
+            wsIps.Cell(row, 15).Value = topSensitive ? "true" : "false";
         }
+
+        if (top.Count > 0)
+        {
+            var table = wsIps.Range(1, 1, top.Count + 1, ipHeaders.Length).CreateTable("BandwidthIPs");
+            table.Theme = XLTableTheme.TableStyleMedium2;
+            table.ShowAutoFilter = true;
+        }
+        for (int c = 3; c <= 5; c++) wsIps.Column(c).Style.NumberFormat.Format = "#,##0";
+        wsIps.Column(7).Style.NumberFormat.Format = "#,##0";
+        for (int c = 8; c <= 11; c++) wsIps.Column(c).Style.NumberFormat.Format = "#,##0";
+        wsIps.Column(13).Style.NumberFormat.Format = "#,##0";
+        wsIps.Column(14).Style.NumberFormat.Format = "#,##0";
+        ExcelHelper.AutoFitColumns(wsIps, 1, ipHeaders.Length);
+
+        // Sheet 2: URIs Detail
+        var wsUris = wb.Worksheets.Add("URIs Detail");
+        var uriHeaders = new[] { "IP", "UriRank", "URI", "Hits", "TotalScBytes", "Sensitive" };
+        for (int c = 0; c < uriHeaders.Length; c++)
+            wsUris.Cell(1, c + 1).Value = uriHeaders[c];
+        StyleHeaderRow(wsUris.Range(1, 1, 1, uriHeaders.Length));
+        wsUris.SheetView.FreezeRows(1);
+
+        int uriRow = 2;
+        foreach (var a in top)
+        {
+            if (!perIpUris.TryGetValue(a.Ip, out var map) || map.Count == 0)
+                continue;
+
+            var ordered = map.OrderByDescending(kv => kv.Value.Bytes)
+                .ThenByDescending(kv => kv.Value.Hits)
+                .ThenBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+                .Take(TopUrisPerIp)
+                .ToList();
+
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                var uri = ordered[i].Key;
+                var agg = ordered[i].Value;
+                wsUris.Cell(uriRow, 1).Value = a.Ip;
+                wsUris.Cell(uriRow, 2).Value = i + 1;
+                wsUris.Cell(uriRow, 3).Value = uri;
+                wsUris.Cell(uriRow, 4).Value = agg.Hits;
+                wsUris.Cell(uriRow, 5).Value = agg.Bytes;
+                wsUris.Cell(uriRow, 6).Value = LooksSensitiveOutSystems(uri) ? "true" : "false";
+                uriRow++;
+            }
+        }
+
+        if (uriRow > 2)
+        {
+            var table = wsUris.Range(1, 1, uriRow - 1, uriHeaders.Length).CreateTable("BandwidthURIs");
+            table.Theme = XLTableTheme.TableStyleMedium9;
+            table.ShowAutoFilter = true;
+        }
+        wsUris.Column(4).Style.NumberFormat.Format = "#,##0";
+        wsUris.Column(5).Style.NumberFormat.Format = "#,##0";
+        ExcelHelper.AutoFitColumns(wsUris, 1, uriHeaders.Length);
+
+        wb.SaveAs(path);
     }
 
-    private static void WriteUploadsCsv(string path, List<UploadAgg> top, Dictionary<string, Dictionary<string, EndpointAgg>> perIpEndpoints)
+    private static void WriteUploadsExcel(string path, List<UploadAgg> top, Dictionary<string, Dictionary<string, EndpointAgg>> perIpEndpoints)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        using var fs = File.Create(path);
-        using var sw = new StreamWriter(fs, new UTF8Encoding(false));
-        sw.WriteLine("Rank,IP,PostPutCount,MaxCsBytes,TotalCsBytes,TotalScBytes,2xx,3xx,4xx,5xx,TopEndpoint,TopEndpointCsBytes");
+        using var wb = new XLWorkbook();
+
+        // Sheet 1: IPs Summary
+        var wsIps = wb.Worksheets.Add("IPs Summary");
+        var ipHeaders = new[] { "Rank", "IP", "PostPutCount", "MaxCsBytes", "TotalCsBytes", "TotalScBytes", "2xx", "3xx", "4xx", "5xx", "TopEndpoint", "TopEndpointCsBytes", "TopEndpointHits", "TopEndpointSensitive" };
+        for (int c = 0; c < ipHeaders.Length; c++)
+            wsIps.Cell(1, c + 1).Value = ipHeaders[c];
+        StyleHeaderRow(wsIps.Range(1, 1, 1, ipHeaders.Length));
+        wsIps.SheetView.FreezeRows(1);
+
         for (int i = 0; i < top.Count; i++)
         {
             var a = top[i];
-            var topEp = "";
+            int row = i + 2;
+
+            string topEp = "";
             long topBytes = 0;
+            long topHits = 0;
+            bool topSensitive = false;
             if (perIpEndpoints.TryGetValue(a.Ip, out var m) && m.Count > 0)
             {
                 var best = m.OrderByDescending(kv => kv.Value.CsBytes).First();
                 topEp = best.Key;
                 topBytes = best.Value.CsBytes;
+                topHits = best.Value.Hits;
+                topSensitive = LooksSensitiveOutSystems(topEp);
             }
-            sw.WriteLine(string.Join(",",
-                (i + 1).ToString(CultureInfo.InvariantCulture), CsvEsc(a.Ip),
-                a.PostPutCount.ToString(CultureInfo.InvariantCulture), a.MaxCsBytes.ToString(CultureInfo.InvariantCulture),
-                a.TotalCsBytes.ToString(CultureInfo.InvariantCulture), a.TotalScBytes.ToString(CultureInfo.InvariantCulture),
-                a.C2xx.ToString(CultureInfo.InvariantCulture), a.C3xx.ToString(CultureInfo.InvariantCulture),
-                a.C4xx.ToString(CultureInfo.InvariantCulture), a.C5xx.ToString(CultureInfo.InvariantCulture),
-                CsvEsc(topEp), topBytes.ToString(CultureInfo.InvariantCulture)));
+
+            wsIps.Cell(row, 1).Value = i + 1;
+            wsIps.Cell(row, 2).Value = a.Ip;
+            wsIps.Cell(row, 3).Value = a.PostPutCount;
+            wsIps.Cell(row, 4).Value = a.MaxCsBytes;
+            wsIps.Cell(row, 5).Value = a.TotalCsBytes;
+            wsIps.Cell(row, 6).Value = a.TotalScBytes;
+            wsIps.Cell(row, 7).Value = a.C2xx;
+            wsIps.Cell(row, 8).Value = a.C3xx;
+            wsIps.Cell(row, 9).Value = a.C4xx;
+            wsIps.Cell(row, 10).Value = a.C5xx;
+            wsIps.Cell(row, 11).Value = topEp;
+            wsIps.Cell(row, 12).Value = topBytes;
+            wsIps.Cell(row, 13).Value = topHits;
+            wsIps.Cell(row, 14).Value = topSensitive ? "true" : "false";
         }
+
+        if (top.Count > 0)
+        {
+            var table = wsIps.Range(1, 1, top.Count + 1, ipHeaders.Length).CreateTable("UploadsIPs");
+            table.Theme = XLTableTheme.TableStyleMedium2;
+            table.ShowAutoFilter = true;
+        }
+        for (int c = 3; c <= 6; c++) wsIps.Column(c).Style.NumberFormat.Format = "#,##0";
+        for (int c = 7; c <= 10; c++) wsIps.Column(c).Style.NumberFormat.Format = "#,##0";
+        wsIps.Column(12).Style.NumberFormat.Format = "#,##0";
+        wsIps.Column(13).Style.NumberFormat.Format = "#,##0";
+        ExcelHelper.AutoFitColumns(wsIps, 1, ipHeaders.Length);
+
+        // Sheet 2: Endpoints Detail
+        var wsEps = wb.Worksheets.Add("Endpoints Detail");
+        var epHeaders = new[] { "IP", "EndpointRank", "Endpoint", "Hits", "TotalCsBytes", "MaxCsBytes", "Sensitive" };
+        for (int c = 0; c < epHeaders.Length; c++)
+            wsEps.Cell(1, c + 1).Value = epHeaders[c];
+        StyleHeaderRow(wsEps.Range(1, 1, 1, epHeaders.Length));
+        wsEps.SheetView.FreezeRows(1);
+
+        int epRow = 2;
+        foreach (var a in top)
+        {
+            if (!perIpEndpoints.TryGetValue(a.Ip, out var map) || map.Count == 0)
+                continue;
+
+            var ordered = map.OrderByDescending(kv => kv.Value.CsBytes)
+                .ThenByDescending(kv => kv.Value.Hits)
+                .ThenBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+                .Take(TopUrisPerIp)
+                .ToList();
+
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                var ep = ordered[i].Key;
+                var agg = ordered[i].Value;
+                wsEps.Cell(epRow, 1).Value = a.Ip;
+                wsEps.Cell(epRow, 2).Value = i + 1;
+                wsEps.Cell(epRow, 3).Value = ep;
+                wsEps.Cell(epRow, 4).Value = agg.Hits;
+                wsEps.Cell(epRow, 5).Value = agg.CsBytes;
+                wsEps.Cell(epRow, 6).Value = agg.MaxCsBytes;
+                wsEps.Cell(epRow, 7).Value = LooksSensitiveOutSystems(ep) ? "true" : "false";
+                epRow++;
+            }
+        }
+
+        if (epRow > 2)
+        {
+            var table = wsEps.Range(1, 1, epRow - 1, epHeaders.Length).CreateTable("UploadsEndpoints");
+            table.Theme = XLTableTheme.TableStyleMedium9;
+            table.ShowAutoFilter = true;
+        }
+        wsEps.Column(4).Style.NumberFormat.Format = "#,##0";
+        wsEps.Column(5).Style.NumberFormat.Format = "#,##0";
+        wsEps.Column(6).Style.NumberFormat.Format = "#,##0";
+        ExcelHelper.AutoFitColumns(wsEps, 1, epHeaders.Length);
+
+        wb.SaveAs(path);
     }
 }
 

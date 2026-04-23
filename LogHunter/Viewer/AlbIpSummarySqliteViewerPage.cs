@@ -143,6 +143,18 @@ internal static class AlbIpSummarySqliteViewerPage
       word-break: break-word;
       color: #bfdbfe;
     }
+    td.truncated {
+      max-width: 280px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+    }
+    td.truncated.expanded {
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow: visible;
+    }
     td code.nowrap {
       white-space: nowrap;
       word-break: normal;
@@ -453,11 +465,12 @@ internal static class AlbIpSummarySqliteViewerPage
           <td><code>${escapeHtml(row.targetEndpoint)}</code></td>
           <td><code class="nowrap">${escapeHtml(row.rawRequest)}</code></td>
           <td>${escapeHtml(row.actionsExecuted)}</td>
-          <td>${escapeHtml(row.userAgent)}</td>
+          <td class="truncated" title="${escapeHtml(row.userAgent)}">${escapeHtml(row.userAgent)}</td>
           <td>${escapeHtml(row.requestProcessingTimeSeconds ?? '')}</td>
           <td>${escapeHtml(row.targetProcessingTimeSeconds ?? '')}</td>
           <td>${escapeHtml(row.responseProcessingTimeSeconds ?? '')}</td>
         </tr>`).join('');
+      body.querySelectorAll('td.truncated').forEach(td => td.addEventListener('click', () => td.classList.toggle('expanded')));
     }
 
     async function loadRows() {

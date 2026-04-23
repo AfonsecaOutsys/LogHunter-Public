@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using ClosedXML.Excel;
 using LogHunter.Utils;
 using Spectre.Console;
 
@@ -89,16 +90,30 @@ public static partial class AlbOptions
         {
             Directory.CreateDirectory(outputFolder);
             var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            var outFile = Path.Combine(outputFolder, $"ALB_Top50_IPs_NoQuery_URIs_{stamp}.csv");
+            var outFile = Path.Combine(outputFolder, $"ALB_Top50_IPs_NoQuery_URIs_{stamp}.xlsx");
 
-            using var swCsv = new StreamWriter(outFile, false, Encoding.UTF8);
-            swCsv.WriteLine("Rank,Hits,IP,URI");
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Top 50 IPs by URI");
+            ExcelHelper.WriteHeaderRow(ws, 1, new[] { "Rank", "Hits", "IP", "URI" });
+            ws.SheetView.FreezeRows(1);
 
-            foreach (var row in top)
-            {
-                var uri = row.URI.Replace("\"", "\"\"");
-                swCsv.WriteLine($"{row.Rank},{row.Hits},{row.IP},\"{uri}\"");
+            var dataRow = 2;
+            foreach (var row in top) {
+                ws.Cell(dataRow, 1).Value = row.Rank;
+                ws.Cell(dataRow, 2).Value = row.Hits;
+                ws.Cell(dataRow, 3).Value = row.IP;
+                ws.Cell(dataRow, 4).Value = row.URI;
+                dataRow++;
             }
+
+            if (dataRow > 2) {
+                var xlTable = ws.Range(1, 1, dataRow - 1, 4).CreateTable("AlbTop50IpUriNoQuery");
+                xlTable.Theme = XLTableTheme.TableStyleMedium2;
+                xlTable.ShowAutoFilter = true;
+            }
+
+            ExcelHelper.AutoFitColumns(ws);
+            wb.SaveAs(outFile);
 
             ConsoleEx.Success($"Exported: {outFile}");
         }

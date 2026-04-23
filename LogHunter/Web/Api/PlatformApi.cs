@@ -100,13 +100,33 @@ internal static class PlatformApi
                 return true;
             }
 
-            if (!app.PlatformAuth.TryStart(out var snapshot, out var error))
+            PlatformAuthRunRequest? body = null;
+            try
+            {
+                body = await ReadJsonAsync<PlatformAuthRunRequest>(context.Request).ConfigureAwait(false);
+            }
+            catch { /* empty body is valid — means use cache */ }
+
+            if (!app.PlatformAuth.TryStart(body?.ManualIps, out var snapshot, out var error))
             {
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
 
             await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/platform/auth/open-export", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            var ok = app.PlatformAuth.TryOpenExport(out var message);
+            await WriteJsonAsync(context.Response, new { ok, message }, ok ? HttpStatusCode.OK : HttpStatusCode.BadRequest).ConfigureAwait(false);
             return true;
         }
 
@@ -159,4 +179,13 @@ internal static class PlatformApi
         await using var stream = response.OutputStream;
         await stream.WriteAsync(data).ConfigureAwait(false);
     }
+
+    private static async Task<T?> ReadJsonAsync<T>(HttpListenerRequest request)
+    {
+        using var reader = new System.IO.StreamReader(request.InputStream, request.ContentEncoding);
+        var json = await reader.ReadToEndAsync().ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(json) ? default : JsonSerializer.Deserialize<T>(json, JsonOptions);
+    }
+
+    private sealed record PlatformAuthRunRequest(List<string>? ManualIps);
 }

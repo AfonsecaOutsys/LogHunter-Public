@@ -40,7 +40,7 @@ public static class AlbStatusMismatchExportExcel
         WriteMetricRow(ws, row++, "Files with hits", result.SourceFiles.Count);
         WriteMetricRow(ws, row++, "First hit UTC", result.FirstHitUtc?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "-");
         WriteMetricRow(ws, row++, "Last hit UTC", result.LastHitUtc?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "-");
-        StyleMetricBlock(ws.Range(summaryStartRow, 1, row - 1, 2));
+        StyleMetricBlock(ws.Range(summaryStartRow, 1, row - 1, 4));
         row += 1;
 
         row = WriteStatusBreakdownTable(ws, row, 1, result) + 2;
@@ -51,7 +51,7 @@ public static class AlbStatusMismatchExportExcel
 
         ws.SheetView.FreezeRows(1);
         ApplyOuterBorder(ws.RangeUsed());
-        ws.Columns().AdjustToContents(10, 80);
+        ExcelHelper.AutoFitColumns(ws);
     }
 
     private static void WriteHitsSheet(IXLWorksheet ws, AlbStatusMismatchScanner.ScanResult result)
@@ -115,7 +115,7 @@ public static class AlbStatusMismatchExportExcel
         ws.Column(7).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         ws.Columns(9, 11).Style.NumberFormat.Format = "0.000";
         ApplyOuterBorder(ws.RangeUsed());
-        ws.Columns(1, headers.Length).AdjustToContents(10, 80);
+        ExcelHelper.AutoFitColumns(ws, 1, headers.Length);
     }
 
     private static int WriteStatusBreakdownTable(IXLWorksheet ws, int row, int col, AlbStatusMismatchScanner.ScanResult result)
@@ -194,7 +194,9 @@ public static class AlbStatusMismatchExportExcel
         ws.Cell(row, 1).Value = label;
         ws.Cell(row, 1).Style.Font.Bold = true;
         ws.Cell(row, 1).Style.Fill.BackgroundColor = CardFill;
+        ws.Range(row, 2, row, 4).Merge();
         ws.Cell(row, 2).Value = XLCellValue.FromObject(value);
+        ws.Cell(row, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
     }
 
     private static void StyleMetricBlock(IXLRange range)

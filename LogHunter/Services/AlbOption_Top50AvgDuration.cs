@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using ClosedXML.Excel;
 using LogHunter.Utils;
 using Spectre.Console;
 
@@ -188,16 +189,33 @@ public static partial class AlbOptions
         {
             Directory.CreateDirectory(outputFolder);
             var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            var outFile = Path.Combine(outputFolder, $"ALB_Top50_Requests_AvgDuration_{stamp}.csv");
+            var outFile = Path.Combine(outputFolder, $"ALB_Top50_Requests_AvgDuration_{stamp}.xlsx");
 
-            using var swCsv = new StreamWriter(outFile, false, Encoding.UTF8);
-            swCsv.WriteLine("AvgSeconds,Count,MaxSeconds,URI");
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Top 50 AVG Duration");
+            ExcelHelper.WriteHeaderRow(ws, 1, new[] { "AvgSeconds", "Count", "MaxSeconds", "URI" });
+            ws.SheetView.FreezeRows(1);
 
-            foreach (var r in results)
-            {
-                var uriEsc = r.URI.Replace("\"", "\"\"");
-                swCsv.WriteLine($"{r.AvgSeconds:0.000},{r.Count},{r.MaxSeconds:0.000},\"{uriEsc}\"");
+            var dataRow = 2;
+            foreach (var r in results) {
+                ws.Cell(dataRow, 1).Value = r.AvgSeconds;
+                ws.Cell(dataRow, 2).Value = r.Count;
+                ws.Cell(dataRow, 3).Value = r.MaxSeconds;
+                ws.Cell(dataRow, 4).Value = r.URI;
+                dataRow++;
             }
+
+            ws.Column(1).Style.NumberFormat.Format = "0.000";
+            ws.Column(3).Style.NumberFormat.Format = "0.000";
+
+            if (dataRow > 2) {
+                var xlTable = ws.Range(1, 1, dataRow - 1, 4).CreateTable("AlbTop50AvgDuration");
+                xlTable.Theme = XLTableTheme.TableStyleMedium2;
+                xlTable.ShowAutoFilter = true;
+            }
+
+            ExcelHelper.AutoFitColumns(ws);
+            wb.SaveAs(outFile);
 
             ConsoleEx.Success($"Exported: {outFile}");
         }

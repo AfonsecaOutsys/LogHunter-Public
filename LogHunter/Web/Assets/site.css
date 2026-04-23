@@ -1278,7 +1278,7 @@ code {
 .expandable-panel summary {
   cursor: pointer;
   list-style: none;
-  padding: 15px 18px;
+  padding: 10px 18px 6px;
   font-weight: 700;
   background: rgba(255, 255, 255, 0.02);
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);
@@ -1289,7 +1289,7 @@ code {
 }
 
 .expandable-body {
-  padding: 0 18px 18px;
+  padding: 10px 18px 18px;
 }
 
 .expandable-body > :first-child {
@@ -1368,9 +1368,13 @@ code {
 
 .ip-summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 18px;
-  margin-top: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 340px));
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.ip-summary-grid > .result-card {
+  align-content: start;
 }
 
 .ip-extract-list {
@@ -1442,6 +1446,14 @@ code {
 
 .mini-table tr:last-child td {
   border-bottom: none;
+}
+
+.mini-table .uri-cell {
+  font-family: monospace;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 1080px) {

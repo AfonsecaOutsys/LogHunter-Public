@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using ClosedXML.Excel;
 using LogHunter.Services;
 
 namespace LogHunter.Web.Orchestration;
@@ -116,13 +117,30 @@ internal static class AlbGenericScanFunctions
 
         Directory.CreateDirectory(outputFolder);
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-        var csvPath = Path.Combine(outputFolder, $"ALB_Top50_IPs_{stamp}.csv");
+        var excelPath = Path.Combine(outputFolder, $"ALB_Top50_IPs_{stamp}.xlsx");
 
-        using (var sw = new StreamWriter(csvPath, false, Encoding.UTF8))
-        {
-            sw.WriteLine("Rank,IP,Hits");
-            foreach (var row in top)
-                sw.WriteLine($"{row.Rank},{row.IP},{row.Hits}");
+        using (var wb = new XLWorkbook()) {
+            var ws = wb.Worksheets.Add("Top 50 IPs");
+            var headers = new[] { "Rank", "IP", "Hits" };
+            WriteHeaderRow(ws, 1, headers);
+            ws.SheetView.FreezeRows(1);
+
+            var dataRow = 2;
+            foreach (var r in top) {
+                ws.Cell(dataRow, 1).Value = r.Rank;
+                ws.Cell(dataRow, 2).Value = r.IP;
+                ws.Cell(dataRow, 3).Value = r.Hits;
+                dataRow++;
+            }
+
+            if (dataRow > 2) {
+                var table = ws.Range(1, 1, dataRow - 1, headers.Length).CreateTable("AlbTop50IpsOverall");
+                table.Theme = XLTableTheme.TableStyleMedium2;
+                table.ShowAutoFilter = true;
+            }
+
+            ExcelHelper.AutoFitColumns(ws);
+            wb.SaveAs(excelPath);
         }
 
         var totalHits = top.Sum(x => (long)x.Hits);
@@ -131,7 +149,7 @@ internal static class AlbGenericScanFunctions
 
         return new AlbGenericScanResult(
             CompletionMessage: $"Scan complete. {ipCounts.Count:N0} unique IPs found. Top 50 exported.",
-            ExportPath: csvPath,
+            ExportPath: excelPath,
             Rows: rows,
             Columns: new[] { "Rank", "IP", "Hits" },
             TotalMatches: totalHits,
@@ -185,16 +203,31 @@ internal static class AlbGenericScanFunctions
 
         Directory.CreateDirectory(outputFolder);
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-        var csvPath = Path.Combine(outputFolder, $"ALB_Top50_IPs_NoQuery_URIs_{stamp}.csv");
+        var excelPath = Path.Combine(outputFolder, $"ALB_Top50_IPs_NoQuery_URIs_{stamp}.xlsx");
 
-        using (var sw = new StreamWriter(csvPath, false, Encoding.UTF8))
-        {
-            sw.WriteLine("Rank,Hits,IP,URI");
-            foreach (var row in top)
-            {
-                var uri = row.URI.Replace("\"", "\"\"");
-                sw.WriteLine($"{row.Rank},{row.Hits},{row.IP},\"{uri}\"");
+        using (var wb = new XLWorkbook()) {
+            var ws = wb.Worksheets.Add("Top 50 IPs by URI");
+            var headers = new[] { "Rank", "Hits", "IP", "URI" };
+            WriteHeaderRow(ws, 1, headers);
+            ws.SheetView.FreezeRows(1);
+
+            var dataRow = 2;
+            foreach (var r in top) {
+                ws.Cell(dataRow, 1).Value = r.Rank;
+                ws.Cell(dataRow, 2).Value = r.Hits;
+                ws.Cell(dataRow, 3).Value = r.IP;
+                ws.Cell(dataRow, 4).Value = r.URI;
+                dataRow++;
             }
+
+            if (dataRow > 2) {
+                var table = ws.Range(1, 1, dataRow - 1, headers.Length).CreateTable("AlbTop50IpUriNoQuery");
+                table.Theme = XLTableTheme.TableStyleMedium2;
+                table.ShowAutoFilter = true;
+            }
+
+            ExcelHelper.AutoFitColumns(ws);
+            wb.SaveAs(excelPath);
         }
 
         var totalHits = top.Sum(x => (long)x.Hits);
@@ -203,7 +236,7 @@ internal static class AlbGenericScanFunctions
 
         return new AlbGenericScanResult(
             CompletionMessage: $"Scan complete. {pairCounts.Count:N0} unique IP+URI pairs found. Top 50 exported.",
-            ExportPath: csvPath,
+            ExportPath: excelPath,
             Rows: rows,
             Columns: new[] { "Rank", "IP", "URI", "Hits" },
             TotalMatches: totalHits,
@@ -263,16 +296,34 @@ internal static class AlbGenericScanFunctions
 
         Directory.CreateDirectory(outputFolder);
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-        var csvPath = Path.Combine(outputFolder, $"ALB_Top50_Requests_AvgDuration_{stamp}.csv");
+        var excelPath = Path.Combine(outputFolder, $"ALB_Top50_Requests_AvgDuration_{stamp}.xlsx");
 
-        using (var sw = new StreamWriter(csvPath, false, Encoding.UTF8))
-        {
-            sw.WriteLine("AvgSeconds,Count,MaxSeconds,URI");
-            foreach (var r in results)
-            {
-                var uriEsc = r.URI.Replace("\"", "\"\"");
-                sw.WriteLine($"{r.AvgSeconds:0.000},{r.Count},{r.MaxSeconds:0.000},\"{uriEsc}\"");
+        using (var wb = new XLWorkbook()) {
+            var ws = wb.Worksheets.Add("Top 50 AVG Duration");
+            var headers = new[] { "AvgSeconds", "Count", "MaxSeconds", "URI" };
+            WriteHeaderRow(ws, 1, headers);
+            ws.SheetView.FreezeRows(1);
+
+            var dataRow = 2;
+            foreach (var r in results) {
+                ws.Cell(dataRow, 1).Value = r.AvgSeconds;
+                ws.Cell(dataRow, 2).Value = r.Count;
+                ws.Cell(dataRow, 3).Value = r.MaxSeconds;
+                ws.Cell(dataRow, 4).Value = r.URI;
+                dataRow++;
             }
+
+            ws.Column(1).Style.NumberFormat.Format = "0.000";
+            ws.Column(3).Style.NumberFormat.Format = "0.000";
+
+            if (dataRow > 2) {
+                var table = ws.Range(1, 1, dataRow - 1, headers.Length).CreateTable("AlbTop50AvgDuration");
+                table.Theme = XLTableTheme.TableStyleMedium2;
+                table.ShowAutoFilter = true;
+            }
+
+            ExcelHelper.AutoFitColumns(ws);
+            wb.SaveAs(excelPath);
         }
 
         var totalCount = results.Sum(x => x.Count);
@@ -288,7 +339,7 @@ internal static class AlbGenericScanFunctions
 
         return new AlbGenericScanResult(
             CompletionMessage: $"Scan complete. {stats.Count:N0} unique URIs found. Top 50 exported.",
-            ExportPath: csvPath,
+            ExportPath: excelPath,
             Rows: rows,
             Columns: new[] { "Rank", "AVG (s)", "Count", "MAX (s)", "URI" },
             TotalMatches: totalCount,
@@ -662,6 +713,21 @@ internal static class AlbGenericScanFunctions
             LastHitUtc: times.Last().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
             FilesWithHits: files.Count,
             ChartHtmlPath: chartPath);
+    }
+
+    // ── Shared Excel helpers ───────────────────────────────────────
+
+    private static readonly XLColor HeaderFill = XLColor.FromHtml("#17324D");
+
+    private static void WriteHeaderRow(IXLWorksheet ws, int row, IReadOnlyList<string> headers)
+    {
+        for (var i = 0; i < headers.Count; i++)
+            ws.Cell(row, i + 1).Value = headers[i];
+
+        var headerRange = ws.Range(row, 1, row, headers.Count);
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Fill.BackgroundColor = HeaderFill;
+        headerRange.Style.Font.FontColor = XLColor.White;
     }
 
     private static async Task ScanFileForWafBlockedBucketsAsync(string filePath, SortedDictionary<DateTime, long> buckets)
