@@ -738,7 +738,7 @@
 
   async function loadIisBytesIntelMeta() {
     const payload = await fetchJson('/api/iis/bytes-intel/meta');
-    if (payload.currentJob) {
+    if (payload.currentJob && payload.currentJob.mode === iisBytesIntelMode) {
       renderIisBytesIntelSnapshot(payload.currentJob);
       if (payload.currentJob.state === 'running') startIisBytesIntelPolling();
     }
@@ -769,6 +769,7 @@
   async function pollIisBytesIntel() {
     try {
       const snap = await fetchJson('/api/iis/bytes-intel/job');
+      if (snap.mode !== iisBytesIntelMode) { stopIisBytesIntelPolling(); return; }
       renderIisBytesIntelSnapshot(snap);
       if (snap.state !== 'running') stopIisBytesIntelPolling();
     } catch { stopIisBytesIntelPolling(); }

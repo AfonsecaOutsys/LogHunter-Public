@@ -110,6 +110,7 @@ public static class PlatformAuthScanner
             return false;
 
         bool anyHit = false;
+        var fileName = Path.GetFileName(path);
 
         while (!parser.EndOfData)
         {
@@ -122,8 +123,7 @@ public static class PlatformAuthScanner
             if (fields is null || fields.Length == 0)
                 continue;
 
-            if (!TryGetUserId(fields, spec.UserIdIdx, out var userId) || userId == 0)
-                continue;
+            TryGetUserId(fields, spec.UserIdIdx, out var userId);
 
             if (!TryGetEffectiveIpCsv(kind, fields, spec, out var effectiveIp))
                 continue;
@@ -131,8 +131,14 @@ public static class PlatformAuthScanner
             if (!suspicious.Contains(effectiveIp))
                 continue;
 
-            anyHit = true;
-            res.AddHit(effectiveIp, kind);
+            bool isAuth = userId != 0;
+            res.AddRow(new PlatformAuthScanResult.CollectedRow(effectiveIp, userId, isAuth, kind, fileName));
+
+            if (isAuth)
+            {
+                anyHit = true;
+                res.AddHit(effectiveIp, kind);
+            }
         }
 
         if (anyHit)
@@ -169,13 +175,14 @@ public static class PlatformAuthScanner
             if (!TryClassify(headers, out var kind, out var spec))
                 continue;
 
+            var fileName = Path.GetFileName(path);
+
             while (reader.Read())
             {
                 ct.ThrowIfCancellationRequested();
 
                 var userVal = reader.GetValue(spec.UserIdIdx);
-                if (!TryParseUserId(userVal, out var userId) || userId == 0)
-                    continue;
+                TryParseUserId(userVal, out var userId);
 
                 if (!TryGetEffectiveIpXlsx(kind, reader, spec, out var effectiveIp))
                     continue;
@@ -183,9 +190,15 @@ public static class PlatformAuthScanner
                 if (!suspicious.Contains(effectiveIp))
                     continue;
 
-                anyHit = true;
-                kindsHit.Add(kind);
-                res.AddHit(effectiveIp, kind);
+                bool isAuth = userId != 0;
+                res.AddRow(new PlatformAuthScanResult.CollectedRow(effectiveIp, userId, isAuth, kind, fileName));
+
+                if (isAuth)
+                {
+                    anyHit = true;
+                    kindsHit.Add(kind);
+                    res.AddHit(effectiveIp, kind);
+                }
             }
         }
         while (reader.NextResult());
@@ -544,4 +557,16 @@ public sealed class PlatformAuthScanResult
         public int Screen { get; set; }
         public int Error { get; set; }
     }
+
+    /// <summary>Row-level data collected for Excel export.</summary>
+    public readonly record struct CollectedRow(
+        string Ip,
+        int UserId,
+        bool IsAuthenticated,
+        PlatformLogKind LogKind,
+        string SourceFile);
+
+    public List<CollectedRow> CollectedRows { get; } = new();
+
+    public void AddRow(CollectedRow row) => CollectedRows.Add(row);
 }

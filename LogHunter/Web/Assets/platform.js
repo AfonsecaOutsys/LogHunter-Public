@@ -292,6 +292,7 @@
   // ── Authenticated activity check ──────────────────────────────
 
   var authPolling = null;
+  var authSourceMode = 'cache';
 
   function setAuthError(msg) {
     var node = byId('platformAuthError');
@@ -352,6 +353,11 @@
       meta.textContent = 'Suspicious IPs input: ' + fmt(snap.suspiciousIpsInput) +
         ' | Files scanned: ' + fmt(snap.filesScanned) + ' | Files matched: ' + fmt(snap.filesMatched);
     }
+
+    // Export button
+    var hasExport = Boolean(snap.exportPath);
+    var exportBtn = byId('platformAuthOpenExport');
+    if (exportBtn) setHidden(exportBtn, !hasExport);
 
     renderAuthResults(snap);
 
@@ -446,6 +452,18 @@
 
   async function runAuthCheck() {
     setAuthError('');
+
+    var body = {};
+    if (authSourceMode === 'manual') {
+      var raw = (byId('platformAuthManualIps')?.value || '').trim();
+      var ips = raw.split(/[\n,;]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+      if (ips.length === 0) {
+        setAuthError('Enter at least one IP address.');
+        return;
+      }
+      body.manualIps = ips;
+    }
+
     setText('platformAuthState', 'running');
     setText('platformAuthPhase', 'queued');
     setText('platformAuthMessage', 'Starting authenticated activity check...');
@@ -453,7 +471,8 @@
 
     try {
       var payload = await fetchJson('/api/platform/auth/run', {
-        method: 'POST'
+        method: 'POST',
+        body: JSON.stringify(body)
       });
 
       if (!payload.ok) {
@@ -484,10 +503,26 @@
     }
   }
 
+  function setAuthSource(mode) {
+    authSourceMode = mode;
+    var cacheBtn = byId('platformAuthSourceCache');
+    var manualBtn = byId('platformAuthSourceManual');
+    if (cacheBtn) cacheBtn.classList.toggle('active', mode === 'cache');
+    if (manualBtn) manualBtn.classList.toggle('active', mode === 'manual');
+    setHidden(byId('platformAuthCacheInfo'), mode !== 'cache');
+    setHidden(byId('platformAuthManualInput'), mode !== 'manual');
+  }
+
   function initializeAuthPage() {
     if (!document.querySelector('[data-platform-auth-page]')) return;
 
     byId('platformAuthRun')?.addEventListener('click', runAuthCheck);
+    byId('platformAuthSourceCache')?.addEventListener('click', function() { setAuthSource('cache'); });
+    byId('platformAuthSourceManual')?.addEventListener('click', function() { setAuthSource('manual'); });
+    byId('platformAuthOpenExport')?.addEventListener('click', async function() {
+      try { await fetchJson('/api/platform/auth/open-export', { method: 'POST' }); }
+      catch (err) { setAuthError(String(err)); }
+    });
     loadAuthMeta().catch(function(err) { setAuthError(String(err)); });
   }
 

@@ -905,6 +905,7 @@
     setText('albOption2Summary', 'Preparing scan.');
     setText('albOption2BarMeta', 'Waiting for the job to start.');
     setHidden(byId('albOption2OpenExport'), true);
+    setHidden(byId('albOption2ResultsOpenExport'), true);
     setHidden(byId('albOption2Results'), true);
     setBar('albOption2Bar', 0, 1);
 
@@ -1001,6 +1002,7 @@
     setText('albOption2ExportPath', exportPath ? `Exported: ${exportPath}` : '');
     setText('albOption2Matches', String(result?.totalMatchingIps || 0));
     setHidden(byId('albOption2OpenExport'), !exportPath);
+    setHidden(byId('albOption2ResultsOpenExport'), !exportPath);
 
     // Lock inputs while running
     setOption2InputsLocked(state === 'running');
@@ -1137,6 +1139,7 @@
 
     byId('albOption2Run')?.addEventListener('click', runAlbOption2);
     byId('albOption2OpenExport')?.addEventListener('click', openAlbOption2Export);
+    byId('albOption2ResultsOpenExport')?.addEventListener('click', openAlbOption2Export);
     byId('albOption2UseDefault')?.addEventListener('click', useAlbOption2Default);
     byId('albOption2SelectFolder')?.addEventListener('click', selectAlbOption2Folder);
     byId('albOption2SelectFiles')?.addEventListener('click', selectAlbOption2Files);

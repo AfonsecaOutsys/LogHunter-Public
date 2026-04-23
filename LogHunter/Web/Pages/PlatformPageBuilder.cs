@@ -230,14 +230,29 @@ internal static class PlatformPageBuilder
             <div id="platformAuthError" class="inline-error" hidden></div>
 
             <div class="field-group">
-              <p class="page-copy">Uses the suspicious-IP cache from the extract step. Scans all CSV/XLSX files in PlatformLogs and counts authenticated rows (UserId != 0) per IP, broken down by log type.</p>
-              <p class="footer-note">Requires the suspicious-IP cache to be populated first.</p>
+              <p class="page-copy">Scans all CSV/XLSX files in PlatformLogs and counts authenticated rows (UserId != 0) per IP, broken down by log type.</p>
+            </div>
+
+            <div class="field-group">
+              <div class="field-label">IP source</div>
+              <div class="button-row source-action-row">
+                <button id="platformAuthSourceCache" class="source-btn active" type="button">Suspicious cache</button>
+                <button id="platformAuthSourceManual" class="source-btn" type="button">Manual input</button>
+              </div>
             </div>
 
             <div id="platformAuthCacheInfo" class="field-group">
               <div class="status-block">
                 <div class="status-pill"><span>Suspicious IPs cached</span><strong id="platformAuthSuspiciousCount">0</strong></div>
                 <div class="status-pill"><span>Authed IPs cached</span><strong id="platformAuthAuthedCount">0</strong></div>
+              </div>
+              <p class="footer-note">Populated by the suspicious requests extract step.</p>
+            </div>
+
+            <div id="platformAuthManualInput" class="field-group" hidden>
+              <div class="field">
+                <label for="platformAuthManualIps">IPs to check (one per line)</label>
+                <textarea id="platformAuthManualIps" rows="6" placeholder="10.0.0.1&#10;192.168.1.100&#10;203.0.113.55" style="resize:vertical"></textarea>
               </div>
             </div>
 
@@ -274,6 +289,9 @@ internal static class PlatformPageBuilder
               <div>
                 <div class="eyebrow">Summary</div>
                 <h2>Authenticated activity overview</h2>
+              </div>
+              <div class="export-row">
+                <button id="platformAuthOpenExport" class="button-link primary button-like compact" type="button" hidden>Open Excel</button>
               </div>
             </div>
             <div id="platformAuthOverview" class="status-block"></div>

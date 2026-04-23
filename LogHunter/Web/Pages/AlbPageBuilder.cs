@@ -441,6 +441,9 @@ internal static class AlbPageBuilder
                 <div class="eyebrow">Results</div>
                 <h2>Top matching IPs</h2>
               </div>
+              <div class="export-row">
+                <button id="albOption2ResultsOpenExport" class="button-link primary button-like compact" type="button" hidden>Open Excel</button>
+              </div>
             </div>
             <div id="albOption2TopIps" class="result-summary-body"></div>
           </section>

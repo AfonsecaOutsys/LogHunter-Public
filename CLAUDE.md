@@ -30,6 +30,14 @@ At the end of a coding session:
 - If the target executable for the current branch line is in use and cannot be replaced, publish a single fallback artifact using the same branch line naming with a `-new` suffix:
   - `LogHunter-new.exe` for `main` / `main`-derived branches
   - `LogHunter2.0-new.exe` for `LogHunter-2.0` / `LogHunter-2.0`-derived branches
+- After publishing the executable, sign it with the code-signing certificate using PowerShell:
+  ```powershell
+  Set-AuthenticodeSignature -FilePath "<target-exe-path>" -Certificate (Get-PfxCertificate -FilePath "certs/LogHunter-signing.pfx") -TimestampServer "http://timestamp.digicert.com" -HashAlgorithm SHA256
+  ```
+  When prompted for the PFX password, use `LogHunter2026!`.
+- The signing certificate is stored at `certs/LogHunter-signing.pfx` (gitignored, never committed).
+- The certificate password is `LogHunter2026!`.
+- After signing, verify with: `Get-AuthenticodeSignature "<target-exe-path>" | Format-List`.
 
 ## Release Notes Workflow
 
@@ -61,6 +69,12 @@ At the end of a coding session:
 - Do not autonomously bump the minor version line.
 - Minor-version changes such as `1.5` -> `1.6` or `1.6` -> `1.7` only happen when the user explicitly decides them.
 - If the current version format needs interpretation, preserve the current minor line and increment only the rightmost shipped patch component unless the user says otherwise.
+
+## Coding Guidelines
+
+- Always activate the `andrej-karpathy-skills:karpathy-guidelines` skill at the start of any coding task.
+- These guidelines enforce: think before coding, simplicity first, surgical changes, and goal-driven execution.
+- Every coding session must follow these principles — no exceptions.
 
 ## UI / UX Design Guardrails (LogHunter 2.0)
 

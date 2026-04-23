@@ -43,6 +43,10 @@ publish/
 *.userosscache
 *.sln.docstates
 
+# --- Code-signing certificates (private keys) ---
+certs/*.pfx
+certs/*.p12
+
 # --- OS junk ---
 .DS_Store
 Thumbs.db
