@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using LogHunter.Services;
 using LogHunter.Web.Hosting;
+using LogHunter.Web.Orchestration;
 
 namespace LogHunter.Web.Api;
 
@@ -173,6 +174,61 @@ internal static class AbuseIpApi
             }
         }
 
+        if (string.Equals(path, "/api/abuseip/browse-output-file", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            var result = await NativeFileDialogHelper.BrowseSingleFileAsync(AppFolders.Output, "CSV/Excel files (*.csv;*.xlsx)", "*.csv;*.xlsx").ConfigureAwait(false);
+            if (result is null)
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, cancelled = true }).ConfigureAwait(false);
+                return true;
+            }
+
+            var fi = new FileInfo(result);
+            await WriteJsonAsync(context.Response, new { ok = true, file = new { name = fi.Name, path = fi.FullName, size = fi.Length } }).ConfigureAwait(false);
+            return true;
+        }
+
+        if (string.Equals(path, "/api/abuseip/extract-ips", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
+            }
+
+            AbuseIpExtractRequest? body;
+            try
+            {
+                body = await ReadJsonAsync<AbuseIpExtractRequest>(context.Request).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = ex.Message }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            if (string.IsNullOrWhiteSpace(body?.FilePath))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = "filePath is required." }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                return true;
+            }
+
+            if (!AlbIpExtractorHelper.TryExtractIps(body.FilePath, out var ipColumn, out var ips, out var extractError))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, error = extractError }).ConfigureAwait(false);
+                return true;
+            }
+
+            await WriteJsonAsync(context.Response, new { ok = true, ipColumn, ips = ips.Select(x => new { x.Ip, x.Hits }) }).ConfigureAwait(false);
+            return true;
+        }
+
         if (string.Equals(path, "/api/abuseip/output-files", StringComparison.OrdinalIgnoreCase))
         {
             var outDir = AppFolders.Output;
@@ -226,6 +282,8 @@ internal static class AbuseIpApi
         await using var stream = response.OutputStream;
         await stream.WriteAsync(data).ConfigureAwait(false);
     }
+
+    private sealed record AbuseIpExtractRequest(string? FilePath);
 
     private sealed record AbuseIpRunRequest(
         IReadOnlyList<string> Ips,

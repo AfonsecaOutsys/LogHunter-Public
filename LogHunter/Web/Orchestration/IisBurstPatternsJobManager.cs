@@ -14,6 +14,7 @@ internal sealed class IisBurstPatternsJobManager
 {
     private readonly object _gate = new();
     private IisBurstPatternsJobSnapshot _snapshot = IisBurstPatternsJobSnapshot.CreateIdle();
+    private IReadOnlyList<BurstIpCacheEntry> _ipCache = Array.Empty<BurstIpCacheEntry>();
 
     public IisBurstPatternsJobSnapshot GetSnapshot()
     {
@@ -21,10 +22,18 @@ internal sealed class IisBurstPatternsJobManager
             return _snapshot;
     }
 
+    public IReadOnlyList<BurstIpCacheEntry> GetIpCache()
+    {
+        lock (_gate)
+            return _ipCache;
+    }
+
     public bool TryStart(
         int bucketSeconds,
         out IisBurstPatternsJobSnapshot snapshot,
-        out string? error)
+        out string? error,
+        IReadOnlyList<string>? customFiles = null,
+        string? customFolderPath = null)
     {
         lock (_gate)
         {
@@ -38,11 +47,18 @@ internal sealed class IisBurstPatternsJobManager
             if (bucketSeconds is not (10 or 30 or 60 or 300))
                 bucketSeconds = 60;
 
-            var files = IisW3cReader.EnumerateLogFiles(AppFolders.IIS);
+            List<string> files;
+            if (customFiles is { Count: > 0 })
+                files = customFiles.Where(File.Exists).ToList();
+            else if (!string.IsNullOrWhiteSpace(customFolderPath) && Directory.Exists(customFolderPath))
+                files = IisW3cReader.EnumerateLogFiles(customFolderPath);
+            else
+                files = IisW3cReader.EnumerateLogFiles(AppFolders.IIS);
+
             if (files.Count == 0)
             {
                 snapshot = _snapshot;
-                error = $"No .log files found in: {AppFolders.IIS}";
+                error = $"No .log files found in the selected source.";
                 return false;
             }
 
@@ -243,6 +259,24 @@ internal sealed class IisBurstPatternsJobManager
                     C5xx: a.C5xx,
                     TopUris: a.TopUris(10).Select(u => new BurstUriCount(u.Uri, u.Count)).ToList());
             }).ToList();
+
+            // Build per-IP cache: aggregate burst count + total hits per distinct IP
+            var ipAgg = new Dictionary<string, (int Bursts, int Hits, int MaxScore)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in candidates)
+            {
+                if (ipAgg.TryGetValue(c.Agg.Ip, out var cur))
+                    ipAgg[c.Agg.Ip] = (cur.Bursts + 1, cur.Hits + c.Agg.TotalDynamic, Math.Max(cur.MaxScore, c.SeverityScore));
+                else
+                    ipAgg[c.Agg.Ip] = (1, c.Agg.TotalDynamic, c.SeverityScore);
+            }
+            lock (_gate)
+            {
+                _ipCache = ipAgg
+                    .OrderByDescending(kv => kv.Value.MaxScore)
+                    .ThenByDescending(kv => kv.Value.Hits)
+                    .Select(kv => new BurstIpCacheEntry(kv.Key, kv.Value.Bursts, kv.Value.Hits, kv.Value.MaxScore))
+                    .ToList();
+            }
 
             Update(jobId, snapshot => snapshot with
             {
@@ -499,3 +533,5 @@ internal sealed record BurstResult(
     IReadOnlyList<BurstUriCount> TopUris);
 
 internal sealed record BurstUriCount(string Uri, int Count);
+
+internal sealed record BurstIpCacheEntry(string Ip, int Bursts, int TotalHits, int MaxScore);

@@ -158,6 +158,101 @@
       .replaceAll('"', '&quot;');
   }
 
+  var _loadingOverlay = null;
+  function showLoading() {
+    if (_loadingOverlay) return;
+    _loadingOverlay = document.createElement('div');
+    _loadingOverlay.className = 'loading-overlay';
+    _loadingOverlay.innerHTML = '<div class="loading-spinner"></div>';
+    document.body.appendChild(_loadingOverlay);
+  }
+  function hideLoading() {
+    if (_loadingOverlay) { _loadingOverlay.remove(); _loadingOverlay = null; }
+  }
+
+  function showIpModal(ips, maxSelect, onConfirm) {
+    var selected = new Set(ips.slice(0, maxSelect).map(function (x) { return x.ip; }));
+
+    var overlay = document.createElement('div');
+    overlay.className = 'ip-modal-overlay';
+
+    var modal = document.createElement('div');
+    modal.className = 'ip-modal';
+
+    var header = document.createElement('div');
+    header.className = 'ip-modal-header';
+    header.innerHTML = '<h3>Select IPs</h3><div class="ip-modal-info">' +
+      ips.length + ' IPs found — select up to ' + maxSelect + '</div>';
+    modal.appendChild(header);
+
+    var body = document.createElement('div');
+    body.className = 'ip-modal-body';
+    modal.appendChild(body);
+
+    var footer = document.createElement('div');
+    footer.className = 'ip-modal-footer';
+
+    var countEl = document.createElement('span');
+    countEl.className = 'ip-modal-count';
+    footer.appendChild(countEl);
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'button-link button-like compact';
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function () { overlay.remove(); });
+    footer.appendChild(cancelBtn);
+
+    var confirmBtn = document.createElement('button');
+    confirmBtn.className = 'button-link primary button-like compact';
+    confirmBtn.type = 'button';
+    confirmBtn.textContent = 'Confirm';
+    confirmBtn.addEventListener('click', function () {
+      overlay.remove();
+      onConfirm(Array.from(selected));
+    });
+    footer.appendChild(confirmBtn);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+
+    var checkboxes = [];
+
+    function updateState() {
+      countEl.textContent = selected.size + ' / ' + maxSelect + ' selected';
+      var atMax = selected.size >= maxSelect;
+      checkboxes.forEach(function (entry) {
+        entry.cb.disabled = !entry.cb.checked && atMax;
+      });
+    }
+
+    var list = document.createElement('div');
+    list.className = 'ip-extract-list';
+    ips.forEach(function (item) {
+      var label = document.createElement('label');
+      label.className = 'ip-extract-item';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = selected.has(item.ip);
+      checkboxes.push({ cb: cb });
+      cb.addEventListener('change', function () {
+        if (cb.checked) {
+          if (selected.size >= maxSelect) { cb.checked = false; return; }
+          selected.add(item.ip);
+        } else {
+          selected.delete(item.ip);
+        }
+        updateState();
+      });
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(' ' + item.ip + ' (' + Number(item.hits).toLocaleString('en-US') + ' hits)'));
+      list.appendChild(label);
+    });
+    body.appendChild(list);
+    updateState();
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+  }
+
   function renderResult(snapshot) {
     const detailsBody = byId('albDetailsBody');
     const sampleSection = byId('albSampleFilesSection');
@@ -1161,8 +1256,8 @@
   let ipSummaryPolling = null;
   let ipSummaryJobId = '';
   let ipSummaryInputMode = 'manual';
-  let ipSummaryExtractedIps = [];
-  let ipSummarySelectedExtractedIps = new Set();
+  let ipSummarySelectedFilePath = '';
+  let ipSummarySelectedIpsFromFile = [];
   let ipSummaryExportMode = 'export'; // 'chart' or 'export'
 
   function setIpSummaryError(msg) {
@@ -1235,89 +1330,48 @@
     }
   }
 
-  async function loadIpSummaryOutputFiles() {
-    const sel = byId('ipSummaryFileSelect');
-    if (!sel) return;
-    try {
-      const payload = await fetchJson('/api/alb/ip-summary/output-files', { method: 'GET', headers: { 'Accept': 'application/json' } });
-      sel.innerHTML = '<option value="">Select a file...</option>';
-      (payload.files || []).forEach(f => {
-        const opt = document.createElement('option');
-        opt.value = f.path;
-        opt.textContent = `${f.createdUtc} - ${f.name} (${formatBytes(f.size)})`;
-        sel.appendChild(opt);
-      });
-    } catch {
-      sel.innerHTML = '<option value="">Failed to load files</option>';
-    }
-  }
-
-  async function extractIpsFromFile() {
-    const sel = byId('ipSummaryFileSelect');
-    const filePath = sel?.value;
-    if (!filePath) {
-      setIpSummaryError('Select an output file first.');
-      return;
-    }
-
+  async function browseAndExtractIpSummary() {
+    if (_loadingOverlay) return;
     setIpSummaryError('');
     try {
-      const payload = await fetchJson('/api/alb/ip-summary/extract-ips', {
+      const browsePayload = await fetchJson('/api/alb/ip-summary/browse-output-file', { method: 'POST' });
+      if (!browsePayload.ok) {
+        if (browsePayload.cancelled) return;
+        throw new Error(browsePayload.error || 'Failed to browse file.');
+      }
+
+      ipSummarySelectedFilePath = browsePayload.file.path;
+      showLoading();
+
+      const extractPayload = await fetchJson('/api/alb/ip-summary/extract-ips', {
         method: 'POST',
-        body: JSON.stringify({ filePath })
+        body: JSON.stringify({ filePath: ipSummarySelectedFilePath })
       });
 
-      if (!payload.ok) {
-        setIpSummaryError(payload.error || 'Failed to extract IPs.');
+      if (!extractPayload.ok) {
+        setIpSummaryError(extractPayload.error || 'Failed to extract IPs.');
         return;
       }
 
-      ipSummaryExtractedIps = payload.ips || [];
-      ipSummarySelectedExtractedIps = new Set(ipSummaryExtractedIps.slice(0, 10).map(x => x.ip));
-
-      const info = byId('ipSummaryExtractInfo');
-      if (info) info.textContent = `Column: ${payload.ipColumn} | ${ipSummaryExtractedIps.length} IPs found`;
-
-      renderExtractedIpList();
-      setHidden(byId('ipSummaryExtractResult'), false);
+      var ips = extractPayload.ips || [];
+      showIpModal(ips, 10, function (selectedIps) {
+        ipSummarySelectedIpsFromFile = selectedIps;
+        const chip = byId('ipSummaryFileChip');
+        if (chip) {
+          chip.textContent = browsePayload.file.name + ' — ' + selectedIps.length + ' of ' + ips.length + ' IPs selected';
+          chip.hidden = false;
+        }
+      });
     } catch (err) {
       setIpSummaryError(String(err));
+    } finally {
+      hideLoading();
     }
-  }
-
-  function renderExtractedIpList() {
-    const container = byId('ipSummaryExtractedList');
-    if (!container) return;
-    container.innerHTML = '';
-
-    ipSummaryExtractedIps.forEach(item => {
-      const label = document.createElement('label');
-      label.className = 'ip-extract-item';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.checked = ipSummarySelectedExtractedIps.has(item.ip);
-      cb.disabled = !cb.checked && ipSummarySelectedExtractedIps.size >= 10;
-      cb.addEventListener('change', () => {
-        if (cb.checked) {
-          if (ipSummarySelectedExtractedIps.size >= 10) {
-            cb.checked = false;
-            return;
-          }
-          ipSummarySelectedExtractedIps.add(item.ip);
-        } else {
-          ipSummarySelectedExtractedIps.delete(item.ip);
-        }
-        renderExtractedIpList();
-      });
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(` ${item.ip} (${Number(item.hits).toLocaleString('en-US')})`));
-      container.appendChild(label);
-    });
   }
 
   function getIpSummaryIps() {
     if (ipSummaryInputMode === 'file') {
-      return Array.from(ipSummarySelectedExtractedIps);
+      return ipSummarySelectedIpsFromFile.slice();
     }
     const text = byId('ipSummaryIpText')?.value || '';
     return text.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
@@ -1663,15 +1717,12 @@
     if (!document.querySelector('[data-alb-ip-summary-page]')) return;
 
     byId('ipSummaryModeManual')?.addEventListener('click', () => setIpSummaryInputMode('manual'));
-    byId('ipSummaryModeFile')?.addEventListener('click', () => {
-      setIpSummaryInputMode('file');
-      loadIpSummaryOutputFiles();
-    });
+    byId('ipSummaryModeFile')?.addEventListener('click', () => setIpSummaryInputMode('file'));
 
     byId('ipSummaryModeChart')?.addEventListener('click', () => setIpSummaryExportMode('chart'));
     byId('ipSummaryModeExport')?.addEventListener('click', () => setIpSummaryExportMode('export'));
 
-    byId('ipSummaryExtractBtn')?.addEventListener('click', extractIpsFromFile);
+    byId('ipSummaryBrowseFile')?.addEventListener('click', browseAndExtractIpSummary);
 
     byId('ipSummaryUseDefault')?.addEventListener('click', clearIpSummarySelection);
     byId('ipSummarySelectFolder')?.addEventListener('click', selectIpSummaryFolder);
@@ -2089,8 +2140,8 @@
     var polling = null;
     var jobId = '';
     var inputMode = 'manual';
-    var extractedIps = [];
-    var selectedExtractedIps = new Set();
+    var selectedFilePath = '';
+    var selectedIpsFromFile = [];
     var chartAutoOpened = false;
 
     function setErr(msg) {
@@ -2148,7 +2199,7 @@
 
     function getIps() {
       if (inputMode === 'file') {
-        return Array.from(selectedExtractedIps);
+        return selectedIpsFromFile.slice();
       }
       var text = byId(prefix + 'IpText')?.value || '';
       return text.split(/[\n,;]+/).map(function (s) { return s.trim(); }).filter(Boolean);
@@ -2216,7 +2267,7 @@
 
     function setReqOverTimeInputsLocked(locked) {
       [prefix + 'Run', prefix + 'UseDefault', prefix + 'SelectFolder', prefix + 'SelectFiles', prefix + 'ClearSelection',
-       prefix + 'ModeManual', prefix + 'ModeFile', prefix + 'ExtractBtn'].forEach(function (id) {
+       prefix + 'ModeManual', prefix + 'ModeFile', prefix + 'BrowseFile'].forEach(function (id) {
         var el = byId(id);
         if (el) el.disabled = locked;
       });
@@ -2265,81 +2316,43 @@
       }
     }
 
-    async function loadOutputFiles() {
-      var sel = byId(prefix + 'FileSelect');
-      if (!sel) return;
-      try {
-        var payload = await fetchJson('/api/' + apiBase + '/output-files', { method: 'GET', headers: { 'Accept': 'application/json' } });
-        sel.innerHTML = '<option value="">Select a file...</option>';
-        (payload.files || []).forEach(function (f) {
-          var opt = document.createElement('option');
-          opt.value = f.path;
-          opt.textContent = f.createdUtc + ' - ' + f.name + ' (' + formatBytes(f.size) + ')';
-          sel.appendChild(opt);
-        });
-      } catch (e) {
-        sel.innerHTML = '<option value="">Failed to load files</option>';
-      }
-    }
-
-    async function extractIps() {
-      var sel = byId(prefix + 'FileSelect');
-      var filePath = sel?.value;
-      if (!filePath) {
-        setErr('Select an output file first.');
-        return;
-      }
-
+    async function browseAndExtract() {
+      if (_loadingOverlay) return;
       setErr('');
       try {
-        var payload = await fetchJson('/api/' + apiBase + '/extract-ips', {
+        var browsePayload = await fetchJson('/api/' + apiBase + '/browse-output-file', { method: 'POST' });
+        if (!browsePayload.ok) {
+          if (browsePayload.cancelled) return;
+          throw new Error(browsePayload.error || 'Failed to browse file.');
+        }
+
+        selectedFilePath = browsePayload.file.path;
+        showLoading();
+
+        var extractPayload = await fetchJson('/api/' + apiBase + '/extract-ips', {
           method: 'POST',
-          body: JSON.stringify({ filePath: filePath })
+          body: JSON.stringify({ filePath: selectedFilePath })
         });
 
-        if (!payload.ok) {
-          setErr(payload.error || 'Failed to extract IPs.');
+        if (!extractPayload.ok) {
+          setErr(extractPayload.error || 'Failed to extract IPs.');
           return;
         }
 
-        extractedIps = payload.ips || [];
-        selectedExtractedIps = new Set(extractedIps.slice(0, 20).map(function (x) { return x.ip; }));
-
-        var info = byId(prefix + 'ExtractInfo');
-        if (info) info.textContent = 'Column: ' + payload.ipColumn + ' | ' + extractedIps.length + ' IPs found';
-
-        renderExtractedList();
-        setHidden(byId(prefix + 'ExtractResult'), false);
+        var ips = extractPayload.ips || [];
+        showIpModal(ips, 20, function (selected) {
+          selectedIpsFromFile = selected;
+          var chip = byId(prefix + 'FileChip');
+          if (chip) {
+            chip.textContent = browsePayload.file.name + ' — ' + selected.length + ' of ' + ips.length + ' IPs selected';
+            chip.hidden = false;
+          }
+        });
       } catch (e) {
         setErr(String(e));
+      } finally {
+        hideLoading();
       }
-    }
-
-    function renderExtractedList() {
-      var container = byId(prefix + 'ExtractedList');
-      if (!container) return;
-      container.innerHTML = '';
-
-      extractedIps.forEach(function (item) {
-        var label = document.createElement('label');
-        label.className = 'ip-extract-item';
-        var cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = selectedExtractedIps.has(item.ip);
-        cb.disabled = !cb.checked && selectedExtractedIps.size >= 20;
-        cb.addEventListener('change', function () {
-          if (cb.checked) {
-            if (selectedExtractedIps.size >= 20) { cb.checked = false; return; }
-            selectedExtractedIps.add(item.ip);
-          } else {
-            selectedExtractedIps.delete(item.ip);
-          }
-          renderExtractedList();
-        });
-        label.appendChild(cb);
-        label.appendChild(document.createTextNode(' ' + item.ip + ' (' + Number(item.hits).toLocaleString('en-US') + ')'));
-        container.appendChild(label);
-      });
     }
 
     function startPolling() {
@@ -2456,11 +2469,8 @@
     }
 
     byId(prefix + 'ModeManual')?.addEventListener('click', function () { setInputMode('manual'); });
-    byId(prefix + 'ModeFile')?.addEventListener('click', function () {
-      setInputMode('file');
-      loadOutputFiles();
-    });
-    byId(prefix + 'ExtractBtn')?.addEventListener('click', extractIps);
+    byId(prefix + 'ModeFile')?.addEventListener('click', function () { setInputMode('file'); });
+    byId(prefix + 'BrowseFile')?.addEventListener('click', browseAndExtract);
     byId(prefix + 'UseDefault')?.addEventListener('click', clearSel);
     byId(prefix + 'SelectFolder')?.addEventListener('click', browseFolder);
     byId(prefix + 'SelectFiles')?.addEventListener('click', browseFiles);

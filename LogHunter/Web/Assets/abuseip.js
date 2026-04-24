@@ -60,7 +60,209 @@
     return num.toLocaleString('en-US');
   }
 
+  function formatBytes(v) {
+    var value = Number(v || 0);
+    if (!Number.isFinite(value) || value <= 0) return '0 B';
+    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var size = value, index = 0;
+    while (size >= 1024 && index < units.length - 1) { size /= 1024; index++; }
+    return (size >= 10 || index === 0 ? Math.round(size) : size.toFixed(1)) + ' ' + units[index];
+  }
+
+  var _loadingOverlay = null;
+  function showLoading() {
+    if (_loadingOverlay) return;
+    _loadingOverlay = document.createElement('div');
+    _loadingOverlay.className = 'loading-overlay';
+    _loadingOverlay.innerHTML = '<div class="loading-spinner"></div>';
+    document.body.appendChild(_loadingOverlay);
+  }
+  function hideLoading() {
+    if (_loadingOverlay) { _loadingOverlay.remove(); _loadingOverlay = null; }
+  }
+
+  function showIpModal(ips, maxSelect, onConfirm) {
+    var selected = new Set(ips.slice(0, maxSelect).map(function (x) { return x.ip; }));
+    var overlay = document.createElement('div');
+    overlay.className = 'ip-modal-overlay';
+    var modal = document.createElement('div');
+    modal.className = 'ip-modal';
+
+    var header = document.createElement('div');
+    header.className = 'ip-modal-header';
+    header.innerHTML = '<h3>Select IPs</h3><div class="ip-modal-info">' +
+      ips.length + ' IPs found — select up to ' + maxSelect + '</div>';
+    modal.appendChild(header);
+
+    var body = document.createElement('div');
+    body.className = 'ip-modal-body';
+    modal.appendChild(body);
+
+    var footer = document.createElement('div');
+    footer.className = 'ip-modal-footer';
+    var countEl = document.createElement('span');
+    countEl.className = 'ip-modal-count';
+    footer.appendChild(countEl);
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'button-link button-like compact';
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function () { overlay.remove(); });
+    footer.appendChild(cancelBtn);
+
+    var confirmBtn = document.createElement('button');
+    confirmBtn.className = 'button-link primary button-like compact';
+    confirmBtn.type = 'button';
+    confirmBtn.textContent = 'Confirm';
+    confirmBtn.addEventListener('click', function () {
+      overlay.remove();
+      onConfirm(Array.from(selected));
+    });
+    footer.appendChild(confirmBtn);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+
+    var checkboxes = [];
+
+    function updateState() {
+      countEl.textContent = selected.size + ' / ' + maxSelect + ' selected';
+      var atMax = selected.size >= maxSelect;
+      checkboxes.forEach(function (entry) {
+        entry.cb.disabled = !entry.cb.checked && atMax;
+      });
+    }
+
+    var list = document.createElement('div');
+    list.className = 'ip-extract-list';
+    ips.forEach(function (item) {
+      var label = document.createElement('label');
+      label.className = 'ip-extract-item';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = selected.has(item.ip);
+      checkboxes.push({ cb: cb });
+      cb.addEventListener('change', function () {
+        if (cb.checked) {
+          if (selected.size >= maxSelect) { cb.checked = false; return; }
+          selected.add(item.ip);
+        } else {
+          selected.delete(item.ip);
+        }
+        updateState();
+      });
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(' ' + item.ip + ' (' + Number(item.hits).toLocaleString('en-US') + ' hits)'));
+      list.appendChild(label);
+    });
+    body.appendChild(list);
+    updateState();
+
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+  }
+
   // ── Check IPs page ────────────────────────────────────────────────
+
+  var abuseipInputMode = 'manual';
+  var abuseipSelectedIpsFromFile = [];
+  var abuseipSelectedIpsFromBurst = [];
+
+  function setAbuseipInputMode(mode) {
+    abuseipInputMode = mode;
+    var btnManual = byId('abuseipModeManual');
+    var btnFile = byId('abuseipModeFile');
+    var btnBurst = byId('abuseipModeBurst');
+    if (btnManual) btnManual.classList.toggle('active', mode === 'manual');
+    if (btnFile) btnFile.classList.toggle('active', mode === 'file');
+    if (btnBurst) btnBurst.classList.toggle('active', mode === 'burst');
+    setHidden(byId('abuseipManualSection'), mode !== 'manual');
+    setHidden(byId('abuseipFileSection'), mode !== 'file');
+    setHidden(byId('abuseipBurstSection'), mode !== 'burst');
+  }
+
+  async function browseAndSelectBurstIps() {
+    if (_loadingOverlay) return;
+    setError('abuseipError', null);
+    showLoading();
+    try {
+      var payload = await fetch('/api/iis/burst-patterns/ip-cache', {
+        headers: { 'Accept': 'application/json' }
+      }).then(function (r) { return r.json(); });
+
+      var cache = payload.ips || [];
+      if (cache.length === 0) {
+        setError('abuseipError', 'No burst results available. Run a Burst Patterns scan first.');
+        return;
+      }
+
+      var modalIps = cache.map(function (e) { return { ip: e.ip, hits: e.totalHits }; });
+      hideLoading();
+      showIpModal(modalIps, 100, function (selectedIps) {
+        abuseipSelectedIpsFromBurst = selectedIps;
+        var chip = byId('abuseipBurstChip');
+        if (chip) {
+          chip.textContent = selectedIps.length + ' of ' + cache.length + ' IPs selected from burst results';
+          chip.hidden = false;
+        }
+      });
+    } catch (err) {
+      setError('abuseipError', String(err));
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function browseAndExtractAbuseip() {
+    if (_loadingOverlay) return;
+    setError('abuseipError', null);
+    try {
+      var browsePayload = await fetch('/api/abuseip/browse-output-file', {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
+      }).then(function (r) { return r.json(); });
+
+      if (!browsePayload.ok) {
+        if (browsePayload.cancelled) return;
+        throw new Error(browsePayload.error || 'Failed to browse file.');
+      }
+
+      showLoading();
+
+      var extractPayload = await fetch('/api/abuseip/extract-ips', {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: browsePayload.file.path })
+      }).then(function (r) { return r.json(); });
+
+      if (!extractPayload.ok) {
+        setError('abuseipError', extractPayload.error || 'Failed to extract IPs.');
+        return;
+      }
+
+      var ips = extractPayload.ips || [];
+      showIpModal(ips, 100, function (selectedIps) {
+        abuseipSelectedIpsFromFile = selectedIps;
+        var chip = byId('abuseipFileChip');
+        if (chip) {
+          chip.textContent = browsePayload.file.name + ' — ' + selectedIps.length + ' of ' + ips.length + ' IPs selected';
+          chip.hidden = false;
+        }
+      });
+    } catch (err) {
+      setError('abuseipError', String(err));
+    } finally {
+      hideLoading();
+    }
+  }
+
+  function getAbuseipIps() {
+    if (abuseipInputMode === 'file') return abuseipSelectedIpsFromFile.slice();
+    if (abuseipInputMode === 'burst') return abuseipSelectedIpsFromBurst.slice();
+    var textarea = byId('abuseipIpText');
+    var rawText = textarea ? textarea.value.trim() : '';
+    return rawText.split(/[\n,;]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+  }
 
   function initCheckPage() {
     var page = document.querySelector('[data-abuseip-check-page]');
@@ -85,6 +287,12 @@
         setHidden(keyOverrideSection, false);
       });
     }
+
+    byId('abuseipModeManual')?.addEventListener('click', function () { setAbuseipInputMode('manual'); });
+    byId('abuseipModeFile')?.addEventListener('click', function () { setAbuseipInputMode('file'); });
+    byId('abuseipModeBurst')?.addEventListener('click', function () { setAbuseipInputMode('burst'); });
+    byId('abuseipBrowseFile')?.addEventListener('click', browseAndExtractAbuseip);
+    byId('abuseipBrowseBurst')?.addEventListener('click', browseAndSelectBurstIps);
 
     var runBtn = byId('abuseipRun');
     if (runBtn) {
@@ -132,16 +340,9 @@
   function startCheck() {
     setError('abuseipError', null);
 
-    var textarea = byId('abuseipIpText');
-    var rawText = textarea ? textarea.value.trim() : '';
-    if (!rawText) {
-      setError('abuseipError', 'Enter at least one IP address.');
-      return;
-    }
-
-    var lines = rawText.split(/[\n,;]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    var lines = getAbuseipIps();
     if (lines.length === 0) {
-      setError('abuseipError', 'No valid IP addresses found.');
+      setError('abuseipError', 'Enter at least one IP address.');
       return;
     }
 
@@ -254,18 +455,12 @@
     setText('abuseipBarMeta', barMeta);
 
     // Lock inputs while running
-    var runBtn = byId('abuseipRun');
-    if (runBtn) {
-      runBtn.disabled = state === 'running';
-    }
-    var abuseIpText = byId('abuseipIpText');
-    if (abuseIpText) abuseIpText.disabled = state === 'running';
-    var abuseMaxAge = byId('abuseipMaxAge');
-    if (abuseMaxAge) abuseMaxAge.disabled = state === 'running';
-    var abuseKeyDefault = byId('abuseipKeyDefault');
-    if (abuseKeyDefault) abuseKeyDefault.disabled = state === 'running';
-    var abuseKeyOverride = byId('abuseipKeyOverride');
-    if (abuseKeyOverride) abuseKeyOverride.disabled = state === 'running';
+    var locked = state === 'running';
+    ['abuseipRun', 'abuseipIpText', 'abuseipMaxAge', 'abuseipKeyDefault', 'abuseipKeyOverride',
+     'abuseipModeManual', 'abuseipModeFile', 'abuseipModeBurst', 'abuseipBrowseFile', 'abuseipBrowseBurst'].forEach(function (id) {
+      var el = byId(id);
+      if (el) el.disabled = locked;
+    });
 
     // Export button
     var exportBtn = byId('abuseipOpenExport');
@@ -549,23 +744,6 @@
         list.innerHTML = html;
       })
       .catch(function () {});
-  }
-
-  function formatBytes(bytes) {
-    var value = Number(bytes || 0);
-    if (!Number.isFinite(value) || value <= 0) {
-      return '0 B';
-    }
-
-    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    var size = value;
-    var index = 0;
-    while (size >= 1024 && index < units.length - 1) {
-      size /= 1024;
-      index += 1;
-    }
-
-    return (size >= 10 || index === 0 ? Math.round(size) : size.toFixed(1)) + ' ' + units[index];
   }
 
   // ── Initialize ────────────────────────────────────────────────────

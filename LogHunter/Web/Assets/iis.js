@@ -71,10 +71,109 @@
     return formatEta((elapsed / currentStep) * (totalSteps - currentStep));
   }
 
+  var _loadingOverlay = null;
+  function showLoading() {
+    if (_loadingOverlay) return;
+    _loadingOverlay = document.createElement('div');
+    _loadingOverlay.className = 'loading-overlay';
+    _loadingOverlay.innerHTML = '<div class="loading-spinner"></div>';
+    document.body.appendChild(_loadingOverlay);
+  }
+  function hideLoading() {
+    if (_loadingOverlay) { _loadingOverlay.remove(); _loadingOverlay = null; }
+  }
+
+  function showIpModal(ips, maxSelect, onConfirm) {
+    var selected = new Set(ips.slice(0, maxSelect).map(function (x) { return x.ip; }));
+    var overlay = document.createElement('div');
+    overlay.className = 'ip-modal-overlay';
+    var modal = document.createElement('div');
+    modal.className = 'ip-modal';
+
+    var header = document.createElement('div');
+    header.className = 'ip-modal-header';
+    header.innerHTML = '<h3>Select IPs</h3><div class="ip-modal-info">' +
+      ips.length + ' IPs found — select up to ' + maxSelect + '</div>';
+    modal.appendChild(header);
+
+    var body = document.createElement('div');
+    body.className = 'ip-modal-body';
+    modal.appendChild(body);
+
+    var footer = document.createElement('div');
+    footer.className = 'ip-modal-footer';
+    var countEl = document.createElement('span');
+    countEl.className = 'ip-modal-count';
+    footer.appendChild(countEl);
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'button-link button-like compact';
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function () { overlay.remove(); });
+    footer.appendChild(cancelBtn);
+
+    var confirmBtn = document.createElement('button');
+    confirmBtn.className = 'button-link primary button-like compact';
+    confirmBtn.type = 'button';
+    confirmBtn.textContent = 'Confirm';
+    confirmBtn.addEventListener('click', function () {
+      overlay.remove();
+      onConfirm(Array.from(selected));
+    });
+    footer.appendChild(confirmBtn);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+
+    var checkboxes = [];
+
+    function updateState() {
+      countEl.textContent = selected.size + ' / ' + maxSelect + ' selected';
+      var atMax = selected.size >= maxSelect;
+      checkboxes.forEach(function (entry) {
+        entry.cb.disabled = !entry.cb.checked && atMax;
+      });
+    }
+
+    var list = document.createElement('div');
+    list.className = 'ip-extract-list';
+    ips.forEach(function (item) {
+      var label = document.createElement('label');
+      label.className = 'ip-extract-item';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = selected.has(item.ip);
+      checkboxes.push({ cb: cb });
+      cb.addEventListener('change', function () {
+        if (cb.checked) {
+          if (selected.size >= maxSelect) { cb.checked = false; return; }
+          selected.add(item.ip);
+        } else {
+          selected.delete(item.ip);
+        }
+        updateState();
+      });
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(' ' + item.ip + ' (' + Number(item.hits).toLocaleString('en-US') + ' hits)'));
+      list.appendChild(label);
+    });
+    body.appendChild(list);
+    updateState();
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+  }
+
   // ── IIS IP Summary ──────────────────────────────────────────────
 
   let iisIpSummaryPolling = null;
   let iisIpSummaryExportMode = 'export';
+  let iisIpSummaryInputMode = 'manual';
+  let iisIpSummarySourceType = 'default';
+  let iisIpSummaryDefaultSelection = null;
+  let iisIpSummarySelection = null;
+  let iisIpSummaryServerSelection = null;
+  let iisIpSummarySelectedFilePath = '';
+  let iisIpSummarySelectedIpsFromFile = [];
 
   function setIisIpSummaryError(msg) {
     const node = byId('iisIpSummaryError');
@@ -96,26 +195,174 @@
     }
   }
 
+  function setIisIpSummaryInputMode(mode) {
+    iisIpSummaryInputMode = mode;
+    const btnManual = byId('iisIpSummaryModeManual');
+    const btnFile = byId('iisIpSummaryModeFile');
+    if (btnManual) btnManual.classList.toggle('active', mode === 'manual');
+    if (btnFile) btnFile.classList.toggle('active', mode === 'file');
+    setHidden(byId('iisIpSummaryManualSection'), mode !== 'manual');
+    setHidden(byId('iisIpSummaryFileSection'), mode !== 'file');
+  }
+
+  function renderIisIpSummarySource() {
+    const chip = byId('iisIpSummarySourceChip');
+    const clearBtn = byId('iisIpSummaryClearSelection');
+    const st = iisIpSummarySourceType;
+    const sel = iisIpSummarySelection && iisIpSummarySelection.sourceType.toLowerCase().indexOf(st) >= 0 ? iisIpSummarySelection : null;
+
+    const btnDef = byId('iisIpSummaryUseDefault');
+    const btnFol = byId('iisIpSummarySelectFolder');
+    const btnFil = byId('iisIpSummarySelectFiles');
+    if (btnDef) btnDef.classList.toggle('active', st === 'default');
+    if (btnFol) btnFol.classList.toggle('active', st === 'folder');
+    if (btnFil) btnFil.classList.toggle('active', st === 'files');
+    setHidden(clearBtn, st === 'default');
+
+    if (st === 'default') {
+      if (chip) {
+        const d = iisIpSummaryDefaultSelection;
+        chip.textContent = d
+          ? (d.selectionLabel || 'Default folder') + ' | ' + (d.fileCount || 0) + ' files | ' + formatBytes(d.totalBytes || 0)
+          : 'Default folder';
+      }
+      return;
+    }
+    if (!sel) {
+      if (chip) chip.textContent = st === 'folder' ? 'No folder selected' : 'No files selected';
+      return;
+    }
+    if (chip) {
+      chip.textContent = st === 'files'
+        ? sel.fileCount + ' file' + (sel.fileCount === 1 ? '' : 's') + ' | ' + formatBytes(sel.totalBytes)
+        : (sel.selectionLabel || 'Selected folder') + ' | ' + sel.fileCount + ' file' + (sel.fileCount === 1 ? '' : 's') + ' | ' + formatBytes(sel.totalBytes);
+    }
+  }
+
   async function loadIisIpSummaryMeta() {
     const payload = await fetchJson('/api/iis/ip-summary/meta');
+    iisIpSummaryDefaultSelection = payload.defaultSelection || null;
+    renderIisIpSummarySource();
     if (payload.currentJob) {
       renderIisIpSummarySnapshot(payload.currentJob);
       if (payload.currentJob.state === 'running') startIisIpSummaryPolling();
     }
   }
 
+  async function browseAndExtractIisIpSummary() {
+    if (_loadingOverlay) return;
+    setIisIpSummaryError('');
+    try {
+      const browsePayload = await fetchJson('/api/iis/ip-summary/browse-output-file', { method: 'POST' });
+      if (!browsePayload.ok) {
+        if (browsePayload.cancelled) return;
+        throw new Error(browsePayload.error || 'Failed to browse file.');
+      }
+
+      iisIpSummarySelectedFilePath = browsePayload.file.path;
+      showLoading();
+
+      const extractPayload = await fetchJson('/api/iis/ip-summary/extract-ips', {
+        method: 'POST',
+        body: JSON.stringify({ filePath: iisIpSummarySelectedFilePath })
+      });
+
+      if (!extractPayload.ok) {
+        setIisIpSummaryError(extractPayload.error || 'Failed to extract IPs.');
+        return;
+      }
+
+      const ips = extractPayload.ips || [];
+      showIpModal(ips, 10, function (selectedIps) {
+        iisIpSummarySelectedIpsFromFile = selectedIps;
+        const chip = byId('iisIpSummaryFileChip');
+        if (chip) {
+          chip.textContent = browsePayload.file.name + ' — ' + selectedIps.length + ' of ' + ips.length + ' IPs selected';
+          chip.hidden = false;
+        }
+      });
+    } catch (err) {
+      setIisIpSummaryError(String(err));
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function selectIisIpSummaryFolder() {
+    setIisIpSummaryError('');
+    iisIpSummarySourceType = 'folder';
+    renderIisIpSummarySource();
+    try {
+      const payload = await fetchJson('/api/iis/ip-summary/browse-folder', { method: 'POST' });
+      if (!payload.ok) {
+        if (payload.cancelled) { iisIpSummarySourceType = 'default'; renderIisIpSummarySource(); return; }
+        throw new Error(payload.error || 'Failed to browse folder.');
+      }
+      iisIpSummaryServerSelection = payload.selection;
+      iisIpSummarySelection = payload.selection;
+      renderIisIpSummarySource();
+    } catch (err) {
+      iisIpSummarySourceType = 'default';
+      renderIisIpSummarySource();
+      setIisIpSummaryError(String(err));
+    }
+  }
+
+  async function selectIisIpSummaryFiles() {
+    setIisIpSummaryError('');
+    iisIpSummarySourceType = 'files';
+    renderIisIpSummarySource();
+    try {
+      const payload = await fetchJson('/api/iis/ip-summary/browse-files', { method: 'POST' });
+      if (!payload.ok) {
+        if (payload.cancelled) { iisIpSummarySourceType = 'default'; renderIisIpSummarySource(); return; }
+        throw new Error(payload.error || 'Failed to browse files.');
+      }
+      iisIpSummaryServerSelection = payload.selection;
+      iisIpSummarySelection = payload.selection;
+      renderIisIpSummarySource();
+    } catch (err) {
+      iisIpSummarySourceType = 'default';
+      renderIisIpSummarySource();
+      setIisIpSummaryError(String(err));
+    }
+  }
+
+  function clearIisIpSummarySelection() {
+    setIisIpSummaryError('');
+    iisIpSummarySourceType = 'default';
+    iisIpSummarySelection = null;
+    iisIpSummaryServerSelection = null;
+    renderIisIpSummarySource();
+  }
+
+  function getIisIpSummaryIps() {
+    if (iisIpSummaryInputMode === 'file') return iisIpSummarySelectedIpsFromFile.slice();
+    const text = byId('iisIpSummaryIpText')?.value || '';
+    return text.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+  }
+
   async function runIisIpSummary() {
     setIisIpSummaryError('');
-    const text = byId('iisIpSummaryIpText')?.value || '';
-    const ips = text.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+    const ips = getIisIpSummaryIps();
     if (ips.length === 0) { setIisIpSummaryError('Enter at least one IP address.'); return; }
     if (ips.length > 10) { setIisIpSummaryError('Maximum 10 IPs per scan.'); return; }
 
     const isChartOnly = iisIpSummaryExportMode === 'chart';
+    const body = { ips, exportXlsx: !isChartOnly, chartOnly: isChartOnly, sourceType: iisIpSummarySourceType };
+
+    if (iisIpSummaryServerSelection && iisIpSummarySourceType !== 'default') {
+      if (iisIpSummarySourceType === 'folder' && iisIpSummaryServerSelection.rootPath) {
+        body.serverPath = iisIpSummaryServerSelection.rootPath;
+      } else if (iisIpSummaryServerSelection.filePaths) {
+        body.serverFilePaths = iisIpSummaryServerSelection.filePaths;
+      }
+    }
+
     try {
       const payload = await fetchJson('/api/iis/ip-summary/run', {
         method: 'POST',
-        body: JSON.stringify({ ips, exportXlsx: !isChartOnly, chartOnly: isChartOnly })
+        body: JSON.stringify(body)
       });
       if (!payload.ok) { setIisIpSummaryError(payload.error || 'Failed to start scan.'); return; }
       renderIisIpSummarySnapshot(payload.snapshot);
@@ -237,7 +484,10 @@
   }
 
   function setIisIpSummaryInputsLocked(locked) {
-    ['iisIpSummaryRun', 'iisIpSummaryModeChart', 'iisIpSummaryModeExport'].forEach(id => {
+    ['iisIpSummaryRun', 'iisIpSummaryModeChart', 'iisIpSummaryModeExport',
+     'iisIpSummaryModeManual', 'iisIpSummaryModeFile', 'iisIpSummaryBrowseFile',
+     'iisIpSummaryUseDefault', 'iisIpSummarySelectFolder', 'iisIpSummarySelectFiles', 'iisIpSummaryClearSelection'
+    ].forEach(id => {
       const el = byId(id);
       if (el) el.disabled = locked;
     });
@@ -323,8 +573,18 @@
   function initializeIisIpSummaryPage() {
     if (!document.querySelector('[data-iis-ip-summary-page]')) return;
 
+    byId('iisIpSummaryModeManual')?.addEventListener('click', () => setIisIpSummaryInputMode('manual'));
+    byId('iisIpSummaryModeFile')?.addEventListener('click', () => setIisIpSummaryInputMode('file'));
+    byId('iisIpSummaryBrowseFile')?.addEventListener('click', browseAndExtractIisIpSummary);
+
     byId('iisIpSummaryModeChart')?.addEventListener('click', () => setIisIpSummaryExportMode('chart'));
     byId('iisIpSummaryModeExport')?.addEventListener('click', () => setIisIpSummaryExportMode('export'));
+
+    byId('iisIpSummaryUseDefault')?.addEventListener('click', clearIisIpSummarySelection);
+    byId('iisIpSummarySelectFolder')?.addEventListener('click', selectIisIpSummaryFolder);
+    byId('iisIpSummarySelectFiles')?.addEventListener('click', selectIisIpSummaryFiles);
+    byId('iisIpSummaryClearSelection')?.addEventListener('click', clearIisIpSummarySelection);
+
     byId('iisIpSummaryRun')?.addEventListener('click', runIisIpSummary);
 
     const openIisReport = async () => {
@@ -556,6 +816,10 @@
   // ── IIS Burst Patterns ─────────────────────────────────────────
 
   let iisBurstPolling = null;
+  let iisBurstSourceType = 'default';
+  let iisBurstDefaultSelection = null;
+  let iisBurstSelection = null;
+  let iisBurstServerSelection = null;
 
   function setIisBurstError(msg) {
     const node = byId('iisBurstError');
@@ -564,8 +828,92 @@
     node.hidden = !msg;
   }
 
+  function renderIisBurstSource() {
+    const chip = byId('iisBurstSourceChip');
+    const clearBtn = byId('iisBurstClearSelection');
+    const st = iisBurstSourceType;
+    const sel = iisBurstSelection && iisBurstSelection.sourceType.toLowerCase().indexOf(st) >= 0 ? iisBurstSelection : null;
+
+    const btnDef = byId('iisBurstUseDefault');
+    const btnFol = byId('iisBurstSelectFolder');
+    const btnFil = byId('iisBurstSelectFiles');
+    if (btnDef) btnDef.classList.toggle('active', st === 'default');
+    if (btnFol) btnFol.classList.toggle('active', st === 'folder');
+    if (btnFil) btnFil.classList.toggle('active', st === 'files');
+    setHidden(clearBtn, st === 'default');
+
+    if (st === 'default') {
+      if (chip) {
+        const d = iisBurstDefaultSelection;
+        chip.textContent = d
+          ? (d.selectionLabel || 'Default folder') + ' | ' + (d.fileCount || 0) + ' files | ' + formatBytes(d.totalBytes || 0)
+          : 'Default folder';
+      }
+      return;
+    }
+    if (!sel) {
+      if (chip) chip.textContent = st === 'folder' ? 'No folder selected' : 'No files selected';
+      return;
+    }
+    if (chip) {
+      chip.textContent = st === 'files'
+        ? sel.fileCount + ' file' + (sel.fileCount === 1 ? '' : 's') + ' | ' + formatBytes(sel.totalBytes)
+        : (sel.selectionLabel || 'Selected folder') + ' | ' + sel.fileCount + ' file' + (sel.fileCount === 1 ? '' : 's') + ' | ' + formatBytes(sel.totalBytes);
+    }
+  }
+
+  async function selectIisBurstFolder() {
+    setIisBurstError('');
+    iisBurstSourceType = 'folder';
+    renderIisBurstSource();
+    try {
+      const payload = await fetchJson('/api/iis/burst-patterns/browse-folder', { method: 'POST' });
+      if (!payload.ok) {
+        if (payload.cancelled) { iisBurstSourceType = 'default'; renderIisBurstSource(); return; }
+        throw new Error(payload.error || 'Failed to browse folder.');
+      }
+      iisBurstServerSelection = payload.selection;
+      iisBurstSelection = payload.selection;
+      renderIisBurstSource();
+    } catch (err) {
+      iisBurstSourceType = 'default';
+      renderIisBurstSource();
+      setIisBurstError(String(err));
+    }
+  }
+
+  async function selectIisBurstFiles() {
+    setIisBurstError('');
+    iisBurstSourceType = 'files';
+    renderIisBurstSource();
+    try {
+      const payload = await fetchJson('/api/iis/burst-patterns/browse-files', { method: 'POST' });
+      if (!payload.ok) {
+        if (payload.cancelled) { iisBurstSourceType = 'default'; renderIisBurstSource(); return; }
+        throw new Error(payload.error || 'Failed to browse files.');
+      }
+      iisBurstServerSelection = payload.selection;
+      iisBurstSelection = payload.selection;
+      renderIisBurstSource();
+    } catch (err) {
+      iisBurstSourceType = 'default';
+      renderIisBurstSource();
+      setIisBurstError(String(err));
+    }
+  }
+
+  function clearIisBurstSelection() {
+    setIisBurstError('');
+    iisBurstSourceType = 'default';
+    iisBurstSelection = null;
+    iisBurstServerSelection = null;
+    renderIisBurstSource();
+  }
+
   async function loadIisBurstMeta() {
     const payload = await fetchJson('/api/iis/burst-patterns/meta');
+    iisBurstDefaultSelection = payload.defaultSelection || null;
+    renderIisBurstSource();
     if (payload.currentJob) {
       renderIisBurstSnapshot(payload.currentJob);
       if (payload.currentJob.state === 'running') startIisBurstPolling();
@@ -575,11 +923,20 @@
   async function runIisBurst() {
     setIisBurstError('');
     const bucketSeconds = parseInt(byId('iisBurstBucket')?.value || '60', 10);
+    const body = { bucketSeconds, sourceType: iisBurstSourceType };
+
+    if (iisBurstServerSelection && iisBurstSourceType !== 'default') {
+      if (iisBurstSourceType === 'folder' && iisBurstServerSelection.rootPath) {
+        body.serverPath = iisBurstServerSelection.rootPath;
+      } else if (iisBurstServerSelection.filePaths) {
+        body.serverFilePaths = iisBurstServerSelection.filePaths;
+      }
+    }
 
     try {
       const payload = await fetchJson('/api/iis/burst-patterns/run', {
         method: 'POST',
-        body: JSON.stringify({ bucketSeconds })
+        body: JSON.stringify(body)
       });
       if (!payload.ok) { setIisBurstError(payload.error || 'Failed to start scan.'); return; }
       renderIisBurstSnapshot(payload.snapshot);
@@ -650,10 +1007,11 @@
   }
 
   function setIisBurstInputsLocked(locked) {
-    const el = byId('iisBurstRun');
-    if (el) el.disabled = locked;
-    const bucket = byId('iisBurstBucket');
-    if (bucket) bucket.disabled = locked;
+    ['iisBurstRun', 'iisBurstBucket', 'iisBurstUseDefault', 'iisBurstSelectFolder',
+     'iisBurstSelectFiles', 'iisBurstClearSelection'].forEach(id => {
+      const el = byId(id);
+      if (el) el.disabled = locked;
+    });
   }
 
   function renderIisBurstResults(snap) {
@@ -715,6 +1073,10 @@
   function initializeIisBurstPatternsPage() {
     if (!document.querySelector('[data-iis-burst-patterns-page]')) return;
 
+    byId('iisBurstUseDefault')?.addEventListener('click', clearIisBurstSelection);
+    byId('iisBurstSelectFolder')?.addEventListener('click', selectIisBurstFolder);
+    byId('iisBurstSelectFiles')?.addEventListener('click', selectIisBurstFiles);
+    byId('iisBurstClearSelection')?.addEventListener('click', clearIisBurstSelection);
     byId('iisBurstRun')?.addEventListener('click', runIisBurst);
     loadIisBurstMeta().catch(err => setIisBurstError(String(err)));
   }

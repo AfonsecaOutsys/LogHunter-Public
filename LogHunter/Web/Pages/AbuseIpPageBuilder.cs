@@ -90,11 +90,34 @@ internal static class AbuseIpPageBuilder
             <div id="abuseipError" class="inline-error" hidden></div>
 
             <div class="field-group">
+              <label class="field-label">IP source</label>
+              <div class="button-row source-action-row">
+                <button id="abuseipModeManual" class="source-btn active" type="button">Manual entry</button>
+                <button id="abuseipModeFile" class="source-btn" type="button">From output file</button>
+                <button id="abuseipModeBurst" class="source-btn" type="button">From burst results</button>
+              </div>
+            </div>
+
+            <div id="abuseipManualSection" class="field-group">
               <div class="field">
                 <label for="abuseipIpText">IP addresses (one per line)</label>
                 <textarea id="abuseipIpText" rows="6" placeholder="10.0.0.1&#10;192.168.1.100&#10;203.0.113.50"></textarea>
               </div>
               <p class="footer-note">Enter up to 100 IPs. Each will be checked individually against the AbuseIPDB API.</p>
+            </div>
+
+            <div id="abuseipFileSection" class="field-group" hidden>
+              <div class="button-row">
+                <button id="abuseipBrowseFile" class="button-link button-like compact" type="button">Select file &amp; extract IPs</button>
+              </div>
+              <div id="abuseipFileChip" class="source-chip" hidden></div>
+            </div>
+
+            <div id="abuseipBurstSection" class="field-group" hidden>
+              <div class="button-row">
+                <button id="abuseipBrowseBurst" class="button-link button-like compact" type="button">Select from burst results</button>
+              </div>
+              <div id="abuseipBurstChip" class="source-chip" hidden></div>
             </div>
 
             <div class="field-group">

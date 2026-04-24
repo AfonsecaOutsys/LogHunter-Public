@@ -28,7 +28,9 @@ internal sealed class IisIpSummaryJobManager
         bool exportXlsx,
         bool chartOnly,
         out IisIpSummaryJobSnapshot snapshot,
-        out string? error)
+        out string? error,
+        IReadOnlyList<string>? customFiles = null,
+        string? customFolderPath = null)
     {
         lock (_gate)
         {
@@ -53,11 +55,23 @@ internal sealed class IisIpSummaryJobManager
                 return false;
             }
 
-            var files = IisW3cReader.EnumerateLogFiles(AppFolders.IIS);
+            List<string> files;
+            if (customFiles is { Count: > 0 })
+            {
+                files = customFiles.ToList();
+            }
+            else
+            {
+                var folder = !string.IsNullOrWhiteSpace(customFolderPath) ? customFolderPath : AppFolders.IIS;
+                files = IisW3cReader.EnumerateLogFiles(folder);
+            }
+
             if (files.Count == 0)
             {
                 snapshot = _snapshot;
-                error = $"No .log files found in: {AppFolders.IIS}";
+                error = customFiles is { Count: > 0 }
+                    ? "No .log files found in the selected files."
+                    : $"No .log files found in: {(!string.IsNullOrWhiteSpace(customFolderPath) ? customFolderPath : AppFolders.IIS)}";
                 return false;
             }
 

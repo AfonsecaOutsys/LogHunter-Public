@@ -497,18 +497,11 @@ internal static class AlbPageBuilder
 
             <div id="ipSummaryFileSection" class="field-group" hidden>
               <div class="field">
-                <label for="ipSummaryFileSelect">Output file (CSV/XLSX)</label>
-                <select id="ipSummaryFileSelect">
-                  <option value="">Loading files...</option>
-                </select>
-              </div>
-              <button id="ipSummaryExtractBtn" class="button-link primary button-like compact" type="button">Extract IPs</button>
-              <div id="ipSummaryExtractResult" hidden>
-                <div id="ipSummaryExtractInfo" class="source-chip"></div>
-                <div class="field">
-                  <label>Extracted IPs (select up to 10)</label>
-                  <div id="ipSummaryExtractedList" class="ip-extract-list"></div>
+                <label>Output file (CSV/XLSX)</label>
+                <div class="button-row">
+                  <button id="ipSummaryBrowseFile" class="button-link primary button-like compact" type="button">Select file &amp; extract IPs</button>
                 </div>
+                <div id="ipSummaryFileChip" class="source-chip" hidden></div>
               </div>
             </div>
 
@@ -736,18 +729,11 @@ internal static class AlbPageBuilder
 
             <div id="albReqOverTimeFileSection" class="field-group" hidden>
               <div class="field">
-                <label for="albReqOverTimeFileSelect">Output file (CSV/XLSX)</label>
-                <select id="albReqOverTimeFileSelect">
-                  <option value="">Loading files...</option>
-                </select>
-              </div>
-              <button id="albReqOverTimeExtractBtn" class="button-link primary button-like compact" type="button">Extract IPs</button>
-              <div id="albReqOverTimeExtractResult" hidden>
-                <div id="albReqOverTimeExtractInfo" class="source-chip"></div>
-                <div class="field">
-                  <label>Extracted IPs (select up to 20)</label>
-                  <div id="albReqOverTimeExtractedList" class="ip-extract-list"></div>
+                <label>Output file (CSV/XLSX)</label>
+                <div class="button-row">
+                  <button id="albReqOverTimeBrowseFile" class="button-link primary button-like compact" type="button">Select file &amp; extract IPs</button>
                 </div>
+                <div id="albReqOverTimeFileChip" class="source-chip" hidden></div>
               </div>
             </div>
 

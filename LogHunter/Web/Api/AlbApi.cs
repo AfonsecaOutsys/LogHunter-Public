@@ -506,29 +506,28 @@ internal static class AlbApi
             return true;
         }
 
-        if (string.Equals(path, "/api/alb/ip-summary/output-files", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(path, "/api/alb/ip-summary/browse-output-file", StringComparison.OrdinalIgnoreCase))
         {
-            var outDir = AppFolders.Output;
-            var files = new List<object>();
-            if (Directory.Exists(outDir))
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
             {
-                foreach (var fi in Directory.EnumerateFiles(outDir, "*", SearchOption.TopDirectoryOnly)
-                    .Where(p => p.EndsWith(".csv", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
-                    .Select(p => new FileInfo(p))
-                    .OrderByDescending(f => f.CreationTimeUtc)
-                    .Take(50))
-                {
-                    files.Add(new
-                    {
-                        name = fi.Name,
-                        path = fi.FullName,
-                        size = fi.Length,
-                        createdUtc = fi.CreationTimeUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + "Z"
-                    });
-                }
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
             }
 
-            await WriteJsonAsync(context.Response, new { files }).ConfigureAwait(false);
+            var filePath = await NativeFileDialogHelper.BrowseSingleFileAsync(
+                AppFolders.Output, "CSV/Excel files (*.csv;*.xlsx)", "*.csv;*.xlsx").ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, cancelled = true }).ConfigureAwait(false);
+                return true;
+            }
+
+            var fi = new FileInfo(filePath);
+            await WriteJsonAsync(context.Response, new
+            {
+                ok = true,
+                file = new { name = fi.Name, path = fi.FullName, size = fi.Length }
+            }).ConfigureAwait(false);
             return true;
         }
 
@@ -745,29 +744,28 @@ internal static class AlbApi
             return true;
         }
 
-        if (string.Equals(path, "/api/alb/requests-over-time/output-files", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(path, "/api/alb/requests-over-time/browse-output-file", StringComparison.OrdinalIgnoreCase))
         {
-            var outDir = AppFolders.Output;
-            var files = new List<object>();
-            if (Directory.Exists(outDir))
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
             {
-                foreach (var fi in Directory.EnumerateFiles(outDir, "*", SearchOption.TopDirectoryOnly)
-                    .Where(p => p.EndsWith(".csv", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
-                    .Select(p => new FileInfo(p))
-                    .OrderByDescending(f => f.CreationTimeUtc)
-                    .Take(50))
-                {
-                    files.Add(new
-                    {
-                        name = fi.Name,
-                        path = fi.FullName,
-                        size = fi.Length,
-                        createdUtc = fi.CreationTimeUtc.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "Z"
-                    });
-                }
+                await WriteTextAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Method not allowed", "text/plain; charset=utf-8").ConfigureAwait(false);
+                return true;
             }
 
-            await WriteJsonAsync(context.Response, new { files }).ConfigureAwait(false);
+            var filePath = await NativeFileDialogHelper.BrowseSingleFileAsync(
+                AppFolders.Output, "CSV/Excel files (*.csv;*.xlsx)", "*.csv;*.xlsx").ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                await WriteJsonAsync(context.Response, new { ok = false, cancelled = true }).ConfigureAwait(false);
+                return true;
+            }
+
+            var fi = new FileInfo(filePath);
+            await WriteJsonAsync(context.Response, new
+            {
+                ok = true,
+                file = new { name = fi.Name, path = fi.FullName, size = fi.Length }
+            }).ConfigureAwait(false);
             return true;
         }
 

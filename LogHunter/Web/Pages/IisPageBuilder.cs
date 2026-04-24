@@ -123,10 +123,39 @@ internal static class IisPageBuilder
             <div id="iisIpSummaryError" class="inline-error" hidden></div>
 
             <div class="field-group">
+              <label class="field-label">IP input</label>
+              <div class="button-row source-action-row">
+                <button id="iisIpSummaryModeManual" class="source-btn active" type="button">Manual entry</button>
+                <button id="iisIpSummaryModeFile" class="source-btn" type="button">From output file</button>
+              </div>
+            </div>
+
+            <div id="iisIpSummaryManualSection" class="field-group">
               <div class="field">
                 <label for="iisIpSummaryIpText">Client IPs (one per line, max 10)</label>
                 <textarea id="iisIpSummaryIpText" rows="5" placeholder="10.0.0.1&#10;192.168.1.100&#10;172.16.0.5"></textarea>
               </div>
+            </div>
+
+            <div id="iisIpSummaryFileSection" class="field-group" hidden>
+              <div class="field">
+                <label>Output file (CSV/XLSX)</label>
+                <div class="button-row">
+                  <button id="iisIpSummaryBrowseFile" class="button-link primary button-like compact" type="button">Select file &amp; extract IPs</button>
+                </div>
+                <div id="iisIpSummaryFileChip" class="source-chip" hidden></div>
+              </div>
+            </div>
+
+            <div class="field-group source-group">
+              <label class="field-label">Log source</label>
+              <div class="button-row source-action-row">
+                <button id="iisIpSummaryUseDefault" class="source-btn active" type="button">Default folder</button>
+                <button id="iisIpSummarySelectFolder" class="source-btn" type="button">Select folder</button>
+                <button id="iisIpSummarySelectFiles" class="source-btn" type="button">Select files</button>
+                <button id="iisIpSummaryClearSelection" class="source-btn source-btn--clear" type="button" hidden>Clear</button>
+              </div>
+              <div id="iisIpSummarySourceChip" class="source-chip">Loading...</div>
             </div>
 
             <div class="field-group source-group">
@@ -311,6 +340,17 @@ internal static class IisPageBuilder
           <section class="panel form-panel">
             <h2>Scan inputs</h2>
             <div id="iisBurstError" class="inline-error" hidden></div>
+
+            <div class="field-group source-group">
+              <label class="field-label">Log source</label>
+              <div class="button-row source-action-row">
+                <button id="iisBurstUseDefault" class="source-btn active" type="button">Default folder</button>
+                <button id="iisBurstSelectFolder" class="source-btn" type="button">Select folder</button>
+                <button id="iisBurstSelectFiles" class="source-btn" type="button">Select files</button>
+                <button id="iisBurstClearSelection" class="source-btn" type="button" hidden>Clear</button>
+              </div>
+              <div id="iisBurstSourceChip" class="source-chip">Default folder</div>
+            </div>
 
             <div class="field-group">
               <div class="field">

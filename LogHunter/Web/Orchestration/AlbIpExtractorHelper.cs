@@ -232,7 +232,7 @@ internal static class AlbIpExtractorHelper
         for (var i = 0; i < headers.Count; i++)
         {
             var h = headers[i].Trim().ToLowerInvariant();
-            if (h == "hits" || h == "count" || h == "requests")
+            if (h == "hits" || h == "count" || h == "requests" || h == "totalrequests" || h == "postputcount")
                 return i;
         }
         return -1;

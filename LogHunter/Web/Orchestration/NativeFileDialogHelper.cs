@@ -29,6 +29,25 @@ internal static class NativeFileDialogHelper
         return tcs.Task;
     }
 
+    public static Task<string?> BrowseSingleFileAsync(string? initialDirectory = null, string? filterName = null, string? filterSpec = null)
+    {
+        var tcs = new TaskCompletionSource<string?>();
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                tcs.SetResult(ShowSingleFileDialog(initialDirectory, filterName, filterSpec));
+            }
+            catch (Exception ex)
+            {
+                tcs.SetException(ex);
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return tcs.Task;
+    }
+
     public static Task<IReadOnlyList<string>> BrowseFilesAsync(string? initialDirectory = null)
     {
         var tcs = new TaskCompletionSource<IReadOnlyList<string>>();
@@ -57,6 +76,39 @@ internal static class NativeFileDialogHelper
             dialog.GetOptions(out var options);
             dialog.SetOptions(options | FOS.FOS_PICKFOLDERS | FOS.FOS_FORCEFILESYSTEM);
             dialog.SetTitle("Select a folder containing ALB log files");
+
+            if (!string.IsNullOrWhiteSpace(initialDirectory))
+                SetInitialDirectory(dialog, initialDirectory);
+
+            var hr = dialog.Show(owner);
+            if (hr != 0)
+                return null;
+
+            dialog.GetResult(out var item);
+            item.GetDisplayName(SIGDN.SIGDN_FILESYSPATH, out var path);
+            return path;
+        }
+        finally
+        {
+            Marshal.ReleaseComObject(dialog);
+        }
+    }
+
+    private static string? ShowSingleFileDialog(string? initialDirectory, string? filterName, string? filterSpec)
+    {
+        var owner = GetForegroundWindow();
+        var dialog = (IFileOpenDialog)new FileOpenDialogCoClass();
+        try
+        {
+            dialog.GetOptions(out var options);
+            dialog.SetOptions(options | FOS.FOS_FORCEFILESYSTEM);
+            dialog.SetTitle("Select a file");
+
+            if (!string.IsNullOrWhiteSpace(filterName) && !string.IsNullOrWhiteSpace(filterSpec))
+            {
+                var filter = new COMDLG_FILTERSPEC { pszName = filterName, pszSpec = filterSpec };
+                dialog.SetFileTypes(1, new[] { filter });
+            }
 
             if (!string.IsNullOrWhiteSpace(initialDirectory))
                 SetInitialDirectory(dialog, initialDirectory);
