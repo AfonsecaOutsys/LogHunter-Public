@@ -56,7 +56,7 @@ internal static class Program
         string? viewerIp = null;
         int? viewerPort = null;
         string? albDownloadJobPath = null;
-        var consoleMode = !DefaultToWebMode;
+        bool? explicitMode = null;
         var launchBrowser = true;
 
         for (var i = 0; i < args.Length; i++)
@@ -91,14 +91,21 @@ internal static class Program
 
             if (a == "--web")
             {
-                consoleMode = false;
+                explicitMode = false;
                 continue;
             }
 
             if (a == "--console")
             {
-                consoleMode = true;
+                explicitMode = true;
                 continue;
+            }
+
+            if (a == "--reset-mode")
+            {
+                StartupModeDialog.ClearSavedMode();
+                Console.WriteLine("Saved startup mode cleared.");
+                return;
             }
 
             if (a == "--no-browser")
@@ -220,6 +227,22 @@ internal static class Program
             }
 
             AppFolders.Ensure();
+
+            bool consoleMode;
+            if (explicitMode.HasValue)
+            {
+                consoleMode = explicitMode.Value;
+            }
+            else if (StartupModeDialog.TrySavedMode(out var savedMode))
+            {
+                consoleMode = savedMode == StartupModeDialog.Mode.Console;
+            }
+            else
+            {
+                var chosen = StartupModeDialog.ShowDialog();
+                consoleMode = chosen == StartupModeDialog.Mode.Console;
+            }
+
             EmbeddedAssets.EnsureTabulatorAssets(root);
 
             var session = new SessionState(root);
@@ -281,8 +304,9 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --root <path>           Workspace path (defaults to the exe folder)");
-        Console.WriteLine("  --console               Start the legacy console menu");
-        Console.WriteLine("  --web                   Explicitly start the local web shell on 127.0.0.1");
+        Console.WriteLine("  --console               Start the console menu (skip mode dialog)");
+        Console.WriteLine("  --web                   Start the local web shell on 127.0.0.1 (skip mode dialog)");
+        Console.WriteLine("  --reset-mode            Clear saved startup mode preference");
         Console.WriteLine("  --no-browser            In web mode, do not auto-open the default browser");
         Console.WriteLine("  --viewer-sqlite <path>  Start the SQLite viewer for the specified database");
         Console.WriteLine("  --viewer-ip <ip>        Optional selected IP shown in viewer metadata");
