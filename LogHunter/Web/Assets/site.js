@@ -102,10 +102,35 @@ function startAppInfoPolling() {
   }, APP_INFO_POLL_MS);
 }
 
+function initializeSqliteViewerCard() {
+  const btn = document.getElementById('openSqliteViewer');
+  if (!btn) return;
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    const original = btn.querySelector('p');
+    if (original) original.textContent = 'Opening file picker\u2026';
+    try {
+      const res = await fetch('/api/viewer/browse-and-launch', { method: 'POST' });
+      const data = await res.json();
+      if (original) original.textContent = data.ok
+        ? 'Viewer launched \u2014 check your browser tabs.'
+        : (data.message || 'No file selected.');
+    } catch {
+      if (original) original.textContent = 'Failed to reach the server.';
+    }
+    setTimeout(() => {
+      btn.disabled = false;
+      if (original) original.textContent = 'Open an existing .db file.';
+    }, 3000);
+  });
+}
+
 function initializeShell() {
   initializeTheme();
   loadAppInfo().catch(() => {});
   startAppInfoPolling();
+  initializeSqliteViewerCard();
 }
 
 if (document.readyState === 'loading') {

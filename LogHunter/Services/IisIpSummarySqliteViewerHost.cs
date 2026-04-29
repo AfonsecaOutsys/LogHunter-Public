@@ -9,6 +9,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using LogHunter.Viewer;
 using Microsoft.Data.Sqlite;
@@ -22,7 +23,7 @@ internal sealed class IisIpSummarySqliteViewerHost : IDisposable
     private readonly string _dbPath;
     private readonly string? _requestedIp;
     private readonly HttpListener _listener = new();
-    private readonly SqliteConnection _connection;
+    private readonly string _connectionString;
     private readonly int _port;
     private readonly string _baseUrl;
 
@@ -33,11 +34,22 @@ internal sealed class IisIpSummarySqliteViewerHost : IDisposable
         if (!File.Exists(_dbPath))
             throw new FileNotFoundException("SQLite database was not found.", _dbPath);
 
-        _connection = new SqliteConnection($"Data Source={_dbPath};Mode=ReadOnly");
-        _connection.Open();
+        _connectionString = $"Data Source={_dbPath};Mode=ReadOnly";
         _port = port is > 0 ? port.Value : GetFreePort();
         _baseUrl = $"http://127.0.0.1:{_port}/";
         _listener.Prefixes.Add(_baseUrl);
+    }
+
+    private SqliteConnection OpenConnection()
+    {
+        var conn = new SqliteConnection(_connectionString);
+        conn.Open();
+        using (var pragma = conn.CreateCommand())
+        {
+            pragma.CommandText = "PRAGMA query_only = 1; PRAGMA mmap_size = 268435456; PRAGMA cache_size = -65536; PRAGMA temp_store = MEMORY;";
+            pragma.ExecuteNonQuery();
+        }
+        return conn;
     }
 
     public async Task RunAsync(Func<bool> stopRequested)
@@ -49,28 +61,76 @@ internal sealed class IisIpSummarySqliteViewerHost : IDisposable
         Console.WriteLine($"Viewer URL: {_baseUrl}");
         Console.WriteLine("Press Ctrl+C in this viewer process to stop the local server.");
 
-        var getContextTask = _listener.GetContextAsync();
         await Task.Delay(350).ConfigureAwait(false);
         TryOpenBrowser(_baseUrl);
-        while (!stopRequested())
-        {
-            HttpListenerContext? context = null;
-            try
-            {
-                var completed = await Task.WhenAny(getContextTask, Task.Delay(500)).ConfigureAwait(false);
-                if (completed != getContextTask)
-                    continue;
 
-                context = await getContextTask.ConfigureAwait(false);
-                getContextTask = _listener.GetContextAsync();
-                await HandleAsync(context, metadata).ConfigureAwait(false);
-            }
-            catch (HttpListenerException) when (stopRequested()) { break; }
-            catch (ObjectDisposedException) when (stopRequested()) { break; }
-            catch (Exception ex) when (context is not null)
+        // Background watcher: when stopRequested flips to true, stop the listener so any
+        // in-flight GetContextAsync() awaits unblock with HttpListenerException/ObjectDisposedException.
+        using var stopWatcherCts = new CancellationTokenSource();
+        var stopWatcher = Task.Run(async () =>
+        {
+            while (!stopWatcherCts.IsCancellationRequested)
             {
-                await WriteTextAsync(context.Response, HttpStatusCode.InternalServerError, ex.ToString(), "text/plain; charset=utf-8").ConfigureAwait(false);
+                if (stopRequested())
+                {
+                    try { _listener.Stop(); } catch { /* listener already stopped/disposed */ }
+                    return;
+                }
+                try
+                {
+                    await Task.Delay(100, stopWatcherCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
             }
+        });
+
+        try
+        {
+            while (!stopRequested())
+            {
+                HttpListenerContext context;
+                try
+                {
+                    context = await _listener.GetContextAsync().ConfigureAwait(false);
+                }
+                catch (HttpListenerException) when (stopRequested())
+                {
+                    break;
+                }
+                catch (ObjectDisposedException) when (stopRequested())
+                {
+                    break;
+                }
+
+                // Dispatch handling on the thread pool so the accept loop is never blocked
+                // by a slow request. Each request is fully isolated.
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await HandleAsync(context, metadata).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        try
+                        {
+                            await WriteTextAsync(context.Response, HttpStatusCode.InternalServerError, ex.ToString(), "text/plain; charset=utf-8").ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            // Response already closed or unwritable; swallow to keep the loop alive.
+                        }
+                    }
+                });
+            }
+        }
+        finally
+        {
+            stopWatcherCts.Cancel();
+            try { await stopWatcher.ConfigureAwait(false); } catch { /* ignore watcher shutdown errors */ }
         }
     }
 
@@ -79,7 +139,6 @@ internal sealed class IisIpSummarySqliteViewerHost : IDisposable
         if (_listener.IsListening)
             _listener.Stop();
         _listener.Close();
-        _connection.Dispose();
     }
 
     private async Task HandleAsync(HttpListenerContext context, ViewerMetadata metadata)
@@ -116,7 +175,8 @@ internal sealed class IisIpSummarySqliteViewerHost : IDisposable
 
     private ViewerMetadata LoadMetadata()
     {
-        using var cmd = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*), MIN(TimestampUtc), MAX(TimestampUtc), MIN(ClientIp), COUNT(DISTINCT ClientIp) FROM Hits;";
         using var reader = cmd.ExecuteReader();
         reader.Read();
@@ -142,7 +202,8 @@ internal sealed class IisIpSummarySqliteViewerHost : IDisposable
 
     private string[] LoadMethods()
     {
-        using var cmd = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT Method FROM Hits WHERE Method IS NOT NULL AND Method <> '-' AND Method <> '' ORDER BY Method COLLATE NOCASE;";
         using var reader = cmd.ExecuteReader();
         var values = new List<string>();
@@ -154,8 +215,9 @@ internal sealed class IisIpSummarySqliteViewerHost : IDisposable
     private ViewerRowsResponse QueryRows(ViewerQueryRequest request)
     {
         var where = new List<string>();
-        using var countCmd = _connection.CreateCommand();
-        using var rowsCmd = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var countCmd = connection.CreateCommand();
+        using var rowsCmd = connection.CreateCommand();
 
         AddPreset(where, request.Preset);
         ApplyFilters(where, countCmd, request);
@@ -189,7 +251,8 @@ LIMIT $limit OFFSET $offset;";
     private async Task WriteCsvAsync(HttpListenerResponse response, ViewerQueryRequest request)
     {
         var where = new List<string>();
-        using var cmd = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var cmd = connection.CreateCommand();
         AddPreset(where, request.Preset);
         ApplyFilters(where, cmd, request);
         var whereClause = where.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", where);

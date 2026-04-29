@@ -30,8 +30,8 @@ public static class PlatformSuspiciousErrorDefinitions
     [
         new PlatformSuspiciousErrorDefinition
         {
-            Name = "Dangerous Request.Path",
-            ContainsText = "A potentially dangerous Request.Path value was detected from the client"
+            Name = "Dangerous Request value",
+            ContainsText = "A potentially dangerous Request."
         },
         new PlatformSuspiciousErrorDefinition
         {

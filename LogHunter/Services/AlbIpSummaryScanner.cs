@@ -315,8 +315,11 @@ public static class AlbIpSummaryScanner
         row = null;
 
         var span = line.AsSpan();
-        if (!TryGetToken(span, 1, out var timestampToken))
-            return false;
+        Span<(int start, int length)> slots = stackalloc (int, int)[24];
+        int n = TokenizeAlbLine(span, slots);
+
+        if (1 >= n) return false;
+        var timestampToken = span.Slice(slots[1].start, slots[1].length);
 
         if (!DateTime.TryParse(timestampToken, CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
@@ -325,8 +328,8 @@ public static class AlbIpSummaryScanner
             return false;
         }
 
-        if (!TryGetToken(span, 3, out var clientToken))
-            return false;
+        if (3 >= n) return false;
+        var clientToken = span.Slice(slots[3].start, slots[3].length);
 
         SplitEndpoint(clientToken, out var clientIpToken, out _);
         if (clientIpToken.Length == 0)
@@ -335,15 +338,15 @@ public static class AlbIpSummaryScanner
         if (!IPAddress.TryParse(clientIpToken, out var clientIp) || !clientIp.Equals(requestedIp))
             return false;
 
-        TryGetToken(span, 4, out var targetToken);
-        TryGetToken(span, 5, out var requestProcToken);
-        TryGetToken(span, 6, out var targetProcToken);
-        TryGetToken(span, 7, out var responseProcToken);
-        TryGetToken(span, 8, out var elbStatusToken);
-        TryGetToken(span, 9, out var targetStatusToken);
-        TryGetToken(span, 12, out var requestToken);
-        TryGetToken(span, 13, out var userAgentToken);
-        TryGetToken(span, 22, out var actionsToken);
+        var targetToken = 4 < n ? span.Slice(slots[4].start, slots[4].length) : default;
+        var requestProcToken = 5 < n ? span.Slice(slots[5].start, slots[5].length) : default;
+        var targetProcToken = 6 < n ? span.Slice(slots[6].start, slots[6].length) : default;
+        var responseProcToken = 7 < n ? span.Slice(slots[7].start, slots[7].length) : default;
+        var elbStatusToken = 8 < n ? span.Slice(slots[8].start, slots[8].length) : default;
+        var targetStatusToken = 9 < n ? span.Slice(slots[9].start, slots[9].length) : default;
+        var requestToken = 12 < n ? span.Slice(slots[12].start, slots[12].length) : default;
+        var userAgentToken = 13 < n ? span.Slice(slots[13].start, slots[13].length) : default;
+        var actionsToken = 22 < n ? span.Slice(slots[22].start, slots[22].length) : default;
 
         ParseRequest(requestToken,
             out var method,
@@ -372,8 +375,11 @@ public static class AlbIpSummaryScanner
         row = null;
 
         var span = line.AsSpan();
-        if (!TryGetToken(span, 1, out var timestampToken))
-            return false;
+        Span<(int start, int length)> slots = stackalloc (int, int)[24];
+        int n = TokenizeAlbLine(span, slots);
+
+        if (1 >= n) return false;
+        var timestampToken = span.Slice(slots[1].start, slots[1].length);
 
         if (!DateTime.TryParse(timestampToken, CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
@@ -382,8 +388,8 @@ public static class AlbIpSummaryScanner
             return false;
         }
 
-        if (!TryGetToken(span, 3, out var clientToken))
-            return false;
+        if (3 >= n) return false;
+        var clientToken = span.Slice(slots[3].start, slots[3].length);
 
         SplitEndpoint(clientToken, out var clientIpToken, out _);
         if (clientIpToken.Length == 0)
@@ -393,15 +399,15 @@ public static class AlbIpSummaryScanner
         if (!resultsByIp.TryGetValue(clientIp, out result))
             return false;
 
-        TryGetToken(span, 4, out var targetToken);
-        TryGetToken(span, 5, out var requestProcToken);
-        TryGetToken(span, 6, out var targetProcToken);
-        TryGetToken(span, 7, out var responseProcToken);
-        TryGetToken(span, 8, out var elbStatusToken);
-        TryGetToken(span, 9, out var targetStatusToken);
-        TryGetToken(span, 12, out var requestToken);
-        TryGetToken(span, 13, out var userAgentToken);
-        TryGetToken(span, 22, out var actionsToken);
+        var targetToken = 4 < n ? span.Slice(slots[4].start, slots[4].length) : default;
+        var requestProcToken = 5 < n ? span.Slice(slots[5].start, slots[5].length) : default;
+        var targetProcToken = 6 < n ? span.Slice(slots[6].start, slots[6].length) : default;
+        var responseProcToken = 7 < n ? span.Slice(slots[7].start, slots[7].length) : default;
+        var elbStatusToken = 8 < n ? span.Slice(slots[8].start, slots[8].length) : default;
+        var targetStatusToken = 9 < n ? span.Slice(slots[9].start, slots[9].length) : default;
+        var requestToken = 12 < n ? span.Slice(slots[12].start, slots[12].length) : default;
+        var userAgentToken = 13 < n ? span.Slice(slots[13].start, slots[13].length) : default;
+        var actionsToken = 22 < n ? span.Slice(slots[22].start, slots[22].length) : default;
 
         ParseRequest(requestToken, out var method, out var rawRequest);
 
@@ -485,11 +491,10 @@ public static class AlbIpSummaryScanner
 
     private static string NormalizeToken(ReadOnlySpan<char> token)
     {
-        if (token.Length == 0)
+        token = token.Trim();
+        if (token.IsEmpty || (token.Length == 1 && token[0] == '-'))
             return "-";
-
-        var text = token.ToString().Trim();
-        return string.IsNullOrWhiteSpace(text) ? "-" : text;
+        return token.ToString();
     }
 
     private static int? ParseNullableInt(ReadOnlySpan<char> token)
@@ -538,14 +543,12 @@ public static class AlbIpSummaryScanner
         port = portCandidate;
     }
 
-    private static bool TryGetToken(ReadOnlySpan<char> line, int tokenIndex, out ReadOnlySpan<char> token)
+    private static int TokenizeAlbLine(ReadOnlySpan<char> line, Span<(int start, int length)> slots)
     {
-        token = default;
-
         int idx = 0;
-        int current = 0;
+        int count = 0;
 
-        while (idx < line.Length)
+        while (idx < line.Length && count < slots.Length)
         {
             while (idx < line.Length && line[idx] == ' ')
                 idx++;
@@ -567,29 +570,17 @@ public static class AlbIpSummaryScanner
                 int end = idx;
                 idx = Math.Min(idx + 1, line.Length);
 
-                if (current == tokenIndex)
-                {
-                    token = line.Slice(start, end - start);
-                    return true;
-                }
-
-                current++;
+                slots[count++] = (start, end - start);
                 continue;
             }
 
             while (idx < line.Length && line[idx] != ' ')
                 idx++;
 
-            int endUnquoted = idx;
-            if (current == tokenIndex)
-            {
-                token = line.Slice(start, endUnquoted - start);
-                return true;
-            }
-
-            current++;
+            slots[count++] = (start, idx - start);
         }
 
-        return false;
+        return count;
     }
+
 }

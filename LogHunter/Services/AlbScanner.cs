@@ -404,7 +404,7 @@ public static class AlbScanner
                 continue;
 
             // Key format: "IP\tURI" (avoids heavier composite keys)
-            var key = $"{ip}\t{uri}";
+            var key = string.Concat(ip, "\t", uri);
 
             if (pairCounts.TryGetValue(key, out var cur))
                 pairCounts[key] = cur + 1;
