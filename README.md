@@ -46,6 +46,14 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 1.8.0.1
+
+- Speeds up ALB Top 50 by AVG duration and Top 50 IPs Overall on multi-file inputs by reading files in parallel where the per-line CPU cost makes it worthwhile.
+- Tightens the ALB hot-path tokenizer (single pass per line) for IP Summary and Status Mismatch scans.
+- Keeps WAF Blocked Summary and the per-minute WAF chart on the original sequential reader after benchmarking showed parallel reads regressed on cold I/O-bound runs.
+- Reduces internal allocations in WAF Blocked Summary aggregation and trims a few hot-path string concatenations in `AlbScanner`.
+- Cleans up dead tokenizer helpers orphaned by the single-pass rewrite.
+
 ### 1.6
 
 - Adds AbuseIPDB check workflow with dedicated settings management and IP selection from multiple sources (ALB, IIS burst, Platform suspicious cache).
