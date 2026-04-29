@@ -42,11 +42,22 @@ public static partial class AlbOptions
 
         var result = new AlbStatusMismatchScanner.ScanResult();
 
-        await RunScanWithProgressAsync(
+        await RunScanWithProgressParallelAsync(
             title: "Scanning ALB logs (5xx while backend succeeded)",
             files: files,
-            scanFileAsync: (file, reportDelta) =>
-                AlbStatusMismatchScanner.ScanFileAsync(file, result, reportDelta)
+            createLocal: () => new AlbStatusMismatchScanner.ScanResult(),
+            scanFileAsync: (file, local, reportDelta, _) =>
+                AlbStatusMismatchScanner.ScanFileAsync(file, local, reportDelta),
+            mergeLocal: local =>
+            {
+                // Merge by replaying rows in their per-file scan order.
+                // ScanResult.AddRow already handles all derived state (counters,
+                // FirstHit/LastHit, SourceFiles, TotalRows). Locals are merged
+                // in input file order, so the master Rows list ends up identical
+                // to the original sequential scan.
+                foreach (var row in local.Rows)
+                    result.AddRow(row, row.SourceFile);
+            }
         );
 
         if (result.TotalRows == 0)

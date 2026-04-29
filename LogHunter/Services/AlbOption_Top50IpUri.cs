@@ -44,14 +44,25 @@ public static partial class AlbOptions
 
         var pairCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        await RunScanWithProgressAsync(
+        await RunScanWithProgressParallelAsync(
             title: "Scanning ALB logs",
             files: files,
-            scanFileAsync: (file, reportDelta) =>
+            createLocal: () => new Dictionary<string, int>(StringComparer.Ordinal),
+            scanFileAsync: (file, local, reportDelta, _) =>
                 AlbScanner.ScanFileForIpUriCountsAsync(
                     filePath: file,
-                    pairCounts: pairCounts,
-                    reportBytesDelta: reportDelta)
+                    pairCounts: local,
+                    reportBytesDelta: reportDelta),
+            mergeLocal: local =>
+            {
+                foreach (var kvp in local)
+                {
+                    if (pairCounts.TryGetValue(kvp.Key, out var cur))
+                        pairCounts[kvp.Key] = cur + kvp.Value;
+                    else
+                        pairCounts[kvp.Key] = kvp.Value;
+                }
+            }
         );
 
         if (pairCounts.Count == 0)

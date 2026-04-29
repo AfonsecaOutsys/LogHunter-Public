@@ -152,6 +152,20 @@ internal static class WebShellPageBuilder
           </div>
         </section>
 
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">Tools</div>
+            </div>
+          </div>
+          <div class="tools-row">
+            <button class="section-card section-card--launch section-card--compact" id="openSqliteViewer" type="button">
+              <h3>SQLite Viewer</h3>
+              <p>Open an existing .db file.</p>
+            </button>
+          </div>
+        </section>
+
         <section class="subtle-status-row">
           <div class="subtle-status-pill">
             <span class="info-label">Workspace</span>

@@ -431,6 +431,36 @@ code {
   border: 1px solid rgba(29, 111, 95, 0.10);
 }
 
+button.section-card--launch {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+button.section-card--launch:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.tools-row {
+  display: flex;
+  gap: 16px;
+}
+
+.section-card--compact {
+  padding: 14px 20px;
+  max-width: 260px;
+}
+
+.section-card--compact h3 {
+  font-size: 0.95rem;
+}
+
+.section-card--compact p {
+  font-size: 0.85rem;
+}
+
 .section-card--launch:hover,
 .section-card--launch:focus-visible,
 .option-card--action:hover {

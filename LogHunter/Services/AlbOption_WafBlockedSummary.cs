@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using LogHunter.Utils;
 using Spectre.Console;
@@ -12,6 +13,13 @@ namespace LogHunter.Services;
 public static partial class AlbOptions
 {
     // ---------- OPTION 8 ----------
+
+    private sealed class WafBlockedLocal
+    {
+        public long Total;
+        public long Blocked;
+        public Dictionary<string, Dictionary<string, int>> Pairs = new(StringComparer.Ordinal);
+    }
 
     public static async Task WafBlockedSummaryAsync(string root)
     {
@@ -41,104 +49,53 @@ public static partial class AlbOptions
             ("Files", files.Count.ToString("N0")),
             ("Input", albFolder));
 
-        var totalBytes = SumFileSizesSafe(files);
-
         long total = 0;
         long blocked = 0;
+        var pairs = new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
 
-        var blockedCounts = new Dictionary<string, int>(StringComparer.Ordinal);
-
-        await AnsiConsole.Progress()
-            .AutoClear(false)
-            .Columns(new ProgressColumn[]
+        await RunScanWithProgressParallelAsync(
+            title: "Scanning ALB logs",
+            files: files,
+            createLocal: () => new WafBlockedLocal(),
+            scanFileAsync: ScanFileForWafBlockedSummaryAsync,
+            mergeLocal: local =>
             {
-                new TaskDescriptionColumn(),
-                new ProgressBarColumn(),
-                new PercentageColumn(),
-                new RemainingTimeColumn(),
-                new SpinnerColumn()
-            })
-            .StartAsync(async ctx =>
-            {
-                var task = ctx.AddTask("Scanning ALB logs", maxValue: Math.Max(1, totalBytes));
-
-                foreach (var file in files)
+                total += local.Total;
+                blocked += local.Blocked;
+                foreach (var ipKvp in local.Pairs)
                 {
-                    using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 1 << 20, FileOptions.SequentialScan);
-                    using var sr = new StreamReader(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1 << 20);
-
-                    long lastReportedPos = 0;
-                    const long chunk = 64L * 1024 * 1024;
-
-                    while (true)
+                    if (!pairs.TryGetValue(ipKvp.Key, out var uriMap))
                     {
-                        var line = await sr.ReadLineAsync().ConfigureAwait(false);
-                        if (line is null) break;
-                        if (line.Length == 0) continue;
-
-                        total++;
-
-                        // Current definition: blocked == NOT "waf,forward"
-                        if (!line.Contains("waf,forward", StringComparison.OrdinalIgnoreCase))
-                        {
-                            blocked++;
-
-                            var ip = AlbScanner.ExtractAlbClientIp(line);
-                            if (ip is not null)
-                            {
-                                var uri = AlbScanner.ExtractAlbUriNoQuery(line) ?? "";
-                                var key = $"{ip}\t{uri}";
-
-                                if (blockedCounts.TryGetValue(key, out var cur))
-                                    blockedCounts[key] = cur + 1;
-                                else
-                                    blockedCounts[key] = 1;
-                            }
-                        }
-
-                        var pos = fs.Position;
-                        if (pos - lastReportedPos >= chunk)
-                        {
-                            task.Increment(pos - lastReportedPos);
-                            lastReportedPos = pos;
-                        }
+                        uriMap = new Dictionary<string, int>(StringComparer.Ordinal);
+                        pairs[ipKvp.Key] = uriMap;
                     }
-
-                    var remaining = fs.Length - lastReportedPos;
-                    if (remaining > 0)
-                        task.Increment(remaining);
+                    foreach (var uriKvp in ipKvp.Value)
+                    {
+                        if (uriMap.TryGetValue(uriKvp.Key, out var cur))
+                            uriMap[uriKvp.Key] = cur + uriKvp.Value;
+                        else
+                            uriMap[uriKvp.Key] = uriKvp.Value;
+                    }
                 }
-
-                if (task.Value < task.MaxValue)
-                    task.Value = task.MaxValue;
-
-                task.StopTask();
-            });
-
-        AnsiConsole.WriteLine();
+            }).ConfigureAwait(false);
 
         InfoPanel("Summary",
             ("Total entries parsed", total.ToString("N0")),
             ("Blocked entries", $"{blocked:N0} (entries without 'waf,forward')"));
 
-        if (blockedCounts.Count == 0)
+        var totalPairs = pairs.Sum(p => (long)p.Value.Count);
+        if (totalPairs == 0)
         {
             ConsoleEx.Warn("No blocked requests found (or blocked entries had no parseable IP/URI).");
             ConsoleEx.Pause("Press Enter to return...");
             return;
         }
 
-        var top = blockedCounts
-            .OrderByDescending(kvp => kvp.Value)
+        var top = pairs
+            .SelectMany(ipKvp => ipKvp.Value.Select(uriKvp => new { IP = ipKvp.Key, URI = uriKvp.Key, Hits = uriKvp.Value }))
+            .OrderByDescending(x => x.Hits)
             .Take(50)
-            .Select((kvp, idx) =>
-            {
-                var key = kvp.Key;
-                var tab = key.IndexOf('\t');
-                var ip = tab > 0 ? key[..tab] : key;
-                var uri = (tab > 0 && tab + 1 < key.Length) ? key[(tab + 1)..] : "";
-                return new { Rank = idx + 1, IP = ip, URI = uri, Hits = kvp.Value };
-            })
+            .Select((x, idx) => new { Rank = idx + 1, x.IP, x.URI, x.Hits })
             .ToList();
 
         var table = TopTable("Rank", "Hits", "IP", "URI");
@@ -171,5 +128,65 @@ public static partial class AlbOptions
         }
 
         ConsoleEx.Pause("Press Enter to return...");
+    }
+
+    private static async Task ScanFileForWafBlockedSummaryAsync(
+        string filePath,
+        WafBlockedLocal local,
+        Action<long> reportBytesDelta,
+        CancellationToken ct)
+    {
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 1 << 20, FileOptions.SequentialScan);
+        using var sr = new StreamReader(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1 << 20);
+
+        long lastReportedPos = 0;
+        const long chunk = 64L * 1024 * 1024;
+        int lineCount = 0;
+
+        while (true)
+        {
+            if ((++lineCount & 0xFFFF) == 0)
+                ct.ThrowIfCancellationRequested();
+
+            var line = await sr.ReadLineAsync().ConfigureAwait(false);
+            if (line is null) break;
+            if (line.Length == 0) continue;
+
+            local.Total++;
+
+            // Current definition: blocked == NOT "waf,forward"
+            if (!line.Contains("waf,forward", StringComparison.OrdinalIgnoreCase))
+            {
+                local.Blocked++;
+
+                var ip = AlbScanner.ExtractAlbClientIp(line);
+                if (ip is not null)
+                {
+                    var uri = AlbScanner.ExtractAlbUriNoQuery(line) ?? "";
+
+                    if (!local.Pairs.TryGetValue(ip, out var uriMap))
+                    {
+                        uriMap = new Dictionary<string, int>(StringComparer.Ordinal);
+                        local.Pairs[ip] = uriMap;
+                    }
+
+                    if (uriMap.TryGetValue(uri, out var cur))
+                        uriMap[uri] = cur + 1;
+                    else
+                        uriMap[uri] = 1;
+                }
+            }
+
+            var pos = fs.Position;
+            if (pos - lastReportedPos >= chunk)
+            {
+                reportBytesDelta(pos - lastReportedPos);
+                lastReportedPos = pos;
+            }
+        }
+
+        var remaining = fs.Length - lastReportedPos;
+        if (remaining > 0)
+            reportBytesDelta(remaining);
     }
 }

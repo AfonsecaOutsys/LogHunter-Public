@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
 using LogHunter.Utils;
@@ -12,7 +13,7 @@ namespace LogHunter.Services;
 
 public static partial class AlbOptions
 {
-    private struct UriAgg
+    internal struct UriAgg
     {
         public long Count;
         public double SumSeconds;
@@ -50,85 +51,47 @@ public static partial class AlbOptions
             ("Input", albFolder));
 
         var stats = new Dictionary<string, UriAgg>(StringComparer.Ordinal);
-        var totalBytes = SumFileSizesSafe(files);
 
-        // ✅ Ctrl+C cancels scanning and returns (doesn't kill the app)
+        using var cts = new CancellationTokenSource();
         var cancelled = false;
         ConsoleCancelEventHandler? cancelHandler = (_, e) =>
         {
             e.Cancel = true;
             cancelled = true;
+            cts.Cancel();
         };
 
         Console.CancelKeyPress += cancelHandler;
 
         try
         {
-            await AnsiConsole.Progress()
-                .AutoClear(false)
-                .Columns(new ProgressColumn[]
+            await RunScanWithProgressParallelAsync(
+                title: "Scanning ALB logs (Ctrl+C to cancel)",
+                files: files,
+                createLocal: () => new Dictionary<string, UriAgg>(StringComparer.Ordinal),
+                scanFileAsync: ScanFileForUriDurationAsync,
+                mergeLocal: local =>
                 {
-                new TaskDescriptionColumn(),
-                new ProgressBarColumn(),
-                new PercentageColumn(),
-                new RemainingTimeColumn(),
-                new SpinnerColumn()
-                })
-                .StartAsync(async ctx =>
-                {
-                    var task = ctx.AddTask("Scanning ALB logs (Ctrl+C to cancel)", maxValue: Math.Max(1, totalBytes));
-
-                    foreach (var file in files)
+                    foreach (var kvp in local)
                     {
-                        if (cancelled) break;
-
-                        using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 1 << 20, FileOptions.SequentialScan);
-                        using var sr = new StreamReader(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1 << 20);
-
-                        long lastReportedPos = 0;
-                        const long chunk = 64L * 1024 * 1024;
-
-                        while (!cancelled)
+                        if (stats.TryGetValue(kvp.Key, out var agg))
                         {
-                            var line = await sr.ReadLineAsync().ConfigureAwait(false);
-                            if (line is null) break;
-                            if (line.Length == 0) continue;
-
-                            var dur = AlbScanner.ExtractAlbTargetProcessingTimeSeconds(line);
-                            if (dur is null || dur.Value < 0) continue;
-
-                            var uri = AlbScanner.ExtractAlbUriNoQuery(line);
-                            if (string.IsNullOrEmpty(uri)) continue;
-
-                            if (!stats.TryGetValue(uri, out var agg))
-                                agg = default;
-
-                            agg.Count++;
-                            agg.SumSeconds += dur.Value;
-                            if (dur.Value > agg.MaxSeconds) agg.MaxSeconds = dur.Value;
-
-                            stats[uri] = agg;
-
-                            var pos = fs.Position;
-                            if (pos - lastReportedPos >= chunk)
-                            {
-                                task.Increment(pos - lastReportedPos);
-                                lastReportedPos = pos;
-                            }
+                            agg.Count += kvp.Value.Count;
+                            agg.SumSeconds += kvp.Value.SumSeconds;
+                            if (kvp.Value.MaxSeconds > agg.MaxSeconds) agg.MaxSeconds = kvp.Value.MaxSeconds;
+                            stats[kvp.Key] = agg;
                         }
-
-                        var remaining = fs.Length - lastReportedPos;
-                        if (remaining > 0)
-                            task.Increment(remaining);
+                        else
+                        {
+                            stats[kvp.Key] = kvp.Value;
+                        }
                     }
-
-                    if (task.Value < task.MaxValue)
-                        task.Value = task.MaxValue;
-
-                    task.StopTask();
-                });
-
-            AnsiConsole.WriteLine();
+                },
+                cancellationToken: cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancelled)
+        {
+            // user pressed Ctrl+C; fall through to cancelled-path below
         }
         finally
         {
@@ -221,5 +184,55 @@ public static partial class AlbOptions
         }
 
         ConsoleEx.Pause("Press Enter to return...");
+    }
+
+    private static async Task ScanFileForUriDurationAsync(
+        string filePath,
+        Dictionary<string, UriAgg> local,
+        Action<long> reportBytesDelta,
+        CancellationToken ct)
+    {
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 1 << 20, FileOptions.SequentialScan);
+        using var sr = new StreamReader(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1 << 20);
+
+        long lastReportedPos = 0;
+        const long chunk = 64L * 1024 * 1024;
+        int lineCount = 0;
+
+        while (true)
+        {
+            if ((++lineCount & 0xFFFF) == 0)
+                ct.ThrowIfCancellationRequested();
+
+            var line = await sr.ReadLineAsync().ConfigureAwait(false);
+            if (line is null) break;
+            if (line.Length == 0) continue;
+
+            var dur = AlbScanner.ExtractAlbTargetProcessingTimeSeconds(line);
+            if (dur is null || dur.Value < 0) continue;
+
+            var uri = AlbScanner.ExtractAlbUriNoQuery(line);
+            if (string.IsNullOrEmpty(uri)) continue;
+
+            if (!local.TryGetValue(uri, out var agg))
+                agg = default;
+
+            agg.Count++;
+            agg.SumSeconds += dur.Value;
+            if (dur.Value > agg.MaxSeconds) agg.MaxSeconds = dur.Value;
+
+            local[uri] = agg;
+
+            var pos = fs.Position;
+            if (pos - lastReportedPos >= chunk)
+            {
+                reportBytesDelta(pos - lastReportedPos);
+                lastReportedPos = pos;
+            }
+        }
+
+        var remaining = fs.Length - lastReportedPos;
+        if (remaining > 0)
+            reportBytesDelta(remaining);
     }
 }

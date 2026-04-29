@@ -63,15 +63,26 @@ public static partial class AlbOptions
 
         var endpointIpCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        await RunScanWithProgressAsync(
+        await RunScanWithProgressParallelAsync(
             title: "Scanning ALB logs (pass 1/2: top IPs for fragment)",
             files: files,
-            scanFileAsync: (file, reportDelta) =>
+            createLocal: () => new Dictionary<string, int>(StringComparer.Ordinal),
+            scanFileAsync: (file, local, reportDelta, _) =>
                 AlbScanner.ScanFileForEndpointIpCountsAsync(
                     filePath: file,
                     endpointFragment: endpoint,
-                    ipCounts: endpointIpCounts,
-                    reportBytesDelta: reportDelta)
+                    ipCounts: local,
+                    reportBytesDelta: reportDelta),
+            mergeLocal: local =>
+            {
+                foreach (var kvp in local)
+                {
+                    if (endpointIpCounts.TryGetValue(kvp.Key, out var cur))
+                        endpointIpCounts[kvp.Key] = cur + kvp.Value;
+                    else
+                        endpointIpCounts[kvp.Key] = kvp.Value;
+                }
+            }
         );
 
         if (endpointIpCounts.Count == 0)
@@ -93,16 +104,36 @@ public static partial class AlbOptions
         // Pass 2: only for top IPs, count URI hits by IP.
         var uriCountsByIp = new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
 
-        await RunScanWithProgressAsync(
+        await RunScanWithProgressParallelAsync(
             title: "Scanning ALB logs (pass 2/2: top full paths per top IP)",
             files: files,
-            scanFileAsync: (file, reportDelta) =>
+            createLocal: () => new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal),
+            scanFileAsync: (file, local, reportDelta, _) =>
                 AlbScanner.ScanFileForEndpointUriCountsBySelectedIpsAsync(
                     filePath: file,
                     endpointFragment: endpoint,
                     selectedIps: selectedIps,
-                    uriCountsByIp: uriCountsByIp,
-                    reportBytesDelta: reportDelta)
+                    uriCountsByIp: local,
+                    reportBytesDelta: reportDelta),
+            mergeLocal: local =>
+            {
+                foreach (var ipKvp in local)
+                {
+                    if (!uriCountsByIp.TryGetValue(ipKvp.Key, out var masterUriCounts))
+                    {
+                        masterUriCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+                        uriCountsByIp[ipKvp.Key] = masterUriCounts;
+                    }
+
+                    foreach (var uriKvp in ipKvp.Value)
+                    {
+                        if (masterUriCounts.TryGetValue(uriKvp.Key, out var cur))
+                            masterUriCounts[uriKvp.Key] = cur + uriKvp.Value;
+                        else
+                            masterUriCounts[uriKvp.Key] = uriKvp.Value;
+                    }
+                }
+            }
         );
 
         var result = AlbTopIpsForEndpointWorkflow.BuildResult(

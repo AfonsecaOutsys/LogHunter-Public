@@ -28,6 +28,52 @@ public static partial class AlbOptions
         return new DateTime(dtUtc.Year, dtUtc.Month, dtUtc.Day, dtUtc.Hour, flooredMinute, 0, DateTimeKind.Utc);
     }
 
+    private static async Task ScanFileBucketsAsync(
+        string filePath,
+        Dictionary<string, Dictionary<DateTime, long>> bucketsByIp,
+        Action<long> reportBytesDelta)
+    {
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 1 << 20, FileOptions.SequentialScan);
+        using var sr = new StreamReader(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1 << 20);
+
+        long lastReportedPos = 0;
+        const long chunk = 64L * 1024 * 1024;
+
+        while (true)
+        {
+            var line = await sr.ReadLineAsync().ConfigureAwait(false);
+            if (line is null) break;
+            if (line.Length == 0) continue;
+
+            var ip = AlbScanner.ExtractAlbClientIp(line);
+            if (ip is null) continue;
+
+            if (!bucketsByIp.TryGetValue(ip, out var map))
+                continue;
+
+            var tsUtc = AlbScanner.ExtractAlbTimestampUtc(line);
+            if (tsUtc is null) continue;
+
+            var bucket = FloorTo5MinUtc(tsUtc.Value);
+
+            if (map.TryGetValue(bucket, out var cur))
+                map[bucket] = cur + 1;
+            else
+                map[bucket] = 1;
+
+            var pos = fs.Position;
+            if (pos - lastReportedPos >= chunk)
+            {
+                reportBytesDelta(pos - lastReportedPos);
+                lastReportedPos = pos;
+            }
+        }
+
+        var remaining = fs.Length - lastReportedPos;
+        if (remaining > 0)
+            reportBytesDelta(remaining);
+    }
+
     // ---------- OPTION 7 ----------
 
     public static async Task TrackRequestsPerIpPer5MinAsync(string root)
@@ -82,72 +128,40 @@ public static partial class AlbOptions
         foreach (var ip in ips)
             bucketsByIp[ip] = new SortedDictionary<DateTime, long>();
 
-        var totalBytes = SumFileSizesSafe(files);
+        // Parallel scan: each file produces a per-file local map (ip -> bucket -> count).
+        // Locals are merged sequentially in input file order; addition is commutative
+        // so the merged counts are identical to the sequential scan.
+        var selectedIps = new HashSet<string>(ips, StringComparer.Ordinal);
 
-        await AnsiConsole.Progress()
-            .AutoClear(false)
-            .Columns(new ProgressColumn[]
+        await RunScanWithProgressParallelAsync(
+            title: "Scanning ALB logs",
+            files: files,
+            createLocal: () =>
             {
-                new TaskDescriptionColumn(),
-                new ProgressBarColumn(),
-                new PercentageColumn(),
-                new RemainingTimeColumn(),
-                new SpinnerColumn()
-            })
-            .StartAsync(async ctx =>
+                var local = new Dictionary<string, Dictionary<DateTime, long>>(StringComparer.Ordinal);
+                foreach (var ip in selectedIps)
+                    local[ip] = new Dictionary<DateTime, long>();
+                return local;
+            },
+            scanFileAsync: (file, local, reportDelta, _) =>
+                ScanFileBucketsAsync(file, local, reportDelta),
+            mergeLocal: local =>
             {
-                var task = ctx.AddTask("Scanning ALB logs", maxValue: Math.Max(1, totalBytes));
-
-                foreach (var file in files)
+                foreach (var ipKvp in local)
                 {
-                    using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 1 << 20, FileOptions.SequentialScan);
-                    using var sr = new StreamReader(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1 << 20);
+                    if (!bucketsByIp.TryGetValue(ipKvp.Key, out var masterMap))
+                        continue;
 
-                    long lastReportedPos = 0;
-                    const long chunk = 64L * 1024 * 1024;
-
-                    while (true)
+                    foreach (var bucketKvp in ipKvp.Value)
                     {
-                        var line = await sr.ReadLineAsync().ConfigureAwait(false);
-                        if (line is null) break;
-                        if (line.Length == 0) continue;
-
-                        var ip = AlbScanner.ExtractAlbClientIp(line);
-                        if (ip is null) continue;
-
-                        if (!bucketsByIp.TryGetValue(ip, out var map))
-                            continue;
-
-                        var tsUtc = AlbScanner.ExtractAlbTimestampUtc(line);
-                        if (tsUtc is null) continue;
-
-                        var bucket = FloorTo5MinUtc(tsUtc.Value);
-
-                        if (map.TryGetValue(bucket, out var cur))
-                            map[bucket] = cur + 1;
+                        if (masterMap.TryGetValue(bucketKvp.Key, out var cur))
+                            masterMap[bucketKvp.Key] = cur + bucketKvp.Value;
                         else
-                            map[bucket] = 1;
-
-                        var pos = fs.Position;
-                        if (pos - lastReportedPos >= chunk)
-                        {
-                            task.Increment(pos - lastReportedPos);
-                            lastReportedPos = pos;
-                        }
+                            masterMap[bucketKvp.Key] = bucketKvp.Value;
                     }
-
-                    var remaining = fs.Length - lastReportedPos;
-                    if (remaining > 0)
-                        task.Increment(remaining);
                 }
-
-                if (task.Value < task.MaxValue)
-                    task.Value = task.MaxValue;
-
-                task.StopTask();
-            });
-
-        AnsiConsole.WriteLine();
+            }
+        );
 
         // Build unified timeline
         var allBuckets = new SortedSet<DateTime>();

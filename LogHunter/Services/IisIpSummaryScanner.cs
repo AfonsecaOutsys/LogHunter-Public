@@ -379,11 +379,10 @@ public static class IisIpSummaryScanner
 
     private static string NormalizeToken(ReadOnlySpan<char> token)
     {
-        if (token.Length == 0)
+        token = token.Trim();
+        if (token.IsEmpty || (token.Length == 1 && token[0] == '-'))
             return "-";
-
-        var text = token.ToString().Trim();
-        return string.IsNullOrWhiteSpace(text) ? "-" : text;
+        return token.ToString();
     }
 
     private static int? ParseNullableInt(ReadOnlySpan<char> token)

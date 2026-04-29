@@ -16,10 +16,7 @@ namespace LogHunter.Web.Api;
 
 internal static class AlbApi
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = true
-    };
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static async Task<bool> TryHandleAsync(WebAppContext app, HttpListenerContext context)
     {
