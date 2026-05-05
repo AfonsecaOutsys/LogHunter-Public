@@ -19,17 +19,13 @@ At the end of a coding session:
 
 ## Release Publish Rules
 
-- The executable naming and publish behavior must follow the current branch family.
-- If the working branch is `main`, or a branch derived from `main`, the Release executable name is `LogHunter.exe`.
-- If the working branch is `LogHunter-2.0`, or a branch derived from `LogHunter-2.0`, the Release executable name is `LogHunter2.0.exe`.
+- The Release executable name is `LogHunter.exe` for all branches (public and internal share the same artifact name).
 - Release publishes only happen when explicitly requested by the user.
-- The publish flow itself must produce the correct final executable name for that branch line.
+- The publish flow itself must produce `LogHunter.exe` directly.
 - Do NOT solve naming by publishing one executable and then copying or renaming it afterward.
 - Do NOT leave two equivalent executables in `C:\espaces`.
 - There must be exactly one final deliverable artifact in `C:\espaces` for the requested publish.
-- If the target executable for the current branch line is in use and cannot be replaced, publish a single fallback artifact using the same branch line naming with a `-new` suffix:
-  - `LogHunter-new.exe` for `main` / `main`-derived branches
-  - `LogHunter2.0-new.exe` for `LogHunter-2.0` / `LogHunter-2.0`-derived branches
+- If `LogHunter.exe` is in use and cannot be replaced, publish a single fallback artifact named `LogHunter-new.exe`.
 - After publishing the executable, sign it with the code-signing certificate using PowerShell:
   ```powershell
   Set-AuthenticodeSignature -FilePath "<target-exe-path>" -Certificate (Get-PfxCertificate -FilePath "certs/LogHunter-signing.pfx") -TimestampServer "http://timestamp.digicert.com" -HashAlgorithm SHA256
@@ -53,11 +49,11 @@ At the end of a coding session:
 
 - The public repo remote is named `public` and points to `https://github.com/AfonsecaOutsys/LogHunter-Public.git`.
 - Public releases only happen when the user explicitly asks for them.
-- Before pushing to `public`, update `README.md` release notes for the new version. Exclude any Web UI references — the public release notes should only cover console-facing features and improvements.
-- Push `main` branch and the version tag (e.g. `v1.6.0`) to the `public` remote.
+- Before pushing to `public`, update `README.md` release notes for the new version. Public release notes cover the full feature set, including web shell and console-facing changes.
+- Push `main` branch and the version tag (e.g. `v2.0.0`) to the `public` remote.
 - Create a GitHub release on the `public` remote using `gh release create` with the version tag.
 - Attach the published Release executable (`LogHunter.exe` from `C:\espaces`) to the GitHub release when available.
-- Do not mirror internal patch notes, backnotes, or web UI documentation to the public repo.
+- Internal patch notes and backnotes under `LogHunter/docs/patch-notes/` are committed to `main` and therefore travel to the public remote with the push; they are not re-published as separate public artifacts.
 
 ## Version Bump Rules
 

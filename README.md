@@ -46,6 +46,16 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 2.0
+
+- Promotes the local web shell to a first-class operator surface alongside the console mode.
+- Card-based workflow selection across ALB, IIS, Platform, and AbuseIP modules: action-first layout, native OS file/folder pickers, background job managers with live progress and cancel, asset cache with ETag/304, parallel accept loop.
+- Adds a startup mode selector dialog with remember-my-choice for Console / Web.
+- Folds in the performance foundation built across the 1.6 -> 1.9 line: parallel ALB scans for Top 50 by AVG duration and Top 50 IPs overall, single-pass ALB tokenizer for IP Summary and Status Mismatch, lower-allocation WAF Blocked Summary aggregation, connection-per-request SQLite viewers.
+- Carries forward AbuseIPDB multi-source IP selection, IIS Bytes Intel (`sc-bytes` / `cs-bytes`), IIS Burst Patterns, IIS Status Pivot, Platform authenticated activity cross-reference and suspicious request extraction, and the ALB generic scan framework.
+- Strips the appended source-revision SHA from `AssemblyInformationalVersion` so the runtime now reports a clean `2.0.0.0` everywhere (console banner, web shell footer, `/api/app-info`, file properties).
+- Existing CLI flows and console commands remain available; default behavior is unchanged.
+
 ### 1.9
 
 - Speeds up ALB Top 50 by AVG duration and Top 50 IPs Overall on multi-file inputs by reading files in parallel where the per-line CPU cost makes it worthwhile.
