@@ -1026,13 +1026,13 @@
 
     setHidden(section, false);
 
-    const severityColor = (label) => {
-      if (!label) return '';
-      const lower = label.toLowerCase();
-      if (lower.includes('critical')) return 'color:#f87171';
-      if (lower.includes('high')) return 'color:#fb923c';
-      if (lower.includes('medium') || lower.includes('elevated')) return 'color:#fbbf24';
-      return '';
+    // Color by score using the same thresholds as the server (CRIT/HIGH/MED/LOW),
+    // so it can't drift from the label wording sent by the API.
+    const severityColor = (score) => {
+      if (score >= 140) return 'color:#f87171'; // CRIT
+      if (score >= 95) return 'color:#fb923c';  // HIGH
+      if (score >= 60) return 'color:#fbbf24';  // MED
+      return '';                                 // LOW
     };
 
     container.innerHTML = `
@@ -1052,7 +1052,7 @@
               <td style="white-space:nowrap">${escHtml(b.startUtc)}</td>
               <td style="white-space:nowrap">${escHtml(b.ip)}</td>
               <td><strong>${b.severityScore}</strong></td>
-              <td style="${severityColor(b.severityLabel)}">${escHtml(b.severityLabel)}</td>
+              <td style="${severityColor(b.severityScore)}">${escHtml(b.severityLabel)}</td>
               <td style="font-family:monospace;font-size:11px">${escHtml(b.flags)}</td>
               <td>${fmt(b.totalDynamic)}</td>
               <td>${b.uniqueDynamicUris}</td>
