@@ -44,6 +44,9 @@ internal static class AlbDownloadPlanner
         var runFolder = AlbDownload.BuildRunFolder(resolved.ConfigName, request.StartUtc, request.EndUtc);
         var prefixRoot = resolved.IsSentry ? "sentry" : "standard";
         var albKey = resolved.UseInternalScope ? $"{resolved.AlbId}-internal" : resolved.AlbId;
+        var sentryHint = resolved.IsSentry
+            ? "Sentry is selected: make sure the customer is actually a Sentry customer."
+            : "Sentry is not selected: make sure the customer is not a Sentry customer.";
 
         var days = EachDayUtc(request.StartUtc.Date, request.EndUtc.Date).ToList();
         var dayPlans = new List<AlbDownloadDayPlan>(days.Count);
@@ -57,7 +60,7 @@ internal static class AlbDownloadPlanner
                 $"{prefixRoot}/{albKey}/AWSLogs/{resolved.AccountId}/elasticloadbalancing/{resolved.Region}/{day:yyyy}/{day:MM}/{day:dd}/";
 
             var s3Uri = $"s3://{resolved.Bucket}/{dayPrefix}";
-            var lines = await RunAwsListAsync(awsExe, s3Uri, creds).ConfigureAwait(false);
+            var lines = await RunAwsListAsync(awsExe, s3Uri, creds, sentryHint).ConfigureAwait(false);
 
             var totalFiles = 0;
             var totalBytes = 0L;
@@ -174,7 +177,7 @@ internal static class AlbDownloadPlanner
             request.IsSentry);
     }
 
-    private static async Task<IReadOnlyList<string>> RunAwsListAsync(string awsExePath, string s3Uri, AwsCreds creds)
+    private static async Task<IReadOnlyList<string>> RunAwsListAsync(string awsExePath, string s3Uri, AwsCreds creds, string emptyResultHint)
     {
         var psi = new ProcessStartInfo
         {
@@ -212,7 +215,9 @@ internal static class AlbDownloadPlanner
             var stderr = await stderrTask.ConfigureAwait(false);
 
             if (proc.ExitCode != 0)
-                throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? $"aws s3 ls failed for {s3Uri}." : stderr.Trim());
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr)
+                    ? $"aws s3 ls failed for {s3Uri}. Possible issue: {emptyResultHint}"
+                    : stderr.Trim());
 
             return stdout
                 .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
