@@ -46,6 +46,12 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 2.0.0.1
+
+- Fixes ALB region detection from the S3 bucket name. Buckets whose GUID contained a block ending in `af` or `ca` resolved to an invalid region (for example `af-us-east-1` instead of `us-east-1`), so ALB log listing and download failed with `aws s3 ls failed`.
+- Applies to both the web shell and the console ALB download flows.
+- Hotfix on top of `2.0`; no other changes.
+
 ### 2.0
 
 - Promotes the local web shell to a first-class operator surface alongside the console mode.

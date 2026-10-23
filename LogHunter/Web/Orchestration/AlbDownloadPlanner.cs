@@ -16,7 +16,7 @@ internal static class AlbDownloadPlanner
         new(@"_(\d{8})T(\d{4})Z_", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex AwsRegionAtEndRegex =
-        new(@"(?<region>(?:af|ap|ca|eu|me|sa|us|cn)-[a-z0-9-]+-\d)$",
+        new(@"(?<![a-z0-9])(?<region>(?:af|ap|ca|eu|me|sa|us|cn)-(?:gov-)?[a-z]+-\d)$",
             RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private static readonly Regex AwsLsLineRegex =

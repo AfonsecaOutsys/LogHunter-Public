@@ -18,7 +18,7 @@ public static class AlbDownload
 
     // AWS region near end of bucket name: ...-ap-northeast-1-alblogs
     private static readonly Regex AwsRegionAtEndRegex =
-        new(@"(?<region>(?:af|ap|ca|eu|me|sa|us|cn)-[a-z0-9-]+-\d)$",
+        new(@"(?<![a-z0-9])(?<region>(?:af|ap|ca|eu|me|sa|us|cn)-(?:gov-)?[a-z]+-\d)$",
             RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private static AwsCreds? _sessionCreds;
