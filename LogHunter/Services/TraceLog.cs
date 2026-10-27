@@ -11,11 +11,12 @@ using System.Threading;
 namespace LogHunter.Services;
 
 /// <summary>
-/// Opt-in trace log (--trace / --debug). Writes one JSON object per line so a session can be replayed afterwards.
+/// Diagnosis trace log, started on every launch. Writes one JSON object per line so a session can be replayed afterwards.
 /// Every call is a no-op until <see cref="Start"/> runs, and tracing failures never surface to the caller.
 /// </summary>
 internal static class TraceLog
 {
+    private const int RetentionDays = 10;
     private const int MaxStringLength = 4000;
     private const int MaxArrayItems = 10;
     private const int ArrayHeadItems = 3;
@@ -47,9 +48,15 @@ internal static class TraceLog
 
     public static string? FilePath { get; private set; }
 
+    public static string? Folder { get; private set; }
+
+    public static string ReportNotice =>
+        $"Debugging mode running, if you have any bugs to report grab the diagnosis file under \"{Folder}\" and send it to André Fonseca @ L3 with a quick description of the problem.";
+
     public static void Start(string folder, string version, string[] args)
     {
         Directory.CreateDirectory(folder);
+        var removedFiles = DeleteExpiredFiles(folder);
         var path = Path.Combine(folder, $"trace-{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}.jsonl");
         var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
 
@@ -57,6 +64,7 @@ internal static class TraceLog
         {
             _writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
             FilePath = path;
+            Folder = folder;
         }
 
         Write("app", "start", new
@@ -67,8 +75,39 @@ internal static class TraceLog
             os = Environment.OSVersion.VersionString,
             machine = Environment.MachineName,
             baseDirectory = AppContext.BaseDirectory,
-            traceFile = path
+            traceFile = path,
+            retentionDays = RetentionDays,
+            removedExpiredFiles = removedFiles
         });
+    }
+
+    /// <summary>Removes trace files not written to for more than <see cref="RetentionDays"/> days, so the folder cannot grow without bound.</summary>
+    private static int DeleteExpiredFiles(string folder)
+    {
+        var cutoffUtc = DateTime.UtcNow.AddDays(-RetentionDays);
+        var removed = 0;
+
+        foreach (var file in Directory.EnumerateFiles(folder, "trace-*.jsonl"))
+        {
+            try
+            {
+                if (File.GetLastWriteTimeUtc(file) >= cutoffUtc)
+                    continue;
+
+                File.Delete(file);
+                removed++;
+            }
+            catch (IOException)
+            {
+                // Still open in another LogHunter instance; it is retried on the next launch.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Read-only or not ours; leave it.
+            }
+        }
+
+        return removed;
     }
 
     public static void Stop()

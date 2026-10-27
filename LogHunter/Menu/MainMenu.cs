@@ -17,6 +17,8 @@ public sealed class MainMenu : IMenu
     public Task<IMenu?> ShowAsync(CancellationToken ct = default)
     {
         ConsoleEx.Header("LogHunter", $"Workspace: {_session.Root}");
+        if (TraceLog.IsEnabled)
+            ConsoleEx.Warn(TraceLog.ReportNotice);
 
         var savedCount = _session.SavedSelections.Count;
 

@@ -3,7 +3,7 @@ const APP_INFO_POLL_MS = 4000;
 const TRACE_ENDPOINT = '/api/trace';
 const TRACE_FLUSH_MS = 1000;
 
-// Records browser-side actions when the exe was started with --trace. Typed text is never recorded.
+// Records browser-side actions into the diagnosis trace when the server enables it. Typed text is never recorded.
 function initializeTrace() {
   if (!document.body || document.body.dataset.trace !== 'on') {
     window.lhTrace = function () {};

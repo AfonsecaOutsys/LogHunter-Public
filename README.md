@@ -51,7 +51,7 @@ LogHunter is built for security and incident investigations, turning raw logs in
 - Fixes the ALB download page getting stuck on a previous job. Starting a second download right after the first could leave the job status panel showing the first job as `completed` while the new download ran unseen; clicking Start again then failed with `An ALB download is already running.`
 - The page now ignores status replies for jobs it is no longer tracking, and switches to the running job if Start reports one is already running.
 - Start download returns immediately; the AWS CLI checks now run in the background job.
-- Adds `--trace` (alias `--debug`): writes every web request, browser action, ALB job step and AWS CLI call to `logs\trace-<timestamp>.jsonl` next to the exe. AWS keys, secrets and session tokens are always masked.
+- Adds an always-on diagnosis trace: every web request, browser action, ALB job step, AWS CLI call and console menu choice is written to `logs\trace-<timestamp>.jsonl` next to the exe. AWS keys, secrets and session tokens are always masked. Trace files not written to for more than 10 days are removed at startup. The console shows where to find the file and who to send it to when reporting a bug.
 - IIS Burst Patterns: Severity colors now follow the severity score, so CRIT and MED rows are colored again.
 - ALB download: when a day prefix lists no logs, the error now suggests checking the Sentry toggle.
 
@@ -248,13 +248,15 @@ LogHunter.exe --web
 LogHunter.exe --help
 LogHunter.exe --version
 LogHunter.exe --root C:\path\to\workspace
-LogHunter.exe --web --trace
 ```
 
 - `--root <path>`: use a custom workspace instead of the executable folder
-- `--trace` (or `--debug`): record a trace of every action to `logs\trace-<timestamp>.jsonl` next to the exe, for analysis after a session; credentials are masked
 - `--viewer-sqlite <path>`: open the SQLite viewer directly for a generated database
 - `--viewer-ip <ip>`: optional selected IP shown in viewer metadata
+
+### Diagnosis trace
+
+Every launch writes a diagnosis trace to `logs\trace-<timestamp>.jsonl` next to the exe: web requests, browser actions, ALB job steps, AWS CLI calls and console menu choices, with credentials masked. Trace files not written to for more than 10 days are removed at startup. To report a bug, send the trace file from the session where it happened together with a short description.
 
 ---
 

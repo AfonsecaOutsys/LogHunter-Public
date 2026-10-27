@@ -58,7 +58,6 @@ internal static class Program
         string? albDownloadJobPath = null;
         bool? explicitMode = null;
         var launchBrowser = true;
-        var traceEnabled = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -115,9 +114,9 @@ internal static class Program
                 continue;
             }
 
+            // Tracing is always on; the flags stay accepted so shortcuts created for 2.0.0.2 keep working.
             if (a is "--trace" or "--debug")
             {
-                traceEnabled = true;
                 continue;
             }
 
@@ -235,17 +234,19 @@ internal static class Program
 
             AppFolders.Ensure();
 
-            if (traceEnabled)
+            try
             {
-                try
-                {
-                    TraceLog.Start(AppFolders.Logs, version, args);
-                    Console.WriteLine($"Trace logging on: {TraceLog.FilePath}");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Trace logging could not start: {ex.Message}");
-                }
+                TraceLog.Start(AppFolders.Logs, version, args);
+
+                // Plain console output: Spectre hard-wraps long lines, which would split the path when copied.
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine(TraceLog.ReportNotice);
+                Console.ResetColor();
+                Console.WriteLine($"Current diagnosis file: {TraceLog.FilePath}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Trace logging could not start: {ex.Message}");
             }
 
             bool consoleMode;
@@ -328,7 +329,7 @@ internal static class Program
         Console.WriteLine($"LogHunter {version}");
         Console.WriteLine();
         Console.WriteLine("Usage:");
-        Console.WriteLine("  LogHunter [--root <path>] [--web] [--console] [--no-browser] [--trace] [--viewer-sqlite <path> --viewer-ip <ip>] [--version] [--help]");
+        Console.WriteLine("  LogHunter [--root <path>] [--web] [--console] [--no-browser] [--viewer-sqlite <path> --viewer-ip <ip>] [--version] [--help]");
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --root <path>           Workspace path (defaults to the exe folder)");
@@ -336,12 +337,14 @@ internal static class Program
         Console.WriteLine("  --web                   Start the local web shell on 127.0.0.1 (skip mode dialog)");
         Console.WriteLine("  --reset-mode            Clear saved startup mode preference");
         Console.WriteLine("  --no-browser            In web mode, do not auto-open the default browser");
-        Console.WriteLine("  --trace, --debug        Write a trace log of every action to logs\\trace-<timestamp>.jsonl");
         Console.WriteLine("  --viewer-sqlite <path>  Start the SQLite viewer for the specified database");
         Console.WriteLine("  --viewer-ip <ip>        Optional selected IP shown in viewer metadata");
         Console.WriteLine("  --viewer-port <port>    Optional local port for the SQLite viewer server");
         Console.WriteLine("  --version, -v           Print version and exit");
         Console.WriteLine("  --help, -h              Show this help");
+        Console.WriteLine();
+        Console.WriteLine("A diagnosis trace of every action is always written to logs\\trace-<timestamp>.jsonl next to the exe.");
+        Console.WriteLine("Trace files not written to for more than 10 days are removed at startup.");
     }
 
     private static bool TryDetectViewerKind(string dbPath, out string kind)
