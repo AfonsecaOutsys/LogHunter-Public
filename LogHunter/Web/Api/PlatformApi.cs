@@ -164,6 +164,7 @@ internal static class PlatformApi
     private static async Task WriteJsonAsync(HttpListenerResponse response, object payload, HttpStatusCode statusCode = HttpStatusCode.OK)
     {
         var json = JsonSerializer.Serialize(payload, JsonOptions);
+        TraceLog.WriteBody("http", "response-body", json, new { status = (int)statusCode });
         await WriteTextAsync(response, statusCode, json, "application/json; charset=utf-8").ConfigureAwait(false);
     }
 
@@ -181,6 +182,7 @@ internal static class PlatformApi
     {
         using var reader = new System.IO.StreamReader(request.InputStream, request.ContentEncoding);
         var json = await reader.ReadToEndAsync().ConfigureAwait(false);
+        TraceLog.WriteBody("http", "request-body", json);
         return string.IsNullOrWhiteSpace(json) ? default : JsonSerializer.Deserialize<T>(json, JsonOptions);
     }
 

@@ -30,6 +30,7 @@ internal static class AlbDownloadPlanner
         AppFolders.Ensure();
 
         var awsExe = ResolveAwsExePath();
+        TraceLog.Write("alb.planner", "aws-cli", new { awsExe });
         if (string.IsNullOrWhiteSpace(awsExe))
             throw new InvalidOperationException("AWS CLI (aws.exe) was not found. Install AWS CLI v2 or ensure it is available on PATH.");
 
@@ -41,6 +42,7 @@ internal static class AlbDownloadPlanner
             throw new InvalidOperationException("End time must be greater than or equal to start time.");
 
         var resolved = ResolveConfig(request);
+        TraceLog.Write("alb.planner", "config", resolved);
         var runFolder = AlbDownload.BuildRunFolder(resolved.ConfigName, request.StartUtc, request.EndUtc);
         var prefixRoot = resolved.IsSentry ? "sentry" : "standard";
         var albKey = resolved.UseInternalScope ? $"{resolved.AlbId}-internal" : resolved.AlbId;
@@ -204,6 +206,7 @@ internal static class AlbDownloadPlanner
 
         try
         {
+            var stopwatch = Stopwatch.StartNew();
             proc.Start();
 
             var stdoutTask = proc.StandardOutput.ReadToEndAsync();
@@ -213,6 +216,15 @@ internal static class AlbDownloadPlanner
 
             var stdout = await stdoutTask.ConfigureAwait(false);
             var stderr = await stderrTask.ConfigureAwait(false);
+
+            TraceLog.Write("alb.planner", "aws-s3-ls", new
+            {
+                s3Uri,
+                exitCode = proc.ExitCode,
+                ms = stopwatch.ElapsedMilliseconds,
+                stdoutLines = stdout.Count(c => c == '\n'),
+                stderr = stderr.Trim()
+            });
 
             if (proc.ExitCode != 0)
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr)

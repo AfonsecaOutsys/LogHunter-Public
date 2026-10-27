@@ -55,16 +55,18 @@ internal sealed class AlbDownloadJobManager
 
     public bool TryStart(AlbDownloadRequest request, out AlbDownloadJobSnapshot snapshot, out string? error)
     {
+        string jobId;
         lock (_gate)
         {
             if (_jobs.Values.Any(x => string.Equals(x.State, "running", StringComparison.OrdinalIgnoreCase)))
             {
                 snapshot = GetSnapshot();
                 error = "An ALB download is already running.";
+                TraceLog.Write("alb.download", "start-rejected", new { runningJobId = snapshot.JobId, snapshot.Stage, error });
                 return false;
             }
 
-            var jobId = Guid.NewGuid().ToString("N");
+            jobId = Guid.NewGuid().ToString("N");
             snapshot = new AlbDownloadJobSnapshot(
                 JobId: jobId,
                 State: "running",
@@ -84,9 +86,26 @@ internal sealed class AlbDownloadJobManager
             _runtime[jobId] = new AlbDownloadRuntimeState();
             _currentJobId = jobId;
             error = null;
-            _ = RunJobAsync(jobId, request);
-            return true;
         }
+
+        TraceLog.Write("alb.download", "start", new
+        {
+            jobId,
+            request.UseSavedConfig,
+            request.SavedConfigName,
+            request.ConfigName,
+            request.Bucket,
+            request.AlbId,
+            request.UseInternalScope,
+            request.AccountId,
+            request.IsSentry,
+            request.StartUtc,
+            request.EndUtc
+        });
+
+        // The job's first steps spawn aws.exe synchronously, so run it off the request thread and outside the lock.
+        _ = Task.Run(() => RunJobAsync(jobId, request));
+        return true;
     }
 
     public bool TryOpenRunFolder(string? jobId, out string message)
@@ -124,6 +143,7 @@ internal sealed class AlbDownloadJobManager
 
     private async Task RunJobAsync(string jobId, AlbDownloadRequest request)
     {
+        TraceLog.DetachRequest();
         var requestFile = Path.Combine(Path.GetTempPath(), $"loghunter-alb-download-{jobId}.json");
         Process? process = null;
         ChildProcessLifetime? childLifetime = null;
@@ -192,6 +212,13 @@ internal sealed class AlbDownloadJobManager
             process.Start();
             childLifetime?.Add(process);
             SetChildStarted(jobId);
+            TraceLog.Write("alb.download", "process-start", new
+            {
+                jobId,
+                pid = process.Id,
+                fileName = startInfo.FileName,
+                arguments = string.Join(" ", startInfo.ArgumentList)
+            });
 
             observerCts = new CancellationTokenSource();
             observerTask = MonitorRunFolderAsync(jobId, plan, observerCts.Token);
@@ -207,6 +234,7 @@ internal sealed class AlbDownloadJobManager
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             await process.WaitForExitAsync().ConfigureAwait(false);
+            TraceLog.Write("alb.download", "process-exit", new { jobId, exitCode = process.ExitCode });
 
             observerCts.Cancel();
             if (observerTask is not null)
@@ -234,6 +262,7 @@ internal sealed class AlbDownloadJobManager
         }
         catch (Exception ex)
         {
+            TraceLog.Write("alb.download", "exception", new { jobId, error = ex.ToString() });
             UpdateSnapshot(jobId, snapshot => snapshot with
             {
                 State = "failed",
@@ -293,13 +322,16 @@ internal sealed class AlbDownloadJobManager
             var stage = DeriveStage(snapshot.State, snapshot.Stage, runtime, plan);
             var message = DeriveMessage(snapshot.Message, stage, progress, plan);
 
-            _jobs[jobId] = snapshot with
+            var next = snapshot with
             {
                 UpdatedUtc = DateTime.UtcNow,
                 Stage = stage,
                 Message = message,
                 Progress = progress
             };
+
+            _jobs[jobId] = next;
+            TraceTransition(jobId, snapshot, next);
         }
     }
 
@@ -417,7 +449,7 @@ internal sealed class AlbDownloadJobManager
             {
                 if (_jobs.TryGetValue(jobId, out var snapshot))
                 {
-                    _jobs[jobId] = snapshot with
+                    var next = snapshot with
                     {
                         Stage = progress.Stage,
                         Message = progress.Message,
@@ -425,6 +457,9 @@ internal sealed class AlbDownloadJobManager
                         CurrentStep = progress.CurrentStep,
                         TotalSteps = progress.TotalSteps
                     };
+
+                    _jobs[jobId] = next;
+                    TraceTransition(jobId, snapshot, next);
                 }
             }
 
@@ -439,6 +474,7 @@ internal sealed class AlbDownloadJobManager
             if (result is null)
                 return true;
 
+            TraceLog.Write("alb.download", "result", new { jobId, result });
             UpdateSnapshot(jobId, snapshot => snapshot with
             {
                 UpdatedUtc = DateTime.UtcNow,
@@ -454,6 +490,7 @@ internal sealed class AlbDownloadJobManager
 
     private void AppendOutputLine(string jobId, string stream, string line)
     {
+        TraceLog.Write("alb.download", "output", new { jobId, stream, line });
         UpdateSnapshot(jobId, snapshot =>
         {
             var lines = snapshot.OutputLines.ToList();
@@ -485,8 +522,28 @@ internal sealed class AlbDownloadJobManager
             if (!_jobs.TryGetValue(jobId, out var snapshot))
                 return;
 
-            _jobs[jobId] = update(snapshot);
+            var next = update(snapshot);
+            _jobs[jobId] = next;
+            TraceTransition(jobId, snapshot, next);
         }
+    }
+
+    private static void TraceTransition(string jobId, AlbDownloadJobSnapshot previous, AlbDownloadJobSnapshot next)
+    {
+        if (string.Equals(previous.State, next.State, StringComparison.Ordinal)
+            && string.Equals(previous.Stage, next.Stage, StringComparison.Ordinal))
+            return;
+
+        TraceLog.Write("alb.download", "transition", new
+        {
+            jobId,
+            fromState = previous.State,
+            toState = next.State,
+            fromStage = previous.Stage,
+            toStage = next.Stage,
+            next.Message,
+            next.Error
+        });
     }
 
     private bool TryResolveSnapshot(string? jobId, out AlbDownloadJobSnapshot snapshot)

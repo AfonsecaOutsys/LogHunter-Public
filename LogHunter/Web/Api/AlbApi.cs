@@ -877,6 +877,7 @@ internal static class AlbApi
     {
         using var reader = new StreamReader(request.InputStream, request.ContentEncoding ?? Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: false);
         var json = await reader.ReadToEndAsync().ConfigureAwait(false);
+        TraceLog.WriteBody("http", "request-body", json);
         if (string.IsNullOrWhiteSpace(json))
             return default;
 
@@ -905,6 +906,7 @@ internal static class AlbApi
     private static async Task WriteJsonAsync(HttpListenerResponse response, object payload, HttpStatusCode statusCode = HttpStatusCode.OK)
     {
         var json = JsonSerializer.Serialize(payload, JsonOptions);
+        TraceLog.WriteBody("http", "response-body", json, new { status = (int)statusCode });
         await WriteTextAsync(response, statusCode, json, "application/json; charset=utf-8").ConfigureAwait(false);
     }
 

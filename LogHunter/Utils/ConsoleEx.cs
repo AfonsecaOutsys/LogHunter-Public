@@ -1,4 +1,5 @@
-﻿using Spectre.Console;
+﻿using LogHunter.Services;
+using Spectre.Console;
 using Spectre.Console.Rendering;
 using System;
 using System.Linq;
@@ -219,6 +220,12 @@ public static class ConsoleEx
                     }
                 }
             });
+
+        TraceLog.Write("console", "menu", new
+        {
+            title = titleIsMarkup ? Markup.Remove(title) : title,
+            selected = result is int index ? items[index].Label : null
+        });
 
         return result;
     }

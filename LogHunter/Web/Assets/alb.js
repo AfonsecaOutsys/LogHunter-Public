@@ -1,5 +1,6 @@
 (function () {
   let currentJobId = '';
+  let startInFlight = false;
   let albOption2Polling = null;
   let albOption2JobId = '';
   let albOption2DefaultSelection = null;
@@ -8,6 +9,21 @@
 
   function byId(id) {
     return document.getElementById(id);
+  }
+
+  function trace(event, data) {
+    if (window.lhTrace) {
+      window.lhTrace(event, data);
+    }
+  }
+
+  function trackJob(jobId, reason) {
+    if (!jobId || jobId === currentJobId) {
+      return;
+    }
+
+    trace('alb.download.track', { from: currentJobId, to: jobId, reason });
+    currentJobId = jobId;
   }
 
   function setHidden(element, hidden) {
@@ -469,7 +485,6 @@
     setText('albJobMessage', snapshot.error ? `${snapshot.message} ${snapshot.error}` : formatValue(snapshot.message));
     setText('albJobStep', snapshot.totalSteps ? `Step ${snapshot.currentStep || 0} of ${snapshot.totalSteps}` : '');
 
-    currentJobId = snapshot.jobId || currentJobId;
     const hasJob = snapshot.state && snapshot.state !== 'idle';
     setHidden(byId('albOpenRunFolder'), !hasJob);
     renderProgress(snapshot);
@@ -559,7 +574,9 @@
 
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.error || `HTTP ${response.status}`);
+      const error = new Error(payload.error || `HTTP ${response.status}`);
+      error.payload = payload;
+      throw error;
     }
 
     return payload;
@@ -572,26 +589,36 @@
       count.textContent = String((payload.configs || []).length);
     }
 
-    if (payload.currentJob) {
-      renderSnapshot(payload.currentJob);
-      currentJobId = payload.currentJob.jobId || currentJobId;
-      return payload.currentJob;
+    const job = payload.currentJob;
+    if (!job || (currentJobId && job.jobId !== currentJobId)) {
+      return null;
     }
 
-    return null;
+    trackJob(job.jobId, 'page-load');
+    renderSnapshot(job);
+    return job;
   }
 
   async function pollStatus() {
-    if (!currentJobId) {
+    const polledJobId = currentJobId;
+    if (!polledJobId) {
       return null;
     }
 
     try {
-      const snapshot = await fetchJson(`/api/jobs/${encodeURIComponent(currentJobId)}`, { method: 'GET', headers: { 'Accept': 'application/json' } });
+      const snapshot = await fetchJson(`/api/jobs/${encodeURIComponent(polledJobId)}`, { method: 'GET', headers: { 'Accept': 'application/json' } });
+      if (polledJobId !== currentJobId) {
+        trace('alb.download.poll.stale-ignored', { polledJobId, currentJobId, state: snapshot.state });
+        return null;
+      }
+
       renderSnapshot(snapshot);
       return snapshot;
     } catch (error) {
-      setError(String(error));
+      if (polledJobId === currentJobId) {
+        setError(String(error));
+      }
+
       return null;
     }
   }
@@ -613,6 +640,11 @@
   }
 
   async function startDownload() {
+    if (startInFlight) {
+      trace('alb.download.start.ignored', { reason: 'request-in-flight' });
+      return;
+    }
+
     setError('');
     const request = collectRequest();
     const missing = validateRequest(request);
@@ -621,6 +653,17 @@
       return;
     }
 
+    startInFlight = true;
+    trace('alb.download.start.request', {
+      configMode: request.configMode,
+      savedConfigName: request.savedConfigName,
+      configName: request.configName,
+      bucket: request.bucket,
+      albId: request.albId,
+      startUtc: request.startUtc,
+      endUtc: request.endUtc
+    });
+
     try {
       const payload = await fetchJson('/api/alb/download/start', {
         method: 'POST',
@@ -628,11 +671,19 @@
       });
 
       if (payload.snapshot) {
-        currentJobId = payload.snapshot.jobId || '';
+        trackJob(payload.snapshot.jobId, 'started');
         renderSnapshot(payload.snapshot);
       }
     } catch (error) {
+      const running = error.payload && error.payload.snapshot;
+      if (running && running.jobId) {
+        trackJob(running.jobId, 'already-running');
+        renderSnapshot(running);
+      }
+
       setError(String(error));
+    } finally {
+      startInFlight = false;
     }
   }
 

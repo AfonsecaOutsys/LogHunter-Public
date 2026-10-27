@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using LogHunter.Services;
 using LogHunter.Web.Hosting;
 
 namespace LogHunter.Web.Pages;
@@ -71,6 +72,10 @@ internal static class WebShellPageBuilder
         var extraScript = string.IsNullOrWhiteSpace(extraScriptPath)
             ? string.Empty
             : $"""  <script src="{Html(extraScriptPath)}"></script>""";
+        var traceAttribute = TraceLog.IsEnabled ? " data-trace=\"on\"" : string.Empty;
+        var traceNote = TraceLog.IsEnabled
+            ? $"""      <p class="footer-note">Trace logging on: {Html(TraceLog.FilePath ?? string.Empty)}</p>"""
+            : string.Empty;
 
         return $$"""
 <!DOCTYPE html>
@@ -81,7 +86,7 @@ internal static class WebShellPageBuilder
   <title>{{title}}</title>
   <link rel="stylesheet" href="/assets/site.css">
 </head>
-<body>
+<body{{traceAttribute}}>
   <div class="shell">
     <main class="content">
       <div class="topbar">
@@ -111,6 +116,7 @@ internal static class WebShellPageBuilder
 {{mainContent}}
 
       <p class="footer-note">{{Html(context.AppName)}} {{Html(context.Version)}}. Current console workflows remain available during the migration.</p>
+{{traceNote}}
     </main>
   </div>
   <script src="/assets/site.js"></script>

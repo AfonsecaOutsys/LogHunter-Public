@@ -108,12 +108,15 @@ internal sealed class WebAppHost : IDisposable
                 // by a slow request. Each request is fully isolated.
                 _ = Task.Run(async () =>
                 {
+                    var requestId = TraceLog.BeginRequest(context.Request);
+                    var stopwatch = Stopwatch.StartNew();
                     try
                     {
                         await HandleAsync(context).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
+                        TraceLog.Write("http", "error", new { error = ex.ToString() });
                         try
                         {
                             await WriteTextAsync(context.Response, HttpStatusCode.InternalServerError, ex.ToString(), "text/plain; charset=utf-8").ConfigureAwait(false);
@@ -122,6 +125,10 @@ internal sealed class WebAppHost : IDisposable
                         {
                             // Response already closed or unwritable; swallow to keep the loop alive.
                         }
+                    }
+                    finally
+                    {
+                        TraceLog.EndRequest(requestId, context.Response, stopwatch.ElapsedMilliseconds);
                     }
                 });
             }
@@ -150,6 +157,18 @@ internal sealed class WebAppHost : IDisposable
         if (string.Equals(path, "/api/app/info", StringComparison.OrdinalIgnoreCase))
         {
             await WriteJsonAsync(context.Response, BuildAppInfo()).ConfigureAwait(false);
+            return;
+        }
+
+        if (string.Equals(path, "/api/trace", StringComparison.OrdinalIgnoreCase))
+        {
+            using (var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding ?? Encoding.UTF8))
+            {
+                TraceLog.WriteClientEvents(await reader.ReadToEndAsync().ConfigureAwait(false));
+            }
+
+            context.Response.StatusCode = (int)HttpStatusCode.NoContent;
+            context.Response.Close();
             return;
         }
 

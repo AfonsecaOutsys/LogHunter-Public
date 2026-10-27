@@ -1,5 +1,92 @@
 const THEME_KEY = 'loghunter.theme';
 const APP_INFO_POLL_MS = 4000;
+const TRACE_ENDPOINT = '/api/trace';
+const TRACE_FLUSH_MS = 1000;
+
+// Records browser-side actions when the exe was started with --trace. Typed text is never recorded.
+function initializeTrace() {
+  if (!document.body || document.body.dataset.trace !== 'on') {
+    window.lhTrace = function () {};
+    return;
+  }
+
+  const queue = [];
+  const page = window.location.pathname;
+  const originalFetch = window.fetch.bind(window);
+
+  window.lhTrace = function (event, data) {
+    queue.push({ event, ts: new Date().toISOString(), page, data: data === undefined ? null : data });
+  };
+
+  function flush(useBeacon) {
+    if (!queue.length) {
+      return;
+    }
+
+    const body = JSON.stringify({ events: queue.splice(0, queue.length) });
+    if (useBeacon && navigator.sendBeacon) {
+      navigator.sendBeacon(TRACE_ENDPOINT, body);
+      return;
+    }
+
+    originalFetch(TRACE_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+  }
+
+  window.fetch = async function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    const method = (init && init.method) || (input && input.method) || 'GET';
+    const started = performance.now();
+    try {
+      const response = await originalFetch(input, init);
+      window.lhTrace('fetch', { method, url, status: response.status, ms: Math.round(performance.now() - started) });
+      return response;
+    } catch (error) {
+      window.lhTrace('fetch.error', { method, url, error: String(error), ms: Math.round(performance.now() - started) });
+      throw error;
+    }
+  };
+
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element
+      ? event.target.closest('button, a, summary, [role="button"], input[type="checkbox"], input[type="radio"]')
+      : null;
+    if (!target) {
+      return;
+    }
+
+    window.lhTrace('click', {
+      tag: target.tagName.toLowerCase(),
+      id: target.id || null,
+      text: (target.textContent || '').trim().replace(/\s+/g, ' ').substring(0, 80),
+      href: target.getAttribute('href')
+    });
+  }, true);
+
+  document.addEventListener('change', (event) => {
+    const target = event.target;
+    if (target instanceof HTMLSelectElement) {
+      window.lhTrace('change', { id: target.id || target.name || null, value: target.value });
+    } else if (target instanceof HTMLInputElement && (target.type === 'checkbox' || target.type === 'radio')) {
+      window.lhTrace('change', { id: target.id || target.name || null, checked: target.checked });
+    }
+  }, true);
+
+  window.addEventListener('error', (event) => {
+    window.lhTrace('js.error', { message: event.message, source: event.filename, line: event.lineno });
+  });
+  window.addEventListener('unhandledrejection', (event) => {
+    window.lhTrace('js.unhandled-rejection', { reason: String(event.reason) });
+  });
+  document.addEventListener('visibilitychange', () => {
+    window.lhTrace('visibility', { state: document.visibilityState });
+  });
+  window.addEventListener('pagehide', () => flush(true));
+
+  window.lhTrace('page.load', { title: document.title, referrer: document.referrer || null });
+  setInterval(() => flush(false), TRACE_FLUSH_MS);
+}
+
+initializeTrace();
 
 function getPreferredTheme() {
   const storedTheme = window.localStorage.getItem(THEME_KEY);
