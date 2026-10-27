@@ -46,6 +46,15 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 2.0.0.2
+
+- Fixes the ALB download page getting stuck on a previous job. Starting a second download right after the first could leave the job status panel showing the first job as `completed` while the new download ran unseen; clicking Start again then failed with `An ALB download is already running.`
+- The page now ignores status replies for jobs it is no longer tracking, and switches to the running job if Start reports one is already running.
+- Start download returns immediately; the AWS CLI checks now run in the background job.
+- Adds `--trace` (alias `--debug`): writes every web request, browser action, ALB job step and AWS CLI call to `logs\trace-<timestamp>.jsonl` next to the exe. AWS keys, secrets and session tokens are always masked.
+- IIS Burst Patterns: Severity colors now follow the severity score, so CRIT and MED rows are colored again.
+- ALB download: when a day prefix lists no logs, the error now suggests checking the Sentry toggle.
+
 ### 2.0.0.1
 
 - Fixes ALB region detection from the S3 bucket name. Buckets whose GUID contained a block ending in `af` or `ca` resolved to an invalid region (for example `af-us-east-1` instead of `us-east-1`), so ALB log listing and download failed with `aws s3 ls failed`.
@@ -239,9 +248,11 @@ LogHunter.exe --web
 LogHunter.exe --help
 LogHunter.exe --version
 LogHunter.exe --root C:\path\to\workspace
+LogHunter.exe --web --trace
 ```
 
 - `--root <path>`: use a custom workspace instead of the executable folder
+- `--trace` (or `--debug`): record a trace of every action to `logs\trace-<timestamp>.jsonl` next to the exe, for analysis after a session; credentials are masked
 - `--viewer-sqlite <path>`: open the SQLite viewer directly for a generated database
 - `--viewer-ip <ip>`: optional selected IP shown in viewer metadata
 
