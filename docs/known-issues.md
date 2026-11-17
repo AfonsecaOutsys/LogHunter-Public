@@ -103,16 +103,16 @@ The results for both Top Bandwidth IPs and Upload Payloads scans need to be clea
 
 ## High Complexity
 
-### 25. ALB Requests Over Time Per Selected IP - Needs File Picker
+### 25. ✅ ALB Requests Over Time Per Selected IP - Needs File Picker
 The ALB "Requests over time per selected IP" chart should use the same file picker flow as the IP Summary pages (single file picker instead of file list from folder).
 
-### 26. ALB/IIS IP Summary UI - Source File Selection
+### 26. ✅ ALB/IIS IP Summary UI - Source File Selection
 When selecting "from source" in the ALB IP Summary UI, the current implementation shows a list of files from the folder. This should be tightened to a single selectable file picker instead. The IIS IP Summary is missing the files input form entirely — it needs the same file selection UI that ALB IP Summary has. Additionally, once a file is selected, the IP selection should use a popup modal with a scrollable list of IPs, each showing the hit count for easy identification. The list should be ranked by hits (descending) and support multi-select so the user can choose which IPs to run in one go.
 
 ### 27. WAF Blocked Summary + Top Blocked Requests - Improve Output
 The WAF blocked summary and top blocked requests outputs need analysis and rework. The blocked summary results are buried in the scan status card and only show a list of top blocks. Both outputs need to be moved to the results section and presented in a more meaningful way (e.g. aggregate stats, visual breakdown). Requires hands-on analysis of the current output before deciding on the approach.
 
-### 28. AbuseIPDB - Pull IPs from IIS Burst Cache
+### 28. ✅ AbuseIPDB - Pull IPs from IIS Burst Cache
 AbuseIPDB IP selection should support pulling IPs from the IIS Burst Identification cache. To enable this:
 1. **Burst Identification** should save each distinct IP into a cache along with the number of bursts and total hits (this data doesn't need to be shown in the burst identification results themselves).
 2. **AbuseIPDB** should have a source option to use the burst cache. When selected, display a well-formatted list of the cached IPs showing IP address, number of bursts, and total hits, each with a radio button for selection.
