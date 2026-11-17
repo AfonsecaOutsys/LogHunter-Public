@@ -390,6 +390,16 @@ internal static class IisPageBuilder
         </section>
 
         <section id="iisBurstResults" class="stack" hidden>
+          <section id="iisBurstCampaignsPanel" class="panel" hidden>
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">Coordinated</div>
+                <h2>Scan campaigns</h2>
+              </div>
+            </div>
+            <p class="inline-note">Bursts grouped by fingerprint &mdash; same user-agent and the identical set of URLs. The same path set replayed from several IPs is a coordinated / rotating-IP scan. These signatures are universal, so they flag the same way on any environment regardless of the app's own endpoints.</p>
+            <div id="iisBurstCampaigns" class="result-summary-body"></div>
+          </section>
           <section class="panel">
             <div class="section-heading">
               <div>
@@ -397,6 +407,7 @@ internal static class IisPageBuilder
                 <h2>Burst candidates</h2>
               </div>
             </div>
+            <p class="inline-note">Heuristic signals, not confirmed threats &mdash; start with the <strong>4xx%</strong> column (highlighted): a high error rate is the strongest sign of a scanner or probe hitting paths that don't exist. Busy apps and integrations, especially behind shared/NAT IPs, can also appear here on volume alone, so verify the requests before acting &mdash; all-200 traffic on a few endpoints is usually normal app load.</p>
             <div id="iisBurstTable" class="result-summary-body"></div>
           </section>
         </section>

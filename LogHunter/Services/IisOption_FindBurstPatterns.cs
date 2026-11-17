@@ -25,100 +25,9 @@ public static class IisOption_FindBurstPatterns
     // safety cap for HTML report (avoid absurdly huge JSON on massive log sets)
     private const int HtmlMaxRows = 5000;
 
-    private sealed class BurstAgg
-    {
-        public required string Ip { get; init; }
-        public required DateTime StartUtc { get; init; }
-        public int BucketSeconds { get; init; }
-
-        public int TotalDynamic { get; set; }
-        public int TotalAll { get; set; }
-
-        public int C2xx { get; set; }
-        public int C3xx { get; set; }
-        public int C4xx { get; set; }
-        public int C5xx { get; set; }
-        public int Dynamic4xx { get; set; }
-        public int Dynamic5xx { get; set; }
-
-        public int Get { get; set; }
-        public int Post { get; set; }
-        public int Head { get; set; }
-
-        public long TimeTakenTotalMs { get; set; }
-        public int TimeTakenMaxMs { get; set; }
-
-        public string? Ua { get; set; }
-        public bool UaMixed { get; set; }
-
-        public int UniqueDynamicUris { get; set; }
-        private HashSet<string>? _uniqueDyn;
-        private readonly int _uniqueCap;
-
-        private Dictionary<string, int>? _uriCounts;
-        private readonly int _uriCap;
-        public int TopDynamicUriHits { get; private set; }
-
-        public BurstAgg(int uniqueCap, int uriCap)
-        {
-            _uniqueCap = uniqueCap;
-            _uriCap = uriCap;
-        }
-
-        public void AddDynamicUri(string uriStem)
-        {
-            int currentCount = 0;
-
-            if (UniqueDynamicUris < _uniqueCap)
-            {
-                _uniqueDyn ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (_uniqueDyn.Add(uriStem))
-                    UniqueDynamicUris++;
-            }
-            else
-            {
-                UniqueDynamicUris = _uniqueCap;
-            }
-
-            _uriCounts ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            if (_uriCounts.Count <= _uriCap)
-            {
-                if (_uriCounts.TryGetValue(uriStem, out var v))
-                {
-                    currentCount = v + 1;
-                    _uriCounts[uriStem] = currentCount;
-                }
-                else
-                {
-                    currentCount = 1;
-                    _uriCounts[uriStem] = currentCount;
-                }
-            }
-
-            if (currentCount > TopDynamicUriHits)
-                TopDynamicUriHits = currentCount;
-        }
-
-        public List<(string Uri, int Count)> TopUris(int take)
-        {
-            if (_uriCounts is null || _uriCounts.Count == 0) return new();
-            return _uriCounts
-                .OrderByDescending(kv => kv.Value)
-                .ThenBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
-                .Take(take)
-                .Select(kv => (kv.Key, kv.Value))
-                .ToList();
-        }
-
-        public string UaDisplay => UaMixed ? "(mixed)" : (Ua ?? "-");
-        public int AvgTimeMs => TotalAll == 0 ? 0 : (int)(TimeTakenTotalMs / TotalAll);
-        public double FourxxRatio => TotalAll == 0 ? 0 : (double)C4xx / TotalAll;
-        public double DynamicFourxxRatio => TotalDynamic == 0 ? 0 : (double)Dynamic4xx / TotalDynamic;
-        public double UniqueDynamicRatio => TotalDynamic == 0 ? 0 : (double)UniqueDynamicUris / TotalDynamic;
-        public double FocusedUriRatio => TotalDynamic == 0 ? 0 : (double)TopDynamicUriHits / TotalDynamic;
-        public double HeadRatio => TotalAll == 0 ? 0 : (double)Head / TotalAll;
-        public double PostRatio => TotalAll == 0 ? 0 : (double)Post / TotalAll;
-    }
+    // BurstAgg, BurstAssessment, BurstThresholds and the scoring / flag / severity
+    // logic now live in the shared IisBurstScoring module (Services/IisBurstScoring.cs),
+    // consumed by both this console option and the web IisBurstPatternsJobManager.
 
     private sealed record BurstPick(string Id, string Display);
 
@@ -133,19 +42,6 @@ public static class IisOption_FindBurstPatterns
 
     // HTML rows for Tabulator
     private sealed record BurstUri(string Uri, int Count);
-
-    private sealed record BurstAssessment(
-        BurstAgg Agg,
-        int SeverityScore,
-        bool IsCandidate,
-        bool IsRate,
-        bool IsStrongRate,
-        bool IsEnum,
-        bool IsStrongEnum,
-        bool IsError,
-        bool IsFocused,
-        bool IsPostHeavy,
-        bool IsHeadHeavy);
 
     private sealed record BurstRow(
         int Rank,
@@ -227,17 +123,13 @@ public static class IisOption_FindBurstPatterns
                          : bucketChoice.StartsWith("300", StringComparison.Ordinal) ? 300
                          : 60;
 
-        var rateThreshold = (int)Math.Ceiling(2.5 * bucketSeconds);
-        var strongRateThreshold = (int)Math.Ceiling(4.0 * bucketSeconds);
-        var enumThreshold = Math.Max(12, (int)Math.Ceiling(0.60 * bucketSeconds));
-        var strongEnumThreshold = Math.Max(enumThreshold + 8, (int)Math.Ceiling(0.90 * bucketSeconds));
-        var errorThreshold = Math.Max(12, (int)Math.Ceiling((30.0 / 60.0) * bucketSeconds));
-        var focusThreshold = Math.Max(12, (int)Math.Ceiling(1.2 * bucketSeconds));
-        var postThreshold = Math.Max(10, (int)Math.Ceiling(0.30 * bucketSeconds));
-        var headThreshold = Math.Max(8, (int)Math.Ceiling(0.25 * bucketSeconds));
-
-        var uniqueCap = Math.Max(enumThreshold + 1, 64);
-        var uriCap = 40;
+        var thresholds = BurstThresholds.ForBucket(bucketSeconds);
+        var rateThreshold = thresholds.RateThreshold;
+        var strongRateThreshold = thresholds.StrongRateThreshold;
+        var enumThreshold = thresholds.EnumThreshold;
+        var errorThreshold = thresholds.ErrorThreshold;
+        var uniqueCap = thresholds.UniqueCap;
+        var uriCap = thresholds.UriCap;
 
         var ignoreUAPrefixes = new[] { "ELB-HealthChecker/" };
 
@@ -378,16 +270,7 @@ public static class IisOption_FindBurstPatterns
         // - Spectre shows top 20
         // - HTML contains "all bursts" (capped)
         var burstCandidates = aggs.Values
-            .Select(a => AssessBurst(
-                a,
-                rateThreshold,
-                strongRateThreshold,
-                enumThreshold,
-                strongEnumThreshold,
-                errorThreshold,
-                focusThreshold,
-                postThreshold,
-                headThreshold))
+            .Select(a => IisBurstScoring.Assess(a, thresholds))
             .Where(x => x.IsCandidate)
             .OrderByDescending(x => x.SeverityScore)
             .ThenByDescending(x => x.Agg.TotalDynamic)
@@ -425,7 +308,7 @@ public static class IisOption_FindBurstPatterns
         for (int i = 0; i < burstsForSpectre.Count; i++)
         {
             var a = burstsForSpectre[i].Agg;
-            var flags = BurstFlags(burstsForSpectre[i]);
+            var flags = IisBurstScoring.BuildFlags(burstsForSpectre[i]);
 
             table.AddRow(
                 (i + 1).ToString(CultureInfo.InvariantCulture),
@@ -440,6 +323,7 @@ public static class IisOption_FindBurstPatterns
         }
 
         AnsiConsole.Write(table);
+        AnsiConsole.MarkupLine("[grey]Heuristic candidates, not confirmed threats — focus on the [bold]Dyn 4xx%[/] column: a high error rate is the strongest scanner/probe signal. Busy apps/integrations (esp. shared/NAT IPs) can appear on volume alone; all-200 on a few endpoints = likely normal app load.[/]");
         AnsiConsole.WriteLine();
 
         // Save distinct burst IPs to session: from ALL candidates (not only top 20)
@@ -475,7 +359,7 @@ public static class IisOption_FindBurstPatterns
         {
             var a = burstsForSpectre[i].Agg;
             var id = $"{a.Ip}|{a.StartUtc.Ticks}";
-            var flags = BurstFlags(burstsForSpectre[i]);
+            var flags = IisBurstScoring.BuildFlags(burstsForSpectre[i]);
 
             pick.AddChoice(new BurstPick(
                 id,
@@ -621,7 +505,7 @@ public static class IisOption_FindBurstPatterns
                 var a = burstsForHtml[i].Agg;
                 var id = $"{a.Ip}|{a.StartUtc.Ticks}";
                 var score = burstsForHtml[i].SeverityScore;
-                var flags = BurstFlags(burstsForHtml[i]);
+                var flags = IisBurstScoring.BuildFlags(burstsForHtml[i]);
 
                 idToRelLog.TryGetValue(id, out var rawLog);
 
@@ -631,7 +515,7 @@ public static class IisOption_FindBurstPatterns
                     StartUtc: a.StartUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                     Ip: a.Ip,
                     SeverityScore: score,
-                    SeverityLabel: SeverityLabel(score),
+                    SeverityLabel: IisBurstScoring.SeverityLabel(score),
                     Flags: flags,
                     TotalDynamic: a.TotalDynamic,
                     UniqueDynamicUris: a.UniqueDynamicUris,
@@ -741,6 +625,10 @@ pre{margin:0;background:#0b0f14;border:1px solid var(--line);padding:10px;border
                       "s</span> · Trigger: dyn ≥ <span class=\"mono\">" + rateThreshold.ToString(CultureInfo.InvariantCulture) +
                       "</span>, unique ≥ <span class=\"mono\">" + enumThreshold.ToString(CultureInfo.InvariantCulture) +
                       "</span>, dyn 4xx ≥ <span class=\"mono\">" + errorThreshold.ToString(CultureInfo.InvariantCulture) + "</span></div>");
+
+        sb.AppendLine("<div style=\"border:1px solid #a16207;background:#3b2f0b;color:#fde68a;border-radius:8px;padding:8px 10px;margin:8px 0;font-size:12px;line-height:1.45\">" +
+                      "Heuristic signals, not confirmed threats &mdash; start with the <b>Dyn 4xx%</b> column: a high error rate is the strongest sign of a scanner or probe hitting paths that don't exist. " +
+                      "Busy apps and integrations (especially behind shared/NAT IPs) can also appear here on volume alone, so verify the actual requests before acting &mdash; all-200 traffic concentrated on a few endpoints is usually normal app load.</div>");
 
         sb.AppendLine("<div class=\"toolbar\">");
         sb.AppendLine("<input id=\"q\" type=\"search\" placeholder=\"Search IP, UA, flags, time...\">");
@@ -940,139 +828,8 @@ applyFilters();
         catch { }
     }
 
-    // ---------------- Scoring / flags ----------------
-
-    private static BurstAssessment AssessBurst(
-        BurstAgg a,
-        int rateTh,
-        int strongRateTh,
-        int enumTh,
-        int strongEnumTh,
-        int errTh,
-        int focusTh,
-        int postTh,
-        int headTh)
-    {
-        var isRate = a.TotalDynamic >= rateTh;
-        var isStrongRate = a.TotalDynamic >= strongRateTh;
-
-        var isEnum = a.TotalDynamic >= enumTh
-            && a.UniqueDynamicUris >= enumTh
-            && a.UniqueDynamicRatio >= 0.45;
-
-        var isStrongEnum = a.TotalDynamic >= strongEnumTh
-            && a.UniqueDynamicUris >= strongEnumTh
-            && a.UniqueDynamicRatio >= 0.65;
-
-        var isError = a.Dynamic4xx >= errTh
-            || (a.DynamicFourxxRatio >= 0.70
-                && a.Dynamic4xx >= Math.Max(8, errTh / 2)
-                && a.TotalDynamic >= Math.Max(15, rateTh / 3));
-
-        var isFocused = a.TopDynamicUriHits >= focusTh
-            && a.FocusedUriRatio >= 0.70;
-
-        var isPostHeavy = a.Post >= postTh && a.PostRatio >= 0.35;
-        var isHeadHeavy = a.Head >= headTh && a.HeadRatio >= 0.35;
-
-        // Conservative gate: prefer corroborated signals over one broad threshold hit.
-        var isCandidate =
-            isStrongEnum
-            || (isFocused && isRate)
-            || (isError && (isRate || isEnum || isPostHeavy || isHeadHeavy))
-            || (isEnum && (isError || isPostHeavy || isHeadHeavy))
-            || (isStrongRate && (isFocused || isError || isPostHeavy || isHeadHeavy));
-
-        var score = Score(
-            a,
-            isRate,
-            isStrongRate,
-            isEnum,
-            isStrongEnum,
-            isError,
-            isFocused,
-            isPostHeavy,
-            isHeadHeavy,
-            rateTh,
-            strongRateTh,
-            enumTh,
-            strongEnumTh,
-            errTh);
-
-        return new BurstAssessment(
-            a,
-            score,
-            isCandidate,
-            isRate,
-            isStrongRate,
-            isEnum,
-            isStrongEnum,
-            isError,
-            isFocused,
-            isPostHeavy,
-            isHeadHeavy);
-    }
-
-    private static int Score(
-        BurstAgg a,
-        bool isRate,
-        bool isStrongRate,
-        bool isEnum,
-        bool isStrongEnum,
-        bool isError,
-        bool isFocused,
-        bool isPostHeavy,
-        bool isHeadHeavy,
-        int rateTh,
-        int strongRateTh,
-        int enumTh,
-        int strongEnumTh,
-        int errTh)
-    {
-        int score = 0;
-
-        if (isStrongRate) score += 65 + Math.Min(50, a.TotalDynamic - strongRateTh);
-        else if (isRate) score += 30 + Math.Min(35, a.TotalDynamic - rateTh);
-
-        if (isStrongEnum) score += 70 + Math.Min(40, (a.UniqueDynamicUris - strongEnumTh) * 2);
-        else if (isEnum) score += 35 + Math.Min(30, (a.UniqueDynamicUris - enumTh) * 2);
-
-        if (isError)
-        {
-            score += 50 + Math.Min(35, (a.Dynamic4xx - errTh) * 2);
-            if (a.DynamicFourxxRatio >= 0.85) score += 10;
-        }
-
-        if (isFocused) score += 35 + Math.Min(15, (int)Math.Round((a.FocusedUriRatio - 0.70) * 100));
-        if (isPostHeavy) score += 20 + Math.Min(15, a.Post - Math.Max(10, rateTh / 4));
-        if (isHeadHeavy) score += 18 + Math.Min(12, a.Head - Math.Max(8, rateTh / 5));
-
-        return score;
-    }
-
-    private static string BurstFlags(BurstAssessment burst)
-    {
-        var flags = new List<string>();
-
-        if (burst.IsStrongRate) flags.Add("RATE+");
-        else if (burst.IsRate) flags.Add("RATE");
-
-        if (burst.IsStrongEnum) flags.Add("ENUM+");
-        else if (burst.IsEnum) flags.Add("ENUM");
-
-        if (burst.IsError) flags.Add("4XX");
-        if (burst.IsFocused) flags.Add("FOCUS");
-        if (burst.IsPostHeavy) flags.Add("POST");
-        if (burst.IsHeadHeavy) flags.Add("HEAD");
-
-        return flags.Count == 0 ? "-" : string.Join("+", flags);
-    }
-
-    private static string SeverityLabel(int score)
-        => score >= 140 ? "CRIT" : score >= 95 ? "HIGH" : score >= 60 ? "MED" : "LOW";
-
-    private static string SeverityColor(int score)
-        => score >= 140 ? "red" : score >= 95 ? "darkorange" : score >= 60 ? "yellow" : "grey";
+    // Scoring, flag derivation and severity labeling now live in the shared
+    // IisBurstScoring module (Services/IisBurstScoring.cs).
 
     private static string UaSummary(BurstAgg a)
     {

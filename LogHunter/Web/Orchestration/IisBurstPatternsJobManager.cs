@@ -89,16 +89,9 @@ internal sealed class IisBurstPatternsJobManager
     {
         try
         {
-            var rateThreshold = (int)Math.Ceiling(2.5 * bucketSeconds);
-            var strongRateThreshold = (int)Math.Ceiling(4.0 * bucketSeconds);
-            var enumThreshold = Math.Max(12, (int)Math.Ceiling(0.60 * bucketSeconds));
-            var strongEnumThreshold = Math.Max(enumThreshold + 8, (int)Math.Ceiling(0.90 * bucketSeconds));
-            var errorThreshold = Math.Max(12, (int)Math.Ceiling((30.0 / 60.0) * bucketSeconds));
-            var focusThreshold = Math.Max(12, (int)Math.Ceiling(1.2 * bucketSeconds));
-            var postThreshold = Math.Max(10, (int)Math.Ceiling(0.30 * bucketSeconds));
-            var headThreshold = Math.Max(8, (int)Math.Ceiling(0.25 * bucketSeconds));
-            var uniqueCap = Math.Max(enumThreshold + 1, 64);
-            var uriCap = 40;
+            var thresholds = BurstThresholds.ForBucket(bucketSeconds);
+            var uniqueCap = thresholds.UniqueCap;
+            var uriCap = thresholds.UriCap;
 
             var ignoreUAPrefixes = new[] { "ELB-HealthChecker/" };
             var aggs = new Dictionary<string, BurstAgg>(StringComparer.OrdinalIgnoreCase);
@@ -225,15 +218,21 @@ internal sealed class IisBurstPatternsJobManager
                 return;
             }
 
-            var candidates = aggs.Values
-                .Select(a => Assess(a, rateThreshold, strongRateThreshold, enumThreshold, strongEnumThreshold, errorThreshold, focusThreshold, postThreshold, headThreshold))
+            var assessed = aggs.Values
+                .Select(a => IisBurstScoring.Assess(a, thresholds))
                 .Where(x => x.IsCandidate)
                 .OrderByDescending(x => x.SeverityScore)
                 .ThenByDescending(x => x.Agg.TotalDynamic)
                 .ThenByDescending(x => x.Agg.UniqueDynamicUris)
                 .ThenBy(x => x.Agg.StartUtc)
-                .Take(200)
                 .ToList();
+
+            // Campaign grouping runs over the FULL candidate set (not just the top 200
+            // shown) so a distributed scan whose individual bursts rank low is still
+            // grouped and surfaced as one finding.
+            var campaigns = BuildCampaigns(assessed);
+
+            var candidates = assessed.Take(200).ToList();
 
             var burstResults = candidates.Select((c, idx) =>
             {
@@ -243,8 +242,8 @@ internal sealed class IisBurstPatternsJobManager
                     StartUtc: a.StartUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                     Ip: a.Ip,
                     SeverityScore: c.SeverityScore,
-                    SeverityLabel: SeverityLabel(c.SeverityScore),
-                    Flags: BuildFlags(c),
+                    SeverityLabel: IisBurstScoring.SeverityLabel(c.SeverityScore),
+                    Flags: IisBurstScoring.BuildFlags(c),
                     TotalDynamic: a.TotalDynamic,
                     UniqueDynamicUris: a.UniqueDynamicUris,
                     FourxxPct: Math.Round(a.DynamicFourxxRatio * 100.0, 1),
@@ -287,7 +286,8 @@ internal sealed class IisBurstPatternsJobManager
                 CurrentStep = files.Count,
                 FilesProcessed = files.Count,
                 CandidateCount = candidates.Count,
-                Bursts = burstResults
+                Bursts = burstResults,
+                Campaigns = campaigns
             });
         }
         catch (Exception ex)
@@ -313,116 +313,67 @@ internal sealed class IisBurstPatternsJobManager
         }
     }
 
-    // ---- Scoring (mirroring console IisOption_FindBurstPatterns) ----
-
-    private sealed record Assessment(BurstAgg Agg, int SeverityScore, bool IsCandidate, bool IsRate, bool IsStrongRate, bool IsEnum, bool IsStrongEnum, bool IsError, bool IsFocused, bool IsPostHeavy, bool IsHeadHeavy);
-
-    private static Assessment Assess(BurstAgg a, int rateTh, int strongRateTh, int enumTh, int strongEnumTh, int errTh, int focusTh, int postTh, int headTh)
+    // ---- Coordinated-campaign grouping (prototype) ----
+    // Group candidate bursts by fingerprint = user-agent + distinct-path-set hash. Real
+    // users never replay an identical path set, so the SAME fingerprint seen from several
+    // source IPs is a coordinated / rotating-IP scan. Labeling uses universal scanner
+    // signatures (probe paths + known scan UAs), so this generalizes across every client
+    // without referencing that client's own endpoints.
+    private static List<BurstCampaign> BuildCampaigns(List<BurstAssessment> assessed)
     {
-        var isRate = a.TotalDynamic >= rateTh;
-        var isStrongRate = a.TotalDynamic >= strongRateTh;
-        var isEnum = a.TotalDynamic >= enumTh && a.UniqueDynamicUris >= enumTh && a.UniqueDynamicRatio >= 0.45;
-        var isStrongEnum = a.TotalDynamic >= strongEnumTh && a.UniqueDynamicUris >= strongEnumTh && a.UniqueDynamicRatio >= 0.65;
-        var isError = a.Dynamic4xx >= errTh || (a.DynamicFourxxRatio >= 0.70 && a.Dynamic4xx >= Math.Max(8, errTh / 2) && a.TotalDynamic >= Math.Max(15, rateTh / 3));
-        var isFocused = a.TopDynamicUriHits >= focusTh && a.FocusedUriRatio >= 0.70;
-        var isPostHeavy = a.Post >= postTh && a.PostRatio >= 0.35;
-        var isHeadHeavy = a.Head >= headTh && a.HeadRatio >= 0.35;
+        var result = new List<BurstCampaign>();
 
-        var isCandidate =
-            isStrongEnum
-            || (isFocused && isRate)
-            || (isError && (isRate || isEnum || isPostHeavy || isHeadHeavy))
-            || (isEnum && (isError || isPostHeavy || isHeadHeavy))
-            || (isStrongRate && (isFocused || isError || isPostHeavy || isHeadHeavy));
-
-        var score = 0;
-        if (isStrongRate) score += 65 + Math.Min(50, a.TotalDynamic - strongRateTh);
-        else if (isRate) score += 30 + Math.Min(35, a.TotalDynamic - rateTh);
-        if (isStrongEnum) score += 70 + Math.Min(40, (a.UniqueDynamicUris - strongEnumTh) * 2);
-        else if (isEnum) score += 35 + Math.Min(30, (a.UniqueDynamicUris - enumTh) * 2);
-        if (isError) { score += 50 + Math.Min(35, (a.Dynamic4xx - errTh) * 2); if (a.DynamicFourxxRatio >= 0.85) score += 10; }
-        if (isFocused) score += 35 + Math.Min(15, (int)Math.Round((a.FocusedUriRatio - 0.70) * 100));
-        if (isPostHeavy) score += 20 + Math.Min(15, a.Post - Math.Max(10, rateTh / 4));
-        if (isHeadHeavy) score += 18 + Math.Min(12, a.Head - Math.Max(8, rateTh / 5));
-
-        return new Assessment(a, score, isCandidate, isRate, isStrongRate, isEnum, isStrongEnum, isError, isFocused, isPostHeavy, isHeadHeavy);
-    }
-
-    private static string BuildFlags(Assessment b)
-    {
-        var flags = new List<string>();
-        if (b.IsStrongRate) flags.Add("RATE+"); else if (b.IsRate) flags.Add("RATE");
-        if (b.IsStrongEnum) flags.Add("ENUM+"); else if (b.IsEnum) flags.Add("ENUM");
-        if (b.IsError) flags.Add("4XX");
-        if (b.IsFocused) flags.Add("FOCUS");
-        if (b.IsPostHeavy) flags.Add("POST");
-        if (b.IsHeadHeavy) flags.Add("HEAD");
-        return flags.Count == 0 ? "-" : string.Join("+", flags);
-    }
-
-    private static string SeverityLabel(int score)
-        => score >= 140 ? "CRIT" : score >= 95 ? "HIGH" : score >= 60 ? "MED" : "LOW";
-
-    // ---- BurstAgg (mirroring console) ----
-
-    private sealed class BurstAgg
-    {
-        public required string Ip { get; init; }
-        public required DateTime StartUtc { get; init; }
-        public int BucketSeconds { get; init; }
-        public int TotalDynamic { get; set; }
-        public int TotalAll { get; set; }
-        public int C2xx { get; set; }
-        public int C3xx { get; set; }
-        public int C4xx { get; set; }
-        public int C5xx { get; set; }
-        public int Dynamic4xx { get; set; }
-        public int Dynamic5xx { get; set; }
-        public int Get { get; set; }
-        public int Post { get; set; }
-        public int Head { get; set; }
-        public long TimeTakenTotalMs { get; set; }
-        public int TimeTakenMaxMs { get; set; }
-        public string? Ua { get; set; }
-        public bool UaMixed { get; set; }
-        public int UniqueDynamicUris { get; set; }
-        private HashSet<string>? _uniqueDyn;
-        private readonly int _uniqueCap;
-        private Dictionary<string, int>? _uriCounts;
-        private readonly int _uriCap;
-        public int TopDynamicUriHits { get; private set; }
-
-        public BurstAgg(int uniqueCap, int uriCap) { _uniqueCap = uniqueCap; _uriCap = uriCap; }
-
-        public void AddDynamicUri(string uriStem)
+        foreach (var grp in assessed.GroupBy(c => c.Agg.FingerprintKey, StringComparer.Ordinal))
         {
-            int currentCount = 0;
-            if (UniqueDynamicUris < _uniqueCap) { _uniqueDyn ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase); if (_uniqueDyn.Add(uriStem)) UniqueDynamicUris++; }
-            else UniqueDynamicUris = _uniqueCap;
+            var g = grp.ToList();
+            var ips = g.Select(c => c.Agg.Ip)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-            _uriCounts ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            if (_uriCounts.Count <= _uriCap)
-            {
-                if (_uriCounts.TryGetValue(uriStem, out var v)) { currentCount = v + 1; _uriCounts[uriStem] = currentCount; }
-                else { currentCount = 1; _uriCounts[uriStem] = currentCount; }
-            }
-            if (currentCount > TopDynamicUriHits) TopDynamicUriHits = currentCount;
+            // Coordinated = the same fingerprint (UA + identical path set) from >= 2 IPs.
+            if (ips.Count < 2) continue;
+
+            var rep = g[0].Agg;
+            var totalDyn = g.Sum(c => c.Agg.TotalDynamic);
+            var total4xx = g.Sum(c => c.Agg.Dynamic4xx);
+            var fourxx = totalDyn == 0 ? 0.0 : (double)total4xx / totalDyn;
+            var scannerUa = IisBurstScoring.IsScannerUserAgent(rep.Ua);
+            var probeRatio = rep.ProbeRatio;
+
+            // Only surface a coordinated group that actually looks hostile — probe paths,
+            // mostly-errors, or a known scan tool. Two legitimate users who happen to hit
+            // the same screens (all-200, no probe, real browser UA) are NOT a campaign.
+            if (!(probeRatio >= 0.15 || fourxx >= 0.50 || scannerUa)) continue;
+
+            string label =
+                (probeRatio >= 0.30 || scannerUa) ? "Vuln scanner — probing known exploit/secret paths"
+                : fourxx >= 0.80 ? "Distributed scan — mostly errors (paths not found)"
+                : "Coordinated scan — same requests from many IPs (review)";
+
+            result.Add(new BurstCampaign(
+                Fingerprint: rep.PathSetHash.ToString("x", CultureInfo.InvariantCulture),
+                Label: label,
+                Ua: rep.UaDisplay,
+                IpCount: ips.Count,
+                BurstCount: g.Count,
+                TotalDynamic: totalDyn,
+                FourxxPct: Math.Round(fourxx * 100.0, 1),
+                ProbePct: Math.Round(probeRatio * 100.0, 1),
+                Ips: ips,
+                SamplePaths: rep.TopUris(12).Select(u => u.Uri).ToList()));
         }
 
-        public List<(string Uri, int Count)> TopUris(int take)
-        {
-            if (_uriCounts is null || _uriCounts.Count == 0) return new();
-            return _uriCounts.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase).Take(take).Select(kv => (kv.Key, kv.Value)).ToList();
-        }
-
-        public string UaDisplay => UaMixed ? "(mixed)" : (Ua ?? "-");
-        public int AvgTimeMs => TotalAll == 0 ? 0 : (int)(TimeTakenTotalMs / TotalAll);
-        public double DynamicFourxxRatio => TotalDynamic == 0 ? 0 : (double)Dynamic4xx / TotalDynamic;
-        public double UniqueDynamicRatio => TotalDynamic == 0 ? 0 : (double)UniqueDynamicUris / TotalDynamic;
-        public double FocusedUriRatio => TotalDynamic == 0 ? 0 : (double)TopDynamicUriHits / TotalDynamic;
-        public double PostRatio => TotalAll == 0 ? 0 : (double)Post / TotalAll;
-        public double HeadRatio => TotalAll == 0 ? 0 : (double)Head / TotalAll;
+        return result
+            .OrderByDescending(c => c.IpCount)
+            .ThenByDescending(c => c.TotalDynamic)
+            .Take(50)
+            .ToList();
     }
+
+    // Scoring, flags, severity labeling, thresholds and BurstAgg now live in the
+    // shared IisBurstScoring module (Services/IisBurstScoring.cs), consumed by both
+    // this web job manager and the console IisOption_FindBurstPatterns.
 
     // ---- Helpers ----
 
@@ -491,7 +442,8 @@ internal sealed record IisBurstPatternsJobSnapshot(
     int FilesTotal,
     int CandidateCount,
     IReadOnlyList<BurstResult>? Bursts,
-    string? Error)
+    string? Error,
+    IReadOnlyList<BurstCampaign>? Campaigns = null)
 {
     public static IisBurstPatternsJobSnapshot CreateIdle()
         => new(
@@ -535,3 +487,15 @@ internal sealed record BurstResult(
 internal sealed record BurstUriCount(string Uri, int Count);
 
 internal sealed record BurstIpCacheEntry(string Ip, int Bursts, int TotalHits, int MaxScore);
+
+internal sealed record BurstCampaign(
+    string Fingerprint,
+    string Label,
+    string Ua,
+    int IpCount,
+    int BurstCount,
+    int TotalDynamic,
+    double FourxxPct,
+    double ProbePct,
+    IReadOnlyList<string> Ips,
+    IReadOnlyList<string> SamplePaths);
