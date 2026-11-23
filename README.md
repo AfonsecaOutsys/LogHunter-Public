@@ -46,6 +46,13 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 2.0.0.3
+
+- IIS Burst Patterns: console and web shell now share one scoring engine (thresholds, flags and severity), so both surfaces give the same verdict for the same logs.
+- Bursts are only flagged when they carry real threat signals: strong path enumeration, or errors alongside volume, enumeration or endpoint focus. Busy legitimate traffic that is high-rate, POST-heavy, or hammers one endpoint with `200` responses no longer shows up as a candidate.
+- Web shell: new **Scan campaigns** panel groups bursts by user-agent and URL set, exposing scans that rotate source IPs.
+- Burst table columns have tooltips, and the 4xx% column is highlighted.
+
 ### 2.0.0.2
 
 - Fixes the ALB download page getting stuck on a previous job. Starting a second download right after the first could leave the job status panel showing the first job as `completed` while the new download ran unseen; clicking Start again then failed with `An ALB download is already running.`
