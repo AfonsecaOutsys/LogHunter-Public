@@ -1155,6 +1155,35 @@ button.section-card--launch:disabled {
   color: #ffb3b3;
 }
 
+.inline-note {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(250, 204, 21, 0.28);
+  background: rgba(250, 204, 21, 0.10);
+  color: #fde68a;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* Soft highlight on the 4xx% column — the strongest scanner/probe signal. */
+.mini-table .col-4xx {
+  background: rgba(250, 204, 21, 0.10);
+  box-shadow: inset 1px 0 0 rgba(250, 204, 21, 0.35), inset -1px 0 0 rgba(250, 204, 21, 0.35);
+}
+/* Header cell also gets a top inset border so the highlighted column is capped cleanly at the top. */
+.mini-table th.col-4xx {
+  color: #fde68a;
+  box-shadow: inset 1px 0 0 rgba(250, 204, 21, 0.35),
+              inset -1px 0 0 rgba(250, 204, 21, 0.35),
+              inset 0 1px 0 rgba(250, 204, 21, 0.35);
+}
+
+/* Burst table headers carry tooltips (title=...); hint that with a help cursor. */
+.burst-table th[title] {
+  cursor: help;
+}
+
 .export-row {
   display: flex;
   align-items: center;

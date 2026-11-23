@@ -1014,6 +1014,44 @@
     });
   }
 
+  function renderIisBurstCampaigns(snap) {
+    const panel = byId('iisBurstCampaignsPanel');
+    const container = byId('iisBurstCampaigns');
+    if (!panel || !container) return;
+
+    const campaigns = (snap && snap.campaigns) || [];
+    if (campaigns.length === 0) {
+      setHidden(panel, true);
+      container.innerHTML = '';
+      return;
+    }
+    setHidden(panel, false);
+
+    container.innerHTML = campaigns.map(c => {
+      const sev = (c.probePct >= 30 || c.fourxxPct >= 80) ? 'color:#f87171' : 'color:#fbbf24';
+      const ips = (c.ips || []).map(ip => `<code>${escHtml(ip)}</code>`).join('&nbsp; ');
+      const paths = (c.samplePaths || []).slice(0, 12).map(p => `<li><code>${escHtml(p)}</code></li>`).join('');
+      return `
+        <details class="expandable-panel"${campaigns.length === 1 ? ' open' : ''}>
+          <summary>
+            <strong style="${sev}">${escHtml(c.label)}</strong>
+            &nbsp;&middot;&nbsp; <strong>${c.ipCount}</strong> IPs
+            &nbsp;&middot;&nbsp; ${fmt(c.totalDynamic)} reqs
+            &nbsp;&middot;&nbsp; ${Number(c.fourxxPct || 0).toFixed(0)}% 4xx${c.probePct > 0 ? ` &nbsp;&middot;&nbsp; ${Number(c.probePct).toFixed(0)}% probe-paths` : ''}
+          </summary>
+          <div class="expandable-body">
+            <div class="status-block">
+              <div class="status-pill"><span>User-Agent</span><strong>${escHtml(c.ua)}</strong></div>
+              <div class="status-pill"><span>Bursts</span><strong>${fmt(c.burstCount)}</strong></div>
+            </div>
+            <p class="footer-note" style="margin-top:8px">Source IPs (${c.ipCount}): ${ips}</p>
+            <p class="footer-note" style="margin-bottom:4px">Sample paths hit:</p>
+            <ul class="list-clean" style="font-family:monospace;font-size:11px">${paths}</ul>
+          </div>
+        </details>`;
+    }).join('');
+  }
+
   function renderIisBurstResults(snap) {
     const section = byId('iisBurstResults');
     const container = byId('iisBurstTable');
@@ -1025,6 +1063,7 @@
     }
 
     setHidden(section, false);
+    renderIisBurstCampaigns(snap);
 
     // Color by score using the same thresholds as the server (CRIT/HIGH/MED/LOW),
     // so it can't drift from the label wording sent by the API.
@@ -1036,13 +1075,26 @@
     };
 
     container.innerHTML = `
-      <table class="mini-table" style="font-size:12px">
+      <table class="mini-table burst-table" style="font-size:12px">
         <thead>
           <tr>
-            <th>#</th><th>Start (UTC)</th><th>IP</th><th>Score</th><th>Severity</th>
-            <th>Flags</th><th>Dyn</th><th>Uniq</th><th>4xx%</th>
-            <th>POST</th><th>HEAD</th><th>Avg ms</th><th>Max ms</th>
-            <th>2xx</th><th>3xx</th><th>4xx</th><th>5xx</th>
+            <th title="Rank - bursts are ordered by severity score, highest first">#</th>
+            <th title="Start of the time bucket for this burst (UTC)">Start (UTC)</th>
+            <th title="Client IP - uses the forwarded/original client address when present">IP</th>
+            <th title="Heuristic severity score - higher means more suspicious">Score</th>
+            <th title="Severity tier from the score: LOW under 60, MED 60+, HIGH 95+, CRIT 140+">Severity</th>
+            <th title="Why it was flagged. RATE = request volume, ENUM = many distinct URLs (scanning), 4XX = error-heavy, FOCUS = one endpoint hammered, POST/HEAD = method mix. A trailing + means a stronger signal.">Flags</th>
+            <th title="Dynamic requests in the bucket (static files like .js/.css/images are excluded)">Dyn</th>
+            <th title="Distinct dynamic URLs hit. Close to Dyn means enumeration/scanning; much lower means the same endpoints repeated">Uniq</th>
+            <th class="col-4xx" title="Share of dynamic requests returning 4xx errors. High means probing for paths that don't exist - the strongest scanner signal">4xx%</th>
+            <th title="POST requests in the bucket">POST</th>
+            <th title="HEAD requests in the bucket">HEAD</th>
+            <th title="Average response time in milliseconds">Avg ms</th>
+            <th title="Slowest single response time in milliseconds">Max ms</th>
+            <th title="Responses with status 200-299 (success)">2xx</th>
+            <th title="Responses with status 300-399 (redirects)">3xx</th>
+            <th title="Responses with status 400-499 (client errors: not found, forbidden, etc.)">4xx</th>
+            <th title="Responses with status 500-599 (server errors)">5xx</th>
           </tr>
         </thead>
         <tbody>
@@ -1056,7 +1108,7 @@
               <td style="font-family:monospace;font-size:11px">${escHtml(b.flags)}</td>
               <td>${fmt(b.totalDynamic)}</td>
               <td>${b.uniqueDynamicUris}</td>
-              <td>${Number(b.fourxxPct || 0).toFixed(0)}%</td>
+              <td class="col-4xx">${Number(b.fourxxPct || 0).toFixed(0)}%</td>
               <td>${b.post}</td>
               <td>${b.head}</td>
               <td>${fmt(b.avgMs)}</td>
