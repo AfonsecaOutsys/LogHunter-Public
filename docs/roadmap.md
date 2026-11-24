@@ -71,19 +71,25 @@ flowchart LR
     N1 --> N3
     N2 --> N3
   end
-  subgraph NEXT["NEXT"]
+  subgraph NEXT["NEXT · Release A (ticket-driven)"]
     direction TB
     X1["Rebase branch on main<br/>(v2.0.0.2)"]
-    X2["Known issues #11, #27"]
+    X3["IOC sweep: CIDR/ranges, no 10-IP cap,<br/>multi-folder, hit/no-hit report<br/>(was LATER: IP range search)"]
+    X4["CDN ranges + badges/banner<br/>(was LATER: CDN detection, cap. 2)"]
+    X5["ALB download hour filters + disk check"]
   end
   subgraph LATER["LATER"]
     direction TB
+    B1["Release B: alarm triage + UA rollup<br/>+ evidence report + verdict memory"]
+    X2["Known issues #11, #27 (+ WAF JSON/HAR)"]
     L1["CertCheck v1<br/>Sectigo R46 / Android ≤13 check"]
-    L2["IP range search<br/>IIS + ALB"]
-    L3["CDN detection"]
+    L4["Platform correlation, flood view,<br/>block-list helper"]
   end
   NOW --> NEXT --> LATER
 ```
+
+> [!NOTE]
+> NEXT/LATER were re-prioritised from 105 Zendesk tickets (Aug–Nov 2026). Gap-by-gap mapping and per-item plans: [ticket-gap-plan.md](ticket-gap-plan.md).
 
 ### Work items
 
@@ -97,6 +103,14 @@ flowchart LR
 | #11 Bandwidth / Upload results readability | open | [known-issues.md](known-issues.md) |
 | #27 WAF blocked summary + top blocked rework | open (needs analysis) | known-issues.md |
 | CertCheck tool | design written | [design.md](../LogHunter/docs/design.md), [handoff.md](../LogHunter/docs/handoff.md) |
+| G1 IOC sweep (CIDR, >10 IPs, multi-folder, scope report) | planned · Release A | [ticket-gap-plan.md](ticket-gap-plan.md) |
+| G2 CDN intelligence layer + badges in ALB results | planned · Release A | ticket-gap-plan.md |
+| G3 Sweep → AbuseIPDB hand-off, RDAP/ASN, verdict memory | planned · A / B | ticket-gap-plan.md |
+| G4 IIS alarm triage preset, UA rollup, "Copy for SOC" | planned · Release B | ticket-gap-plan.md |
+| G6 ALB download hour filters, disk check, corrupt-gz report | planned · Release A | ticket-gap-plan.md |
+| G7 Shared evidence report (scope + caveats, UTC + local) | planned · Release B | ticket-gap-plan.md |
+| G5 / G8–G11 Platform correlation, WAF JSON/HAR, flood view, block-list helper, expert IIS heuristics | later | ticket-gap-plan.md |
+| G12 "Which module for which ticket" card + macro step | now, no code | ticket-gap-plan.md |
 
 **Done / dropped**
 
@@ -120,9 +134,15 @@ quadrants: Quick wins | Big bets | Fillers | Money pits
 - CertCheck v1: 0.7, 0.8 !
 - CDN host detection: 0.55, 0.5
 - CDN output analyzer: 0.75, 0.45
+- CDN ranges + badges in results: 0.4, 0.7
 - IIS reader migration: 0.6, 0.3
 - CertCheck crt.sh sweep (v2): 0.8, 0.55
-- IP range search (IIS + ALB): 0.35, 0.7
+- IP range search → IOC sweep (IIS + ALB): 0.4, 0.9 !
+- ALB download hour filters: 0.2, 0.6
+- Alarm triage preset + Copy for SOC: 0.5, 0.8
+- Evidence report: 0.45, 0.7
+- Platform correlation: 0.8, 0.65
+- Block-list helper: 0.4, 0.4
 ```
 
 <div data-tabs>
@@ -139,7 +159,8 @@ quadrants: Quick wins | Big bets | Fillers | Money pits
 <summary>v2 follow-ups</summary>
 
 - CertCheck: crt.sh subdomain sweep, multi-host sweep, baseline diff, offline PEM-bundle mode.
-- Log Exporter follow-ups live in the LogExporter repo / PlanCatcher now.
+- Log Exporter follow-ups live in PlanCatcher now (the LogExporter repo is retired). Roadmap: `plancatcher/docs/roadmap.md`.
+- **PlanCatcher publication streamlining** (TODO, branch `publication-streamlining` in the plancatcher repo): add proper versioning, a live check for new versions with update download, and configuration/streamlining of version control and releases.
 
 </details>
 <details data-tab>
