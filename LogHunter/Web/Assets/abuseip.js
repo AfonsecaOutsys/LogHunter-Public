@@ -270,6 +270,13 @@
       return;
     }
 
+    // Hand-off from IP sweep ("Check reputation"), zero-hit targets included.
+    var prefill = sessionStorage.getItem('lh.prefill.abuseip');
+    if (prefill && byId('abuseipIpText')) {
+      byId('abuseipIpText').value = prefill;
+      sessionStorage.removeItem('lh.prefill.abuseip');
+    }
+
     var keyModeDefault = byId('abuseipKeyDefault');
     var keyModeOverride = byId('abuseipKeyOverride');
     var keyOverrideSection = byId('abuseipKeyOverrideSection');

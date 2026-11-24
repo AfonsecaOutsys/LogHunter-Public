@@ -552,6 +552,51 @@ button.section-card--launch:disabled {
   box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.16);
 }
 
+.status-dot.is-warn {
+  background: var(--warm);
+  box-shadow: 0 0 0 6px rgba(255, 184, 108, 0.16);
+}
+
+a.runtime-pill {
+  text-decoration: none;
+  color: inherit;
+}
+
+.ip-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.ip-badge--cdn {
+  background: rgba(245, 158, 11, 0.18);
+  color: #f59e0b;
+}
+
+.ip-badge--corporateproxy {
+  background: rgba(59, 130, 246, 0.18);
+  color: #60a5fa;
+}
+
+.ip-badge--healthcheck {
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--muted);
+}
+
+.ip-ranges-banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.12);
+  font-weight: 600;
+}
+
 .option-grid,
 .result-grid,
 .module-grid,
@@ -1596,6 +1641,29 @@ button.section-card--launch:disabled {
 
 .mini-table tr:last-child td {
   border-bottom: none;
+}
+
+.mini-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.mini-table tr.ip-sweep-hit td:first-child,
+.mini-table tr.ip-sweep-hit td.num {
+  font-weight: 700;
+  color: var(--danger, #b42318);
+}
+
+.ip-sweep-source {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ip-sweep-label {
+  min-width: 140px;
+  max-width: 220px;
 }
 
 .mini-table .uri-cell {

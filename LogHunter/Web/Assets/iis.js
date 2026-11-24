@@ -573,6 +573,13 @@
   function initializeIisIpSummaryPage() {
     if (!document.querySelector('[data-iis-ip-summary-page]')) return;
 
+    // Hand-off from IP sweep ("IP summary for top hits").
+    const prefill = sessionStorage.getItem('lh.prefill.ipSummary');
+    if (prefill && byId('iisIpSummaryIpText')) {
+      byId('iisIpSummaryIpText').value = prefill;
+      sessionStorage.removeItem('lh.prefill.ipSummary');
+    }
+
     byId('iisIpSummaryModeManual')?.addEventListener('click', () => setIisIpSummaryInputMode('manual'));
     byId('iisIpSummaryModeFile')?.addEventListener('click', () => setIisIpSummaryInputMode('file'));
     byId('iisIpSummaryBrowseFile')?.addEventListener('click', browseAndExtractIisIpSummary);

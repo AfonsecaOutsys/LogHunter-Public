@@ -44,6 +44,14 @@ internal static class WebShellPageBuilder
             return true;
         }
 
+        if (string.Equals(path, "/ip-ranges", StringComparison.OrdinalIgnoreCase))
+        {
+            var ipRangesPage = new WebPageDefinition("/ip-ranges", "/ip-ranges", "IP ranges", "IP ranges", "CDN and proxy ranges",
+                "Vendor-published CDN, WAF and corporate proxy ranges used to label IPs in results. Refreshed every 24 hours.");
+            html = BuildLayout(context, ipRangesPage, BuildIpRangesContent(), null);
+            return true;
+        }
+
         var page = Pages.FirstOrDefault(static x => string.Equals(x.Path, "/", StringComparison.Ordinal));
         if (!string.IsNullOrWhiteSpace(path))
             page = Pages.FirstOrDefault(x => string.Equals(x.Path, path, StringComparison.OrdinalIgnoreCase));
@@ -64,6 +72,24 @@ internal static class WebShellPageBuilder
 
         return true;
     }
+
+    private static string BuildIpRangesContent() => """
+      <section class="stack" data-ip-ranges-page="true">
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">Feeds</div>
+              <h2 id="ipRangesSummary">Loading…</h2>
+            </div>
+            <div class="export-row">
+              <button id="ipRangesRefresh" class="button-link primary button-like compact" type="button">Refresh now</button>
+            </div>
+          </div>
+          <div id="ipRangesTable" class="result-summary-body"></div>
+          <p class="footer-note">CDN edges hide the real client: use IIS IP summary (X-Forwarded-For) for those IPs. Corporate proxies carry real users. A feed that fails keeps its last good copy.</p>
+        </section>
+      </section>
+""";
 
     private static string BuildLayout(WebAppContext context, WebPageDefinition page, string mainContent, string? extraScriptPath)
     {
@@ -109,6 +135,11 @@ internal static class WebShellPageBuilder
             <span>Runtime</span>
             <strong data-app-info="status">Ready</strong>
           </button>
+          <a id="ipRangesPill" class="runtime-pill" href="/ip-ranges" title="CDN and proxy ranges: age of the oldest feed">
+            <span class="status-dot" data-ip-ranges-light="status"></span>
+            <span>IP ranges</span>
+            <strong data-app-info="ipRanges">…</strong>
+          </a>
           <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to light theme">Switch to light</button>
         </div>
       </div>

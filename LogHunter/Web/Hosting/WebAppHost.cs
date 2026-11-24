@@ -32,6 +32,7 @@ internal sealed class WebAppHost : IDisposable
         ("/assets/iis.js",       ".Web.Assets.iis.js",       "application/javascript; charset=utf-8"),
         ("/assets/platform.js",  ".Web.Assets.platform.js",  "application/javascript; charset=utf-8"),
         ("/assets/abuseip.js",   ".Web.Assets.abuseip.js",   "application/javascript; charset=utf-8"),
+        ("/assets/ipsweep.js",  ".Web.Assets.ipsweep.js",  "application/javascript; charset=utf-8"),
     };
 
     private static Dictionary<string, (byte[] Body, string ContentType, string ETag)>? s_assetCache;
@@ -192,6 +193,16 @@ internal sealed class WebAppHost : IDisposable
             return;
         }
 
+        if (await IocSweepApi.TryHandleAsync(_context, context).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        if (await IpIntelApi.TryHandleAsync(_context, context).ConfigureAwait(false))
+        {
+            return;
+        }
+
         if (string.Equals(path, "/api/viewer/browse-and-launch", StringComparison.OrdinalIgnoreCase))
         {
             await HandleViewerBrowseAndLaunchAsync(context).ConfigureAwait(false);
@@ -278,8 +289,11 @@ internal sealed class WebAppHost : IDisposable
     private object BuildAppInfo()
     {
         var uptime = DateTime.UtcNow - _context.StartedUtc;
+        var ipRanges = IpIntelStore.GetStatus();
         return new
         {
+            ipRanges = IpIntelApi.PillLabel(ipRanges),
+            ipRangesLevel = ipRanges.Level,
             appName = _context.AppName,
             version = _context.Version,
             rootPath = _context.RootPath,

@@ -10,6 +10,7 @@ internal static class IisPageBuilder
     private static readonly IisOptionDefinition[] Options =
     [
         new(0, "/iis/ip-summary", "IP Summary", "Multi-IP summary with per-minute charts, status breakdowns, latency stats, and Excel/SQLite exports.", true),
+        new(5, "/iis/ip-sweep", IpSweepPageBuilder.Title, IpSweepPageBuilder.Description, true),
         new(1, "/iis/status-pivot", "Status Pivot", "Find error IPs by status filter, then pivot into their 2xx/3xx traffic and export raw log lines.", true),
         new(2, "/iis/burst-patterns", "Burst Patterns", "Detect bursty request patterns per IP using configurable time buckets and heuristic scoring.", true),
         new(3, "/iis/top-bandwidth", "Top Bandwidth IPs", "Rank client IPs by sc-bytes (outbound bandwidth) with per-IP top URI breakdown.", true),
@@ -31,6 +32,14 @@ internal static class IisPageBuilder
             page = new WebPageDefinition("/iis/ip-summary", "/iis", "IIS", "IIS / IP Summary", "Workflow", "Enter client IPs, scan IIS logs, and review per-minute charts with status breakdowns.");
             mainContent = BuildIpSummaryContent();
             extraScriptPath = "/assets/iis.js";
+            return true;
+        }
+
+        if (string.Equals(path, "/iis/ip-sweep", StringComparison.OrdinalIgnoreCase))
+        {
+            page = IpSweepPageBuilder.BuildPage("/iis/ip-sweep", "/iis", "IIS");
+            mainContent = IpSweepPageBuilder.BuildContent();
+            extraScriptPath = "/assets/ipsweep.js";
             return true;
         }
 

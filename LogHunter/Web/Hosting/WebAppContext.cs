@@ -31,6 +31,7 @@ internal sealed class WebAppContext
         PlatformSuspicious = new PlatformSuspiciousJobManager(session);
         PlatformAuth = new PlatformAuthJobManager(session);
         AbuseIpChecks = new AbuseIpCheckJobManager(rootPath);
+        IocSweep = new IocSweepJobManager();
     }
 
     public string AppName { get; }
@@ -61,4 +62,5 @@ internal sealed class WebAppContext
     public PlatformSuspiciousJobManager PlatformSuspicious { get; }
     public PlatformAuthJobManager PlatformAuth { get; }
     public AbuseIpCheckJobManager AbuseIpChecks { get; }
+    public IocSweepJobManager IocSweep { get; }
 }

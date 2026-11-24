@@ -754,9 +754,10 @@
     results.hidden = false;
     topIps.innerHTML = `
       <div class="result-lines">
-        ${items.map((item) => `<div>#${escapeHtml(item.rank)} ${escapeHtml(item.ip)} <strong>${escapeHtml(formatValue(item.hits))}</strong> hits</div>`).join('')}
+        ${items.map((item) => `<div>#${escapeHtml(item.rank)} <span data-ip="${escapeHtml(item.ip)}">${escapeHtml(item.ip)}</span> <strong>${escapeHtml(formatValue(item.hits))}</strong> hits</div>`).join('')}
       </div>
     `;
+    if (window.lhIpRanges) window.lhIpRanges.annotate(topIps).catch(() => {});
 
     topUris.innerHTML = items.map((item) => `
       <div class="result-card">
@@ -1767,6 +1768,13 @@
   function initializeIpSummaryPage() {
     if (!document.querySelector('[data-alb-ip-summary-page]')) return;
 
+    // Hand-off from IP sweep ("IP summary for top hits").
+    const prefill = sessionStorage.getItem('lh.prefill.ipSummary');
+    if (prefill && byId('ipSummaryIpText')) {
+      byId('ipSummaryIpText').value = prefill;
+      sessionStorage.removeItem('lh.prefill.ipSummary');
+    }
+
     byId('ipSummaryModeManual')?.addEventListener('click', () => setIpSummaryInputMode('manual'));
     byId('ipSummaryModeFile')?.addEventListener('click', () => setIpSummaryInputMode('file'));
 
@@ -1992,6 +2000,7 @@
       });
       html += '</tbody></table>';
       body.innerHTML = html;
+      if (window.lhIpRanges) window.lhIpRanges.annotate(body).catch(function () {});
     }
 
     function renderSectionedTable(cols, rows, sectionIdx) {
@@ -2351,6 +2360,7 @@
       });
       html += '</tbody></table>';
       body.innerHTML = html;
+      if (window.lhIpRanges) window.lhIpRanges.annotate(body).catch(function () {});
     }
 
     async function loadMetaData() {
