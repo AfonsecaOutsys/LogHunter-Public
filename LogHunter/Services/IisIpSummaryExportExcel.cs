@@ -165,7 +165,9 @@ public static class IisIpSummaryExportExcel
             "CsBytes",
             "ScBytes",
             "UserAgent",
-            "Referer"
+            "Referer",
+            "ClaimedClient (unverified)",
+            "XForwardedFor"
         };
 
         IXLWorksheet ws = CreateHitsWorksheet(wb, 1, headers);
@@ -198,6 +200,8 @@ public static class IisIpSummaryExportExcel
                 ws.Cell(row, 13).Value = hit.ScBytes;
                 ws.Cell(row, 14).Value = hit.UserAgent;
                 ws.Cell(row, 15).Value = hit.Referer;
+                ws.Cell(row, 16).Value = hit.ClaimedClient;
+                ws.Cell(row, 17).Value = hit.XForwardedFor;
                 row++;
             }
         }

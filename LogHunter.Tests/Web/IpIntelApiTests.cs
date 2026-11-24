@@ -55,6 +55,68 @@ public class IpIntelApiTests
     }
 
     [Fact]
+    public void BuildLookup_ProviderKnownOnlyFromNetwork_IsCappedAtLikely()
+    {
+        // Arrange
+        var label = new IpIntelLabel("Akamai", "AS20940", IpIntelCategory.Cdn, "akamai-as20940", Likely: true);
+        IpIntelStore.UseTestSnapshot(IpIntelStore.BuildSnapshot(new[] { ("23.192.0.0/11", label) }));
+
+        try
+        {
+            // Act
+            var level = Lookup("23.192.1.1", "23.192.1.2", "23.192.1.3").GetProperty("fronted").GetProperty("level").GetString();
+
+            // Assert
+            Assert.Equal("likely", level);
+        }
+        finally
+        {
+            IpIntelStore.UseTestSnapshot(IpIntelStore.BuildSnapshot(IpIntelFeeds.Static));
+        }
+    }
+
+    [Fact]
+    public void SaveCustomRanges_LabelsPastedRangesAndClearRemovesThem()
+    {
+        // Arrange
+        const string pasted = "198.18.0.0/24\n10.0.0.0/8\nbogus";
+
+        try
+        {
+            // Act
+            var (saved, invalid) = IpIntelStore.SaveCustomRanges("Acme Akamai Site Shield", pasted);
+            var hit = IpIntelStore.Lookup("198.18.0.77");
+            var (provider, text) = IpIntelStore.GetCustomRanges();
+
+            // Assert
+            Assert.Equal(1, saved);
+            Assert.Equal(new[] { "bogus", "10.0.0.0/8" }, invalid);
+            Assert.Equal("Acme Akamai Site Shield edge", hit!.Badge);
+            Assert.Equal(("Acme Akamai Site Shield", "198.18.0.0/24"), (provider, text));
+        }
+        finally
+        {
+            IpIntelStore.SaveCustomRanges(null, "");
+        }
+
+        Assert.Null(IpIntelStore.Lookup("198.18.0.77"));
+    }
+
+    [Fact]
+    public void ParseCustomFile_ReadsProviderHeaderAndRanges()
+    {
+        // Arrange
+        const string content = "# provider: Acme WAF\n203.0.113.0/24\n# note\n198.51.100.7\n";
+
+        // Act
+        var (provider, text) = IpIntelStore.ParseCustomFile(content);
+
+        // Assert
+        Assert.Equal("Acme WAF", provider);
+        Assert.Equal("203.0.113.0/24\n198.51.100.7", text);
+    }
+
+    [Fact]
     public void PillLabel_NeverDownloaded_SaysNotLoaded()
     {
         // Arrange

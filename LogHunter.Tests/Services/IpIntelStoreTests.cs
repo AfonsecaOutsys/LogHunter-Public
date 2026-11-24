@@ -130,6 +130,42 @@ public class IpIntelStoreTests
     }
 
     [Fact]
+    public async Task RefreshFeedAsync_DiscoveryFeed_FollowsLinkAndStoresReducedBody()
+    {
+        // Arrange
+        var azure = IpIntelFeeds.All.Single(f => f.Id == "azure-frontdoor");
+        const string page = """
+            <a href="https://evil.example/ServiceTags_Public_20261123.json">x</a>
+            <a href="https://download.microsoft.com/download/7/1/d/abc/ServiceTags_Public_20261123.json">Download</a>
+            """;
+        const string json = """{"values":[{"name":"AzureFrontDoor.Backend","properties":{"addressPrefixes":["4.153.250.0/29","147.243.0.0/16"]}}]}""";
+        var handler = new StubHandler(req => req.RequestUri!.Host == "www.microsoft.com" ? Ok(page) : Ok(json));
+        using var http = new HttpClient(handler);
+
+        // Act
+        var state = await IpIntelStore.RefreshFeedAsync(http, azure, null, CancellationToken.None);
+
+        // Assert
+        Assert.Null(state.LastError);
+        Assert.Equal(2, state.RangeCount);
+        Assert.Equal("download.microsoft.com", handler.Requests[1].RequestUri!.Host);
+    }
+
+    [Fact]
+    public async Task RefreshFeedAsync_DiscoveryPageWithoutLink_ReportsError()
+    {
+        // Arrange
+        var azure = IpIntelFeeds.All.Single(f => f.Id == "azure-frontdoor");
+        using var http = new HttpClient(new StubHandler(_ => Ok("<html>no link here</html>")));
+
+        // Act
+        var state = await IpIntelStore.RefreshFeedAsync(http, azure, null, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Download link not found on the page", state.LastError);
+    }
+
+    [Fact]
     public void BuildSnapshot_StaticLists_LabelGoogleLbAndNetskope()
     {
         // Arrange

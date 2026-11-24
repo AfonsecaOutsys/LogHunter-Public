@@ -54,7 +54,9 @@ CREATE TABLE Hits (
     CsBytes INTEGER,
     ScBytes INTEGER,
     UserAgent TEXT,
-    Referer TEXT
+    Referer TEXT,
+    ClaimedClient TEXT,
+    XForwardedFor TEXT
 );";
                 create.ExecuteNonQuery();
             }
@@ -77,7 +79,9 @@ INSERT INTO Hits (
     CsBytes,
     ScBytes,
     UserAgent,
-    Referer
+    Referer,
+    ClaimedClient,
+    XForwardedFor
 ) VALUES (
     $TimestampUtc,
     $ClientIp,
@@ -92,7 +96,9 @@ INSERT INTO Hits (
     $CsBytes,
     $ScBytes,
     $UserAgent,
-    $Referer
+    $Referer,
+    $ClaimedClient,
+    $XForwardedFor
 );";
 
             AddParameter("$TimestampUtc");
@@ -109,6 +115,8 @@ INSERT INTO Hits (
             AddParameter("$ScBytes");
             AddParameter("$UserAgent");
             AddParameter("$Referer");
+            AddParameter("$ClaimedClient");
+            AddParameter("$XForwardedFor");
             _insert.Prepare();
         }
 
@@ -134,6 +142,8 @@ INSERT INTO Hits (
             _insert.Parameters["$ScBytes"].Value = DbValue(row.ScBytes);
             _insert.Parameters["$UserAgent"].Value = DbValue(row.UserAgent);
             _insert.Parameters["$Referer"].Value = DbValue(row.Referer);
+            _insert.Parameters["$ClaimedClient"].Value = DbValue(row.ClaimedClient);
+            _insert.Parameters["$XForwardedFor"].Value = DbValue(row.XForwardedFor);
             _insert.ExecuteNonQuery();
         }
 

@@ -88,6 +88,28 @@ internal static class WebShellPageBuilder
           <div id="ipRangesTable" class="result-summary-body"></div>
           <p class="footer-note">CDN edges hide the real client: use IIS IP summary (X-Forwarded-For) for those IPs. Corporate proxies carry real users. A feed that fails keeps its last good copy.</p>
         </section>
+        <section class="panel form-panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">Customer ranges</div>
+              <h2>Add the customer's CDN ranges</h2>
+            </div>
+          </div>
+          <p class="footer-note">For CDNs without a public list (Akamai Site Shield, F5, a customer WAF). Labelled as CDN edges until cleared.</p>
+          <div class="field">
+            <label for="ipRangesCustomProvider">Provider name</label>
+            <input id="ipRangesCustomProvider" type="text" placeholder="Customer CDN">
+          </div>
+          <div class="field">
+            <label for="ipRangesCustomText">Ranges (IP, CIDR or range; one per line)</label>
+            <textarea id="ipRangesCustomText" rows="6" placeholder="23.62.0.0/16&#10;104.64.0.0/10"></textarea>
+          </div>
+          <div class="button-row">
+            <button id="ipRangesCustomSave" class="button-link primary button-like compact" type="button">Save ranges</button>
+            <button id="ipRangesCustomClear" class="button-link button-like compact" type="button">Clear</button>
+          </div>
+          <div id="ipRangesCustomInfo" class="footer-note"></div>
+        </section>
       </section>
 """;
 

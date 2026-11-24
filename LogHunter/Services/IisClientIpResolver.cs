@@ -69,6 +69,27 @@ internal static class IisClientIpResolver
 
     private static bool IsKnownCdnEdge(string ip) => IpIntelStore.Lookup(ip)?.Category == IpIntelCategory.Cdn;
 
+    /// <summary>
+    /// The leftmost public hop of an X-Forwarded-For chain when it differs from the resolved client:
+    /// what the request claims to come from. It can be the genuine user behind a corporate proxy or a
+    /// forged value, so it is shown as unverified next to the resolved client. Null when there is
+    /// nothing to show.
+    /// </summary>
+    public static string? GetClaimedClient(ReadOnlySpan<char> raw, string? resolved)
+    {
+        raw = raw.Trim();
+        if (raw.IsEmpty || raw[0] == '-' || raw.IndexOf(',') < 0)
+            return null;
+
+        foreach (var hop in SplitHops(raw))
+        {
+            if (hop is null || IsPrivateOrLoopback(hop)) continue;
+            return string.Equals(hop, resolved, StringComparison.OrdinalIgnoreCase) ? null : hop;
+        }
+
+        return null;
+    }
+
     // Unparseable tokens are kept as null so the order of the remaining hops is preserved.
     private static List<string?> SplitHops(ReadOnlySpan<char> raw)
     {

@@ -115,6 +115,24 @@ public class IisClientIpResolverTests
     }
 
     [Theory]
+    [InlineData("106.106.198.131,+219.153.113.105", "219.153.113.105", "106.106.198.131")]
+    [InlineData("198.51.100.5,+172.70.243.250", "198.51.100.5", null)]
+    [InlineData("0.0.0.0,+82.158.196.58", "82.158.196.58", null)]
+    [InlineData("82.158.196.58", "82.158.196.58", null)]
+    [InlineData("-", null, null)]
+    public void GetClaimedClient_ReturnsLeftmostPublicHopOnlyWhenItDiffers(string originalIp, string? resolved, string? expected)
+    {
+        // Arrange
+        var raw = originalIp.AsSpan();
+
+        // Act
+        var claimed = IisClientIpResolver.GetClaimedClient(raw, resolved);
+
+        // Assert
+        Assert.Equal(expected, claimed);
+    }
+
+    [Theory]
     [InlineData("-")]
     [InlineData("")]
     public void ResolvePreferredClientIp_EmptyOrDash_ReturnsNull(string originalIp)

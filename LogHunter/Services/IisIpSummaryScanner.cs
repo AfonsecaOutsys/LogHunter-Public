@@ -248,7 +248,9 @@ public static class IisIpSummaryScanner
         long? CsBytes,
         long? ScBytes,
         string UserAgent,
-        string Referer);
+        string Referer,
+        string ClaimedClient = "",
+        string XForwardedFor = "");
 
     public static async Task ScanFileAsync(
         string filePath,
@@ -307,10 +309,23 @@ public static class IisIpSummaryScanner
                 CsBytes: ParseNullableLong(tokens.Get(iCsBytes)),
                 ScBytes: ParseNullableLong(tokens.Get(iScBytes)),
                 UserAgent: NormalizeToken(tokens.Get(iUA)),
-                Referer: NormalizeToken(tokens.Get(iReferer)));
+                Referer: NormalizeToken(tokens.Get(iReferer)),
+                ClaimedClient: ClaimedClient(tokens, iOriginalIp, ip),
+                XForwardedFor: ForwardedChain(tokens, iOriginalIp));
 
             result.AddRow(row, sourceFile);
         }).ConfigureAwait(false);
+    }
+
+    private static string ClaimedClient(IisW3cReader.TokenReader tokens, int iOriginalIp, string resolved)
+        => iOriginalIp < 0 ? "" : IisClientIpResolver.GetClaimedClient(tokens.Get(iOriginalIp), resolved) ?? "";
+
+    // Only multi-hop chains are kept: a single hop is already the ClientIp column.
+    private static string ForwardedChain(IisW3cReader.TokenReader tokens, int iOriginalIp)
+    {
+        if (iOriginalIp < 0) return "";
+        var raw = tokens.Get(iOriginalIp);
+        return raw.IndexOf(',') < 0 ? "" : raw.ToString().Replace(",+", ", ");
     }
 
     private static string SafeSourceFile(string filePath)

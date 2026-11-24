@@ -62,12 +62,8 @@ internal static class IpIntelStore
     public static IpIntelLabel? Best(IReadOnlyList<IpIntelLabel> labels) =>
         labels.Count == 0 ? null : labels.OrderBy(l => l.Priority).First();
 
-    /// <summary>Test hook: point the store at another folder and reload it.</summary>
-    internal static void UseRoot(string root)
-    {
-        s_root = root;
-        LoadFromDisk();
-    }
+    /// <summary>Test hook: replace the lookup snapshot.</summary>
+    internal static void UseTestSnapshot(IpRangeSet<IpIntelLabel> snapshot) => Volatile.Write(ref s_current, snapshot);
 
     /// <summary>Loads cached feeds, then refreshes stale ones in the background. Never throws.</summary>
     public static void Initialize()
@@ -110,7 +106,7 @@ internal static class IpIntelStore
             foreach (var feed in IpIntelFeeds.All)
             {
                 states.TryGetValue(feed.Id, out var previous);
-                if (!force && previous?.LastSuccessUtc is { } ok && DateTime.UtcNow - ok < RefreshAfter)
+                if (!force && previous?.LastSuccessUtc is { } ok && DateTime.UtcNow - ok < (feed.RefreshAfter ?? RefreshAfter))
                     continue;
                 states[feed.Id] = await RefreshFeedAsync(http, feed, previous, ct).ConfigureAwait(false);
             }
@@ -134,34 +130,78 @@ internal static class IpIntelStore
         var keep = previous ?? new IpIntelFeedState(feed.Id, feed.Provider, null, null, 0, null, null);
         try
         {
-            using var request = new HttpRequestMessage(feed.Method, feed.Url);
-            if (feed.PostBody is not null)
-                request.Content = new StringContent(feed.PostBody, Encoding.UTF8, "application/x-www-form-urlencoded");
-            if (previous?.ETag is { } etag && File.Exists(FeedPath(feed.Id)))
-                request.Headers.TryAddWithoutValidation("If-None-Match", etag);
+            var url = feed.Url;
+            var allowedHost = new Uri(feed.Url).Host;
+            if (feed.DiscoveryPattern is not null)
+            {
+                var (page, pageError) = await GetAsync(http, feed, url, allowedHost, null, ct).ConfigureAwait(false);
+                if (page is null)
+                    return keep with { LastAttemptUtc = now, LastError = pageError };
+                var match = System.Text.RegularExpressions.Regex.Match(page, feed.DiscoveryPattern);
+                if (!match.Success)
+                    return keep with { LastAttemptUtc = now, LastError = "Download link not found on the page" };
+                url = match.Value;
+                allowedHost = feed.DiscoveredHost ?? new Uri(url).Host;
+            }
 
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-            if (response.StatusCode == HttpStatusCode.NotModified)
+            var etag = feed.DiscoveryPattern is null && File.Exists(FeedPath(feed.Id)) ? previous?.ETag : null;
+            var (body, error, newEtag, notModified) = await GetWithEtagAsync(http, feed, url, allowedHost, etag, ct).ConfigureAwait(false);
+            if (notModified)
                 return keep with { LastSuccessUtc = now, LastAttemptUtc = now, LastError = null };
-            if (!response.IsSuccessStatusCode)
-                return keep with { LastAttemptUtc = now, LastError = $"HTTP {(int)response.StatusCode}" };
-            if (!IsAllowedHost(response.RequestMessage?.RequestUri, feed.Url))
-                return keep with { LastAttemptUtc = now, LastError = "Redirected to an unexpected host" };
+            if (body is null)
+                return keep with { LastAttemptUtc = now, LastError = error };
 
-            var body = await ReadCappedAsync(response, ct).ConfigureAwait(false);
-            var (count, error) = Validate(feed, body, previous?.RangeCount ?? 0);
+            if (feed.Reduce is not null)
+            {
+                try { body = feed.Reduce(body); }
+                catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
+                {
+                    return keep with { LastAttemptUtc = now, LastError = $"Format changed ({ex.GetType().Name})" };
+                }
+            }
+
+            (var count, error) = Validate(feed, body, previous?.RangeCount ?? 0);
             if (error is not null)
                 return keep with { LastAttemptUtc = now, LastError = error };
 
             WriteAtomic(FeedPath(feed.Id), body);
             TraceLog.Write("ipintel", "feed-updated", new { feed = feed.Id, ranges = count });
-            return new IpIntelFeedState(feed.Id, feed.Provider, now, now, count, response.Headers.ETag?.Tag, null);
+            return new IpIntelFeedState(feed.Id, feed.Provider, now, now, count, newEtag, null);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException or InvalidDataException)
         {
             TraceLog.Write("ipintel", "feed-failed", new { feed = feed.Id, error = ex.Message });
             return keep with { LastAttemptUtc = now, LastError = ex.Message };
         }
+    }
+
+    private static async Task<(string? Body, string? Error)> GetAsync(HttpClient http, IpIntelFeed feed, string url,
+        string allowedHost, string? etag, CancellationToken ct)
+    {
+        var (body, error, _, _) = await GetWithEtagAsync(http, feed, url, allowedHost, etag, ct).ConfigureAwait(false);
+        return (body, error);
+    }
+
+    // One HTTPS request with host check and size cap. The feed's method/body apply to its main URL only.
+    private static async Task<(string? Body, string? Error, string? ETag, bool NotModified)> GetWithEtagAsync(
+        HttpClient http, IpIntelFeed feed, string url, string allowedHost, string? etag, CancellationToken ct)
+    {
+        var isMain = string.Equals(url, feed.Url, StringComparison.Ordinal) && feed.DiscoveryPattern is null;
+        using var request = new HttpRequestMessage(isMain ? feed.Method : HttpMethod.Get, url);
+        if (isMain && feed.PostBody is not null)
+            request.Content = new StringContent(feed.PostBody, Encoding.UTF8, "application/x-www-form-urlencoded");
+        if (etag is not null)
+            request.Headers.TryAddWithoutValidation("If-None-Match", etag);
+
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotModified)
+            return (null, null, etag, true);
+        if (!response.IsSuccessStatusCode)
+            return (null, $"HTTP {(int)response.StatusCode}", null, false);
+        if (!IsAllowedHost(response.RequestMessage?.RequestUri, allowedHost))
+            return (null, "Redirected to an unexpected host", null, false);
+
+        return (await ReadCappedAsync(response, ct).ConfigureAwait(false), null, response.Headers.ETag?.Tag, false);
     }
 
     /// <summary>Parses the body and rejects empty, unparseable or suddenly shrunken feeds.</summary>
@@ -236,7 +276,69 @@ internal static class IpIntelStore
             }
         }
 
+        entries.AddRange(LoadCustomEntries());
         Volatile.Write(ref s_current, BuildSnapshot(entries));
+    }
+
+    // ── Customer-supplied ranges (e.g. the customer's Akamai Site Shield or F5 list from a ticket) ──
+
+    public const string DefaultCustomProvider = "Customer CDN";
+
+    private static string CustomPath => Path.Combine(s_root, "custom.txt");
+
+    /// <summary>Saved customer ranges: provider name and the ranges as typed (one per line).</summary>
+    public static (string Provider, string Text) GetCustomRanges()
+    {
+        if (!File.Exists(CustomPath))
+            return (DefaultCustomProvider, "");
+        var (provider, text) = ParseCustomFile(File.ReadAllText(CustomPath));
+        return (provider, text);
+    }
+
+    /// <summary>Saves (or clears, when empty) the customer ranges and rebuilds the lookup snapshot.</summary>
+    public static (int Saved, IReadOnlyList<string> Invalid) SaveCustomRanges(string? provider, string? text)
+    {
+        var (targets, invalid) = IpTargetParser.ParseList(text);
+        var usable = targets.Where(t => IsUsableRange(t.Text)).Select(t => t.Text).ToList();
+        invalid.AddRange(targets.Where(t => !IsUsableRange(t.Text)).Select(t => t.Text));
+        var name = string.IsNullOrWhiteSpace(provider) ? DefaultCustomProvider : provider.Trim().Replace('\n', ' ').Replace('\r', ' ');
+
+        if (usable.Count == 0)
+        {
+            if (File.Exists(CustomPath)) File.Delete(CustomPath);
+        }
+        else
+        {
+            WriteAtomic(CustomPath, $"# provider: {name}\n{string.Join("\n", usable)}\n");
+        }
+
+        Rebuild();
+        return (usable.Count, invalid);
+    }
+
+    internal static (string Provider, string Text) ParseCustomFile(string content)
+    {
+        var lines = content.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var provider = DefaultCustomProvider;
+        var ranges = new List<string>();
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("# provider:", StringComparison.OrdinalIgnoreCase))
+                provider = line["# provider:".Length..].Trim();
+            else if (!line.StartsWith('#'))
+                ranges.Add(line);
+        }
+
+        return (provider, string.Join("\n", ranges));
+    }
+
+    private static IEnumerable<(string, IpIntelLabel)> LoadCustomEntries()
+    {
+        if (!File.Exists(CustomPath))
+            return Array.Empty<(string, IpIntelLabel)>();
+        var (provider, text) = ParseCustomFile(File.ReadAllText(CustomPath));
+        var label = new IpIntelLabel(provider, "customer-supplied", IpIntelCategory.Cdn, "custom");
+        return text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(cidr => (cidr, label)).ToList();
     }
 
     private static void SaveManifest(Dictionary<string, IpIntelFeedState> states)
@@ -257,9 +359,9 @@ internal static class IpIntelStore
         File.Move(temp, path, overwrite: true);
     }
 
-    private static bool IsAllowedHost(Uri? final, string original) =>
+    private static bool IsAllowedHost(Uri? final, string allowedHost) =>
         final is not null && final.Scheme == Uri.UriSchemeHttps
-        && string.Equals(final.Host, new Uri(original).Host, StringComparison.OrdinalIgnoreCase);
+        && string.Equals(final.Host, allowedHost, StringComparison.OrdinalIgnoreCase);
 
     private static async Task<string> ReadCappedAsync(HttpResponseMessage response, CancellationToken ct)
     {

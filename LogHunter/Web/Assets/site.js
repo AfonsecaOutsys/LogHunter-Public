@@ -240,7 +240,8 @@ window.lhIpRanges = (function () {
         if (cell && cell.tagName === 'TD') targets.push({ el: cell, ip: cell.textContent.trim() });
       });
     });
-    return targets.filter(t => t.ip);
+    // Elements already looked up carry data-ip-checked, so polling re-renders cost nothing.
+    return targets.filter(t => t.ip && !t.el.hasAttribute('data-ip-checked'));
   }
 
   function bannerText(fronted) {
@@ -253,8 +254,9 @@ window.lhIpRanges = (function () {
   async function annotate(container) {
     if (!container) return null;
     const targets = collectTargets(container);
-    container.querySelectorAll('.ip-ranges-banner').forEach(b => b.remove());
     if (targets.length === 0) return null;
+    targets.forEach(t => t.el.setAttribute('data-ip-checked', ''));
+    container.querySelectorAll('.ip-ranges-banner').forEach(b => b.remove());
 
     const response = await fetch('/api/ip-ranges/lookup', {
       method: 'POST',
@@ -314,6 +316,35 @@ function initializeIpRangesPage() {
     try { await load('POST'); } finally { button.disabled = false; }
   });
   load('GET').catch(() => {});
+
+  const providerInput = document.getElementById('ipRangesCustomProvider');
+  const rangesInput = document.getElementById('ipRangesCustomText');
+  const info = document.getElementById('ipRangesCustomInfo');
+
+  async function saveCustom(provider, ranges) {
+    const response = await fetch('/api/ip-ranges/custom', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, ranges })
+    });
+    const result = await response.json();
+    info.textContent = result.saved > 0
+      ? `${result.saved} range(s) saved.${result.invalid.length ? ` Ignored: ${result.invalid.join(', ')}` : ''}`
+      : (result.invalid.length ? `Nothing saved. Ignored: ${result.invalid.join(', ')}` : 'Customer ranges cleared.');
+    await load('GET');
+  }
+
+  document.getElementById('ipRangesCustomSave').addEventListener('click', () =>
+    saveCustom(providerInput.value, rangesInput.value).catch(err => { info.textContent = String(err); }));
+  document.getElementById('ipRangesCustomClear').addEventListener('click', () => {
+    rangesInput.value = '';
+    saveCustom(providerInput.value, '').catch(err => { info.textContent = String(err); });
+  });
+
+  fetch('/api/ip-ranges/custom').then(r => r.json()).then(c => {
+    providerInput.value = c.ranges ? c.provider : '';
+    rangesInput.value = c.ranges || '';
+  }).catch(() => {});
 }
 
 function initializeShell() {

@@ -17,17 +17,20 @@ internal enum IpIntelCategory
     HealthCheck,
 }
 
-internal sealed record IpIntelLabel(string Provider, string Service, IpIntelCategory Category, string FeedId)
+/// <param name="Likely">True when the range comes from the vendor's network (ASN) rather than a
+/// published edge list: it is the vendor, but not necessarily the customer's CDN.</param>
+internal sealed record IpIntelLabel(string Provider, string Service, IpIntelCategory Category, string FeedId, bool Likely = false)
 {
     public string Badge => Category switch
     {
-        IpIntelCategory.Cdn => $"{Provider} edge",
+        IpIntelCategory.Cdn => Likely ? $"{Provider} network (likely)" : $"{Provider} edge",
         IpIntelCategory.CorporateProxy => $"{Provider} proxy",
         _ => $"{Provider} health check",
     };
 
-    // Lower wins when several labels cover one IP (e.g. CLOUDFRONT_ORIGIN_FACING inside CLOUDFRONT).
-    public int Priority => Category switch
+    // Lower wins when several labels cover one IP (e.g. CLOUDFRONT_ORIGIN_FACING inside CLOUDFRONT,
+    // or the Akamai Origin IP ACL list inside Akamai's network ranges).
+    public int Priority => (Likely ? 10 : 0) + Category switch
     {
         IpIntelCategory.Cdn => Service.Contains("ORIGIN", StringComparison.OrdinalIgnoreCase) ? 0 : 1,
         IpIntelCategory.HealthCheck => 2,
@@ -35,13 +38,21 @@ internal sealed record IpIntelLabel(string Provider, string Service, IpIntelCate
     };
 }
 
+/// <param name="DiscoveryPattern">Regex run on the body of Url to find the real download URL
+/// (Azure publishes a new file name every week).</param>
+/// <param name="DiscoveredHost">Only host the discovered URL may point to.</param>
+/// <param name="Reduce">Shrinks the downloaded body before it is validated and stored.</param>
 internal sealed record IpIntelFeed(
     string Id,
     string Provider,
     string Url,
     HttpMethod Method,
     string? PostBody,
-    Func<string, IEnumerable<(string Cidr, IpIntelLabel Label)>> Parse);
+    Func<string, IEnumerable<(string Cidr, IpIntelLabel Label)>> Parse,
+    string? DiscoveryPattern = null,
+    string? DiscoveredHost = null,
+    Func<string, string>? Reduce = null,
+    TimeSpan? RefreshAfter = null);
 
 /// <summary>
 /// Vendor-published range feeds (no auth, no key). Only CDN / proxy / health-check services are
@@ -67,6 +78,17 @@ internal static class IpIntelFeeds
             body => JsonArrays(body, Cdn("Fastly", "edge", "fastly"), "addresses", "ipv6_addresses")),
         new IpIntelFeed("f5xc", "F5 Distributed Cloud", "https://docs.cloud.f5.com/docs-v2/downloads/platform/reference/network-cloud-ref/ips-domains.json", HttpMethod.Get, null, ParseF5),
         new IpIntelFeed("zscaler", "Zscaler", "https://config.zscaler.com/api/zscaler.net/cenr/json", HttpMethod.Get, null, ParseZscaler),
+        // Akamai's public list only covers customers with Origin IP ACL; its networks cover the rest (likely).
+        new IpIntelFeed("akamai-as20940", "Akamai", "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS20940", HttpMethod.Get, null,
+            body => ParseRipeStatPrefixes(body, new IpIntelLabel("Akamai", "AS20940", IpIntelCategory.Cdn, "akamai-as20940", Likely: true))),
+        new IpIntelFeed("akamai-as16625", "Akamai", "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS16625", HttpMethod.Get, null,
+            body => ParseRipeStatPrefixes(body, new IpIntelLabel("Akamai", "AS16625", IpIntelCategory.Cdn, "akamai-as16625", Likely: true))),
+        new IpIntelFeed("azure-frontdoor", "Azure Front Door", "https://www.microsoft.com/en-us/download/details.aspx?id=56519", HttpMethod.Get, null,
+            body => Lines(body, Cdn("Azure Front Door", "AzureFrontDoor.Backend", "azure-frontdoor")),
+            DiscoveryPattern: @"https://download\.microsoft\.com/download/[^""\\\s]+/ServiceTags_Public_\d{8}\.json",
+            DiscoveredHost: "download.microsoft.com",
+            Reduce: ReduceAzureServiceTags,
+            RefreshAfter: TimeSpan.FromDays(3)),
     };
 
     /// <summary>Vendors without a machine-readable feed; reviewed with each release.</summary>
@@ -100,6 +122,26 @@ internal static class IpIntelFeeds
         "ROUTE53_HEALTHCHECKS" => new IpIntelLabel("Route 53", service, IpIntelCategory.HealthCheck, "aws"),
         _ => null,
     };
+
+    // { "data": { "prefixes": [ { "prefix": "23.193.114.0/24", ... } ] } }
+    public static IEnumerable<(string Cidr, IpIntelLabel Label)> ParseRipeStatPrefixes(string body, IpIntelLabel label)
+    {
+        using var doc = JsonDocument.Parse(body);
+        return doc.RootElement.GetProperty("data").GetProperty("prefixes").EnumerateArray()
+            .Select(p => (p.GetProperty("prefix").GetString() ?? "", label))
+            .ToList();
+    }
+
+    /// <summary>Keeps only AzureFrontDoor.Backend (what origins see) from the ~5 MB service tags file.</summary>
+    public static string ReduceAzureServiceTags(string body)
+    {
+        using var doc = JsonDocument.Parse(body);
+        var backend = doc.RootElement.GetProperty("values").EnumerateArray()
+            .First(v => v.GetProperty("name").GetString() == "AzureFrontDoor.Backend");
+        var prefixes = backend.GetProperty("properties").GetProperty("addressPrefixes").EnumerateArray()
+            .Select(p => p.GetString());
+        return string.Join("\n", prefixes);
+    }
 
     public static IEnumerable<(string Cidr, IpIntelLabel Label)> ParseF5(string body)
     {

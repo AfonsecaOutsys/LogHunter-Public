@@ -39,6 +39,15 @@ internal static class IpIntelApi
                 var body = await ReadJsonAsync<LookupRequest>(context.Request).ConfigureAwait(false);
                 await WriteJsonAsync(context.Response, BuildLookup(body?.Ips ?? Array.Empty<string>())).ConfigureAwait(false);
                 return true;
+            case "custom" when IsPost(context):
+                var custom = await ReadJsonAsync<CustomRangesRequest>(context.Request).ConfigureAwait(false);
+                var (saved, invalid) = IpIntelStore.SaveCustomRanges(custom?.Provider, custom?.Ranges);
+                await WriteJsonAsync(context.Response, new { saved, invalid }).ConfigureAwait(false);
+                return true;
+            case "custom":
+                var (provider, text) = IpIntelStore.GetCustomRanges();
+                await WriteJsonAsync(context.Response, new { provider, ranges = text }).ConfigureAwait(false);
+                return true;
             default:
                 await WriteJsonAsync(context.Response, new { error = "Not found." }, HttpStatusCode.NotFound).ConfigureAwait(false);
                 return true;
@@ -57,11 +66,12 @@ internal static class IpIntelApi
 
         var top = results.Where(r => r.Label?.Category == IpIntelCategory.Cdn)
             .GroupBy(r => r.Label!.Provider)
-            .Select(g => (Provider: g.Key, Count: g.Count()))
+            .Select(g => (Provider: g.Key, Count: g.Count(), OnlyNetwork: g.All(r => r.Label!.Likely)))
             .OrderByDescending(g => g.Count)
             .FirstOrDefault();
         var share = distinct.Count == 0 || top.Provider is null ? 0 : (double)top.Count / distinct.Count;
-        var level = share >= ConfirmedShare ? "confirmed" : share >= LikelyShare ? "likely" : "none";
+        // A provider known only from its network ranges (Akamai ASN) never reaches "confirmed".
+        var level = share >= ConfirmedShare && !top.OnlyNetwork ? "confirmed" : share >= LikelyShare ? "likely" : "none";
 
         return new
         {
@@ -125,4 +135,6 @@ internal static class IpIntelApi
     }
 
     private sealed record LookupRequest(IReadOnlyList<string>? Ips);
+
+    private sealed record CustomRangesRequest(string? Provider, string? Ranges);
 }

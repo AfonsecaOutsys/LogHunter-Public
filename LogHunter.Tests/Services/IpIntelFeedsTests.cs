@@ -92,4 +92,51 @@ public class IpIntelFeedsTests
         Assert.Same(origin, best);
         Assert.Equal("CloudFront edge", best!.Badge);
     }
+
+    [Fact]
+    public void ParseRipeStatPrefixes_ReturnsPrefixesWithLikelyLabel()
+    {
+        // Arrange
+        const string body = """{"status":"ok","data":{"prefixes":[{"prefix":"23.193.114.0/24","timelines":[]},{"prefix":"2a02:26f0::/32"}]}}""";
+        var label = new IpIntelLabel("Akamai", "AS20940", IpIntelCategory.Cdn, "akamai-as20940", Likely: true);
+
+        // Act
+        var entries = IpIntelFeeds.ParseRipeStatPrefixes(body, label).ToList();
+
+        // Assert
+        Assert.Equal(new[] { "23.193.114.0/24", "2a02:26f0::/32" }, entries.Select(e => e.Cidr));
+        Assert.Equal("Akamai network (likely)", entries[0].Label.Badge);
+    }
+
+    [Fact]
+    public void ReduceAzureServiceTags_KeepsOnlyFrontDoorBackend()
+    {
+        // Arrange
+        const string body = """
+        {"changeNumber":428,"cloud":"Public","values":[
+          {"name":"AzureFrontDoor.Frontend","properties":{"addressPrefixes":["4.145.22.160/29"]}},
+          {"name":"AzureFrontDoor.Backend","properties":{"addressPrefixes":["4.153.250.0/29","2603:1030:21::/48"]}},
+          {"name":"AzureCloud","properties":{"addressPrefixes":["20.0.0.0/11"]}}]}
+        """;
+
+        // Act
+        var reduced = IpIntelFeeds.ReduceAzureServiceTags(body);
+
+        // Assert
+        Assert.Equal("4.153.250.0/29\n2603:1030:21::/48", reduced);
+    }
+
+    [Fact]
+    public void Label_AkamaiAclBeatsAkamaiNetwork()
+    {
+        // Arrange
+        var network = new IpIntelLabel("Akamai", "AS20940", IpIntelCategory.Cdn, "akamai-as20940", Likely: true);
+        var acl = new IpIntelLabel("Akamai", "Origin IP ACL", IpIntelCategory.Cdn, "akamai-v4");
+
+        // Act
+        var best = IpIntelStore.Best(new[] { network, acl });
+
+        // Assert
+        Assert.Same(acl, best);
+    }
 }

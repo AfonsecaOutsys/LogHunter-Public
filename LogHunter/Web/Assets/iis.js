@@ -43,6 +43,12 @@
     return `${hours}h ${minutes % 60}m`;
   }
 
+  // CDN / proxy badges (site.js); only looks up IPs not checked yet, so it is safe on every poll.
+  function annotateIps(containerId) {
+    const el = byId(containerId);
+    if (el && window.lhIpRanges) window.lhIpRanges.annotate(el).catch(() => {});
+  }
+
   async function fetchJson(url, options) {
     const response = await fetch(url, {
       headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
@@ -473,6 +479,7 @@
     }
 
     renderIisIpSummaryResults(snap);
+    annotateIps('iisIpSummaryPerIp');
 
     // Auto-scroll to results on completion
     if (state === 'completed') {
@@ -508,7 +515,7 @@
     setHidden(section, false);
     container.innerHTML = snap.perIpSummaries.map(ip => {
       if (ip.totalRows <= 0) {
-        return `<div class="result-card"><div class="status-pill"><span>${escHtml(ip.ip)}</span><strong>0 hits</strong></div><p class="page-copy">No IIS hits found for this IP.</p></div>`;
+        return `<div class="result-card"><div class="status-pill"><span><span data-ip="${escHtml(ip.ip)}">${escHtml(ip.ip)}</span></span><strong>0 hits</strong></div><p class="page-copy">No IIS hits found for this IP.</p></div>`;
       }
 
       const topUriRows = (ip.topUris || []).map(u =>
@@ -525,7 +532,7 @@
 
       return `
         <details class="expandable-panel" open>
-          <summary>${escHtml(ip.ip)} — ${fmt(ip.totalRows)} hits</summary>
+          <summary><span data-ip="${escHtml(ip.ip)}">${escHtml(ip.ip)}</span> — ${fmt(ip.totalRows)} hits</summary>
           <div class="expandable-body">
             <div class="status-block">
               <div class="status-pill"><span>Total</span><strong>${fmt(ip.totalRows)}</strong></div>
@@ -722,6 +729,7 @@
     }
 
     renderIisStatusPivotResults(snap);
+    annotateIps('iisStatusPivotResults');
 
     // Auto-scroll to results on completion
     if (state === 'completed') {
@@ -770,7 +778,7 @@
 
       return `
         <details class="expandable-panel">
-          <summary>${escHtml(ip.ip)} — ${fmt(ip.totalHits)} error hits</summary>
+          <summary><span data-ip="${escHtml(ip.ip)}">${escHtml(ip.ip)}</span> — ${fmt(ip.totalHits)} error hits</summary>
           <div class="expandable-body">
             <div class="status-block">${statusEntries}</div>
             ${uriRows ? `<ul class="list-clean">${uriRows}</ul>` : ''}
@@ -791,7 +799,7 @@
 
       return `
         <details class="expandable-panel">
-          <summary>${escHtml(ip.ip)} — 2xx: ${fmt(ip.total2xx)}, 3xx: ${fmt(ip.total3xx)}</summary>
+          <summary><span data-ip="${escHtml(ip.ip)}">${escHtml(ip.ip)}</span> — 2xx: ${fmt(ip.total2xx)}, 3xx: ${fmt(ip.total3xx)}</summary>
           <div class="expandable-body">
             ${uriRows ? `<ul class="list-clean">${uriRows}</ul>` : '<div class="footer-note">No 2xx/3xx hits.</div>'}
           </div>
@@ -1003,6 +1011,7 @@
     }
 
     renderIisBurstResults(snap);
+    annotateIps('iisBurstTable');
 
     // Auto-scroll to results on completion
     if (state === 'completed') {
@@ -1241,6 +1250,7 @@
     if (exportInfo) exportInfo.textContent = hasExport2 ? `Exported: ${snap.exportPath}` : '';
 
     renderIisBytesIntelResults(snap, prefix);
+    annotateIps(`${prefix}TopIps`);
 
     // Auto-scroll to results on completion
     if (state === 'completed') {
@@ -1279,7 +1289,7 @@
 
       return `
         <details class="expandable-panel">
-          <summary>#${ip.rank} ${escHtml(ip.ip)} — ${formatBytes(primaryBytes)} (${fmt(ip.hits)} hits)</summary>
+          <summary>#${ip.rank} <span data-ip="${escHtml(ip.ip)}">${escHtml(ip.ip)}</span> — ${formatBytes(primaryBytes)} (${fmt(ip.hits)} hits)</summary>
           <div class="expandable-body">
             <div class="status-block">
               <div class="status-pill"><span>${bytesLabel}</span><strong>${formatBytes(primaryBytes)}</strong></div>
