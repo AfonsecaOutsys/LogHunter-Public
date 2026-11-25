@@ -46,6 +46,16 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 2.0.0.4
+
+- New **IP sweep** workflow (ALB and IIS pages): paste any number of IPs, CIDR blocks or IP ranges and check them across several log folders in one run. Per target: hit or no hit, first and last seen, matched IPs, top paths, status codes and which environment it hit. Produces a customer-safe HTML report (scope, caveats, CDN labels) and an Excel workbook, with hand-offs to IP Summary (same folder) and AbuseIPDB (CDN edges skipped). The 10-IP limit stays on IP Summary only.
+- **CDN and proxy ranges**, refreshed in the app every 24 hours from vendor feeds: Cloudflare, CloudFront (origin-facing), Akamai (Origin IP ACL plus its networks as "likely"), Imperva, Fastly, F5 Distributed Cloud, Azure Front Door, Zscaler, plus Google Cloud load balancers, Sucuri and Netskope. A feed that fails keeps its last good copy. New "IP ranges" status pill and page, with the option to paste a customer's own CDN ranges.
+- CDN / proxy badges on ALB and IIS result tables, and a "Fronted by …" banner when most top IPs are one CDN's edges ("these are CDN edges, not users").
+- IIS client IP: X-Forwarded-For is now read right to left, skipping known CDN edges, so a forged first hop no longer becomes the "client". `0.0.0.0`, CGNAT (`100.64/10`) and private IPv6 are never reported as the client.
+- IIS IP summary exports add `ClaimedClient (unverified)` and the X-Forwarded-For chain next to the resolved client.
+- ALB download: Start download greys out from the click until the job ends.
+- Fixes: empty result panels no longer show before a run; the footer drops the "during the migration" wording.
+
 ### 2.0.0.3
 
 - IIS Burst Patterns: console and web shell now share one scoring engine (thresholds, flags and severity), so both surfaces give the same verdict for the same logs.
