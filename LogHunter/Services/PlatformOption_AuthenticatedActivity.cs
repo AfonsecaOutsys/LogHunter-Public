@@ -50,6 +50,7 @@ public static partial class PlatformOptions
         }
 
         PlatformAuthScanResult result = null!;
+        UsageReporter.Track(UsageFeature.PlatformAuthActivity);
         await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
             .StartAsync("Processing platform logs...", async ctx =>

@@ -44,6 +44,7 @@ public static partial class AlbOptions
 
         var ipCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
+        UsageReporter.Track(UsageFeature.AlbTop50Ips);
         await RunScanWithProgressParallelAsync(
             title: "Scanning ALB logs",
             files: files,

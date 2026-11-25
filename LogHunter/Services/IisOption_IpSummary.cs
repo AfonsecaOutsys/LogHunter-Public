@@ -85,6 +85,7 @@ public static class IisOption_IpSummary
                 ("HTML", "Single report with IP selector"),
                 ("Output", outputFolder));
 
+            UsageReporter.Track(UsageFeature.IisIpSummary);
             sharedSqliteWriter = await ScanWithPhasedProgressAsync(files, resultsByIp, sqlitePath, ct).ConfigureAwait(false);
 
             foreach (var result in resultsByIp.Values)

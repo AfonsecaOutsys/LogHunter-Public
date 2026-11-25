@@ -102,6 +102,8 @@ internal static class AlbApi
                 return true;
             }
 
+            UsageReporter.Track(UsageFeature.AlbDownload);
+
             await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
             return true;
         }
@@ -187,6 +189,8 @@ internal static class AlbApi
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
+
+            UsageReporter.Track(UsageFeature.AlbTopIpsEndpoint);
 
             await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
             return true;
@@ -427,6 +431,8 @@ internal static class AlbApi
                 return true;
             }
 
+            UsageReporter.Track(UsageFeature.AlbIpSummary);
+
             await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
             return true;
         }
@@ -649,6 +655,8 @@ internal static class AlbApi
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
+
+            UsageReporter.Track(UsageFeature.AlbRequestsOverTime);
 
             await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
             return true;
@@ -964,6 +972,18 @@ internal static class AlbApi
         string? ServerPath,
         IReadOnlyList<string>? ServerFilePaths);
 
+    // Usage key for each generic scan registered below (options 4-10).
+    internal static string GenericScanFeature(string optionSlug) => optionSlug switch
+    {
+        "alb/5xx-mismatch" => UsageFeature.Alb5xxMismatch,
+        "alb/top-50-ips" => UsageFeature.AlbTop50Ips,
+        "alb/top-50-ips-by-uri" => UsageFeature.AlbTop50IpsByUri,
+        "alb/top-50-avg-duration" => UsageFeature.AlbTop50AvgDuration,
+        "alb/waf-blocked-summary" => UsageFeature.AlbWafBlockedSummary,
+        "alb/waf-blocks-over-time" => UsageFeature.AlbWafBlocksOverTime,
+        _ => throw new ArgumentOutOfRangeException(nameof(optionSlug), optionSlug, "No usage key for this scan."),
+    };
+
     private static async Task<bool> TryHandleGenericScanAsync(
         WebAppContext app,
         HttpListenerContext context,
@@ -1036,6 +1056,8 @@ internal static class AlbApi
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
+
+            UsageReporter.Track(GenericScanFeature(optionSlug));
 
             await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
             return true;

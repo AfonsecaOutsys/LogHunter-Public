@@ -46,6 +46,8 @@ publish/
 # --- Code-signing certificates (private keys) ---
 certs/*.pfx
 certs/*.p12
+# Usage API endpoint and key (imported by LogHunter.csproj at build time)
+certs/*.props
 
 # --- OS junk ---
 .DS_Store

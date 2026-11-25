@@ -163,6 +163,19 @@ By default, LogHunter starts in **console mode**. You can explicitly start the l
 
 ---
 
+## Usage counts
+
+Release builds send anonymous usage counts so we know which workflows are used:
+
+- **App start:** a random install id (created once in `config\install-id`), a random id for this launch, the app version, and the mode (`web` or `console`).
+- **Workflow run:** the same four values plus the workflow name (for example `alb.download` or `iis.ip-summary`).
+
+Nothing else is sent: no user name, machine name, file paths, IPs or log content. The call runs in the background, never slows the tool down, and fails silently when offline.
+
+To turn it off, set the environment variable `LOGHUNTER_NO_USAGE=1` before starting LogHunter.
+
+---
+
 ## Prerequisites
 
 ### Required for ALB log download

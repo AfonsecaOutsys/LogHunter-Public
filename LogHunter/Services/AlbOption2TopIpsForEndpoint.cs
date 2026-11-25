@@ -63,6 +63,7 @@ public static partial class AlbOptions
 
         var endpointIpCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
+        UsageReporter.Track(UsageFeature.AlbTopIpsEndpoint);
         await RunScanWithProgressParallelAsync(
             title: "Scanning ALB logs (pass 1/2: top IPs for fragment)",
             files: files,

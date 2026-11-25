@@ -40,6 +40,7 @@ public static partial class AlbOptions
         var buckets = new SortedDictionary<DateTime, long>();
         var totalBytes = SumFileSizesSafe(files);
 
+        UsageReporter.Track(UsageFeature.AlbWafBlocksOverTime);
         await AnsiConsole.Progress()
             .AutoClear(false)
             .Columns(new ProgressColumn[]

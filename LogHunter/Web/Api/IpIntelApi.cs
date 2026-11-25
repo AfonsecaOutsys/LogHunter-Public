@@ -32,6 +32,8 @@ internal static class IpIntelApi
                 await WriteJsonAsync(context.Response, BuildStatusPayload(IpIntelStore.GetStatus())).ConfigureAwait(false);
                 return true;
             case "refresh" when IsPost(context):
+                // Counted here, not in RefreshAsync, which the startup auto-refresh also calls.
+                UsageReporter.Track(UsageFeature.IpRangesRefresh);
                 var status = await IpIntelStore.RefreshAsync(force: true, CancellationToken.None).ConfigureAwait(false);
                 await WriteJsonAsync(context.Response, BuildStatusPayload(status)).ConfigureAwait(false);
                 return true;
@@ -42,6 +44,7 @@ internal static class IpIntelApi
             case "custom" when IsPost(context):
                 var custom = await ReadJsonAsync<CustomRangesRequest>(context.Request).ConfigureAwait(false);
                 var (saved, invalid) = IpIntelStore.SaveCustomRanges(custom?.Provider, custom?.Ranges);
+                UsageReporter.Track(UsageFeature.IpRangesCustomRanges);
                 await WriteJsonAsync(context.Response, new { saved, invalid }).ConfigureAwait(false);
                 return true;
             case "custom":

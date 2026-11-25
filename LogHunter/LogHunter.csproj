@@ -65,4 +65,11 @@
 		<InternalsVisibleTo Include="LogHunter.Tests" />
 	</ItemGroup>
 
+	<!-- Usage counts: endpoint and key come from certs\usage.props (gitignored), Release builds only. -->
+	<Import Project="..\certs\usage.props" Condition="Exists('..\certs\usage.props')" />
+	<ItemGroup Condition="'$(Configuration)' == 'Release' and '$(UsageEndpoint)' != ''">
+		<AssemblyMetadata Include="UsageEndpoint" Value="$(UsageEndpoint)" />
+		<AssemblyMetadata Include="UsageKey" Value="$(UsageKey)" />
+	</ItemGroup>
+
 </Project>

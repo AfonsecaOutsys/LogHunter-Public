@@ -95,6 +95,8 @@ internal static class AbuseIpApi
                 return true;
             }
 
+            UsageReporter.Track(UsageFeature.AbuseIpDbCheck);
+
             await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
             return true;
         }

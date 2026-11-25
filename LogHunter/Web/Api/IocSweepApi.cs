@@ -101,6 +101,8 @@ internal static class IocSweepApi
             return;
         }
 
+        UsageReporter.Track(string.Equals(body?.Section, "iis", StringComparison.OrdinalIgnoreCase) ? UsageFeature.IisIpSweep : UsageFeature.AlbIpSweep);
+
         await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
     }
 
@@ -146,5 +148,6 @@ internal static class IocSweepApi
         await stream.WriteAsync(data).ConfigureAwait(false);
     }
 
-    private sealed record IocSweepRunRequest(string? Targets, IReadOnlyList<IocSweepSourceRequest>? Sources);
+    /// <param name="Section">"alb" or "iis": which page started the sweep (both post here), for usage counts.</param>
+    private sealed record IocSweepRunRequest(string? Targets, IReadOnlyList<IocSweepSourceRequest>? Sources, string? Section = null);
 }

@@ -48,6 +48,7 @@ public static partial class AlbOptions
 
         var blockedCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
+        UsageReporter.Track(UsageFeature.AlbWafBlockedSummary);
         await AnsiConsole.Progress()
             .AutoClear(false)
             .Columns(new ProgressColumn[]

@@ -42,6 +42,7 @@ public static partial class AlbOptions
 
         var result = new AlbStatusMismatchScanner.ScanResult();
 
+        UsageReporter.Track(UsageFeature.Alb5xxMismatch);
         await RunScanWithProgressParallelAsync(
             title: "Scanning ALB logs (5xx while backend succeeded)",
             files: files,

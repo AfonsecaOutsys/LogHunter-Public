@@ -266,6 +266,15 @@ internal static class Program
 
             TraceLog.Write("app", "mode", new { mode = consoleMode ? "console" : "web", root });
 
+            // Anonymous usage counts (child-process paths returned earlier, so they never count as starts).
+            UsageReporter.Start(version, consoleMode ? "console" : "web");
+            if (UsageReporter.IsEnabled)
+            {
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine($"Anonymous usage counts (version, mode, workflow). {UsageReporter.OptOutVariable}=1 turns them off.");
+                Console.ResetColor();
+            }
+
             EmbeddedAssets.EnsureTabulatorAssets(root);
 
             // CDN / proxy ranges: load the cached copy, refresh stale feeds in the background.

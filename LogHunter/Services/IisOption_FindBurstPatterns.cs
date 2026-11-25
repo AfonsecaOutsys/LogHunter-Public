@@ -136,6 +136,7 @@ public static class IisOption_FindBurstPatterns
         var aggs = new Dictionary<string, BurstAgg>(StringComparer.OrdinalIgnoreCase);
         IisW3cReader.FieldMap? firstMap = null;
 
+        UsageReporter.Track(UsageFeature.IisBurstPatterns);
         await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
             .StartAsync("Scanning IIS logs for bursts...", async ctx =>

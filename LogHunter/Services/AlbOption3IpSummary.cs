@@ -67,6 +67,7 @@ public static partial class AlbOptions
             ("1M-row behavior", "Prompt once, then use one aggregated SQLite database for all selected IPs if approved"),
             ("Output", outputFolder));
 
+        UsageReporter.Track(UsageFeature.AlbIpSummary);
         try
         {
             sharedSqliteWriter = await ScanIpSummaryMultiWithPhasedProgressAsync(files, resultsByIp, sqlitePath).ConfigureAwait(false);
