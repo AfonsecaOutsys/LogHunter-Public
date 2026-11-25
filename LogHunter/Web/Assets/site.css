@@ -26,6 +26,11 @@
   --button-text: #08111f;
 }
 
+/* The hidden attribute must win over layout rules such as .stack { display: grid }. */
+[hidden] {
+  display: none !important;
+}
+
 :root[data-theme='light'] {
   color-scheme: light;
   --bg-base: #f4efe6;

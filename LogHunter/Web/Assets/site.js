@@ -294,9 +294,13 @@ function initializeIpRangesPage() {
   const fmt = v => v ? new Date(v).toISOString().replace('T', ' ').substring(0, 16) + ' UTC' : 'never';
 
   function render(status) {
+    // Same numbers as the table below: providers that delivered data, and ranges as published.
+    const loaded = status.feeds.filter(f => f.rangeCount > 0);
+    const providers = new Set(loaded.map(f => f.provider)).size;
+    const ranges = loaded.reduce((sum, f) => sum + Number(f.rangeCount), 0);
     document.getElementById('ipRangesSummary').textContent = status.refreshing
       ? 'Refreshing…'
-      : `${status.providerCount} providers · ${Number(status.rangeCount).toLocaleString('en-US')} ranges · oldest feed ${status.label}`;
+      : `${providers} providers · ${ranges.toLocaleString('en-US')} ranges · oldest feed ${status.label}`;
     const rows = status.feeds.map(f => `
       <tr><td>${esc(f.provider)}</td><td>${esc(f.id)}</td><td class="num">${Number(f.rangeCount).toLocaleString('en-US')}</td>
         <td>${esc(fmt(f.lastSuccessUtc))}</td><td>${f.lastError ? esc(f.lastError) : 'OK'}</td></tr>`).join('');

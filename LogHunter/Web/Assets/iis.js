@@ -587,6 +587,22 @@
       sessionStorage.removeItem('lh.prefill.ipSummary');
     }
 
+    // ...and the swept IIS folder, so the summary runs on the same logs.
+    const folderPrefill = sessionStorage.getItem('lh.prefill.ipSummaryFolder');
+    if (folderPrefill) {
+      sessionStorage.removeItem('lh.prefill.ipSummaryFolder');
+      try {
+        const f = JSON.parse(folderPrefill);
+        const sel = { sourceType: 'folder', rootPath: f.path, filePaths: [], fileCount: f.files || 0, totalBytes: f.bytes || 0, selectionLabel: f.path };
+        iisIpSummarySourceType = 'folder';
+        iisIpSummarySelection = sel;
+        iisIpSummaryServerSelection = sel;
+        renderIisIpSummarySource();
+      } catch {
+        // Malformed prefill: keep the default folder.
+      }
+    }
+
     byId('iisIpSummaryModeManual')?.addEventListener('click', () => setIisIpSummaryInputMode('manual'));
     byId('iisIpSummaryModeFile')?.addEventListener('click', () => setIisIpSummaryInputMode('file'));
     byId('iisIpSummaryBrowseFile')?.addEventListener('click', browseAndExtractIisIpSummary);

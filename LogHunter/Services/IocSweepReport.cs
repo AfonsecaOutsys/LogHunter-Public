@@ -34,6 +34,32 @@ internal static class IocSweepReport
     public static string FormatTop(Dictionary<string, long> map, int n) =>
         string.Join(", ", Top(map, n).Select(kv => $"{kv.Key} ({kv.Value:N0})"));
 
+    /// <summary>CDN / proxy label of an IP ("CloudFront edge"), or "" when unknown.</summary>
+    public static string IpLabel(string ip) => IpIntelStore.Lookup(ip)?.Badge ?? "";
+
+    /// <summary>
+    /// Network column: the label of a single-IP target, or the distinct labels of the IPs a range
+    /// matched, so a shared report shows when a "hit" is really a CDN edge.
+    /// </summary>
+    public static string NetworkLabel(IocSweepTargetResult t)
+    {
+        if (t.Target.IsSingle)
+            return IpLabel(t.Target.Text);
+
+        return string.Join(", ", Top(t.MatchedIps, IocSweepTargetResult.MaxDistinctKeys)
+            .Select(kv => IpLabel(kv.Key))
+            .Where(l => l.Length > 0)
+            .GroupBy(l => l)
+            .Select(g => g.Count() == 1 ? g.Key : $"{g.Key} ({g.Count()} IPs)"));
+    }
+
+    public static string FormatIps(Dictionary<string, long> map, int n) =>
+        string.Join(", ", Top(map, n).Select(kv =>
+        {
+            var label = IpLabel(kv.Key);
+            return label.Length == 0 ? $"{kv.Key} ({kv.Value:N0})" : $"{kv.Key} [{label}] ({kv.Value:N0})";
+        }));
+
     public static string FormatUtc(DateTime? value) =>
         value?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + (value is null ? "" : " UTC");
 
@@ -89,13 +115,13 @@ internal static class IocSweepReport
             return;
         }
 
-        sb.Append("<table><tr><th>Target</th><th>Type</th><th class=\"num\">Hits</th><th>First seen</th><th>Last seen</th>")
+        sb.Append("<table><tr><th>Target</th><th>Type</th><th>Network</th><th class=\"num\">Hits</th><th>First seen</th><th>Last seen</th>")
           .Append("<th>Matched IPs</th><th>Top paths</th><th>Status codes</th><th>Sources</th></tr>");
         foreach (var t in hits)
         {
-            sb.Append($"<tr><td>{E(t.Target.Text)}</td><td>{TargetKind(t.Target)}</td><td class=\"num hit\">{t.Hits:N0}</td>")
+            sb.Append($"<tr><td>{E(t.Target.Text)}</td><td>{TargetKind(t.Target)}</td><td>{E(NetworkLabel(t))}</td><td class=\"num hit\">{t.Hits:N0}</td>")
               .Append($"<td>{E(FormatUtc(t.FirstSeenUtc))}</td><td>{E(FormatUtc(t.LastSeenUtc))}</td>")
-              .Append($"<td>{E(FormatTop(t.MatchedIps, 5))}</td><td>{E(FormatTop(t.Uris, 5))}</td>")
+              .Append($"<td>{E(FormatIps(t.MatchedIps, 5))}</td><td>{E(FormatTop(t.Uris, 5))}</td>")
               .Append($"<td>{E(FormatTop(t.Statuses, 5))}</td><td>{E(FormatTop(t.HitsBySource, 10))}</td></tr>");
         }
 
@@ -107,7 +133,7 @@ internal static class IocSweepReport
         sb.Append("<h2>Targets without hits</h2>");
         sb.Append(misses.Count == 0
             ? "<p>Every target has at least one hit.</p>"
-            : $"<p>{E(string.Join(", ", misses.Select(m => m.Target.Text)))}</p>");
+            : $"<p>{E(string.Join(", ", misses.Select(m => NetworkLabel(m) is { Length: > 0 } l ? $"{m.Target.Text} ({l})" : m.Target.Text)))}</p>");
     }
 
     public static void WriteExcel(IocSweepResult result, string path)
@@ -115,20 +141,20 @@ internal static class IocSweepReport
         using var wb = new XLWorkbook();
 
         var summary = wb.Worksheets.Add("Targets");
-        WriteRow(summary, 1, "Target", "Type", "Hits", "First seen (UTC)", "Last seen (UTC)", "Distinct IPs", "Top paths", "Status codes", "Sources");
+        WriteRow(summary, 1, "Target", "Type", "Network", "Hits", "First seen (UTC)", "Last seen (UTC)", "Distinct IPs", "Top paths", "Status codes", "Sources");
         var row = 2;
         foreach (var t in result.Targets.OrderByDescending(t => t.Hits).ThenBy(t => t.Target.Text, StringComparer.Ordinal))
         {
-            WriteRow(summary, row++, t.Target.Text, TargetKind(t.Target), t.Hits, FormatUtc(t.FirstSeenUtc), FormatUtc(t.LastSeenUtc),
+            WriteRow(summary, row++, t.Target.Text, TargetKind(t.Target), NetworkLabel(t), t.Hits, FormatUtc(t.FirstSeenUtc), FormatUtc(t.LastSeenUtc),
                 t.MatchedIps.Count, FormatTop(t.Uris, 10), FormatTop(t.Statuses, 10), FormatTop(t.HitsBySource, 20));
         }
 
         var ips = wb.Worksheets.Add("Matched IPs");
-        WriteRow(ips, 1, "Target", "Matched IP", "Hits");
+        WriteRow(ips, 1, "Target", "Matched IP", "Network", "Hits");
         row = 2;
         foreach (var t in result.Targets.Where(t => t.Hits > 0))
             foreach (var kv in Top(t.MatchedIps, IocSweepTargetResult.MaxDistinctKeys))
-                WriteRow(ips, row++, t.Target.Text, kv.Key, kv.Value);
+                WriteRow(ips, row++, t.Target.Text, kv.Key, IpLabel(kv.Key), kv.Value);
 
         var uris = wb.Worksheets.Add("Paths");
         WriteRow(uris, 1, "Target", "Path", "Hits");

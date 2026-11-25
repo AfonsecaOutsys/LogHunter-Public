@@ -168,7 +168,7 @@ internal static class WebShellPageBuilder
 
 {{mainContent}}
 
-      <p class="footer-note">{{Html(context.AppName)}} {{Html(context.Version)}}. Current console workflows remain available during the migration.</p>
+      <p class="footer-note">{{Html(context.AppName)}} {{Html(context.Version)}}</p>
 {{traceNote}}
     </main>
   </div>

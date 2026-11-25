@@ -487,6 +487,7 @@
 
     const hasJob = snapshot.state && snapshot.state !== 'idle';
     setHidden(byId('albOpenRunFolder'), !hasJob);
+    setDownloadBusy(snapshot.state === 'running');
     renderProgress(snapshot);
     renderOutput(snapshot);
     renderResult(snapshot);
@@ -639,6 +640,14 @@
     setConfigMode(currentConfigMode);
   }
 
+  // Greys out Start download from the click until the job leaves the running state.
+  function setDownloadBusy(busy) {
+    const button = byId('albDownloadStart');
+    if (!button) return;
+    button.disabled = busy;
+    button.textContent = busy ? 'Download running…' : 'Start download';
+  }
+
   async function startDownload() {
     if (startInFlight) {
       trace('alb.download.start.ignored', { reason: 'request-in-flight' });
@@ -654,6 +663,7 @@
     }
 
     startInFlight = true;
+    setDownloadBusy(true);
     trace('alb.download.start.request', {
       configMode: request.configMode,
       savedConfigName: request.savedConfigName,
@@ -679,6 +689,8 @@
       if (running && running.jobId) {
         trackJob(running.jobId, 'already-running');
         renderSnapshot(running);
+      } else {
+        setDownloadBusy(false);
       }
 
       setError(String(error));
@@ -1773,6 +1785,22 @@
     if (prefill && byId('ipSummaryIpText')) {
       byId('ipSummaryIpText').value = prefill;
       sessionStorage.removeItem('lh.prefill.ipSummary');
+    }
+
+    // ...and the swept ALB folder, so the summary runs on the same logs.
+    const folderPrefill = sessionStorage.getItem('lh.prefill.ipSummaryFolder');
+    if (folderPrefill) {
+      sessionStorage.removeItem('lh.prefill.ipSummaryFolder');
+      try {
+        const f = JSON.parse(folderPrefill);
+        const sel = { sourceType: 'folder', rootPath: f.path, filePaths: [], fileCount: f.files || 0, totalBytes: f.bytes || 0, selectionLabel: f.path };
+        ipSummarySourceType = 'folder';
+        ipSummarySelection = sel;
+        ipSummaryServerSelection = sel;
+        renderIpSummarySource();
+      } catch {
+        // Malformed prefill: keep the default folder.
+      }
     }
 
     byId('ipSummaryModeManual')?.addEventListener('click', () => setIpSummaryInputMode('manual'));

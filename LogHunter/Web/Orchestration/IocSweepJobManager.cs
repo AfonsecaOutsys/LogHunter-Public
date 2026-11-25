@@ -18,7 +18,7 @@ internal sealed record IocSweepTargetRow(
 
 internal sealed record IocSweepScopeRow(
     string Label, int AlbFiles, int IisFiles, long LinesRead, long RecordsParsed, long ParseFailures,
-    string MinUtc, string MaxUtc, int UnreadableFiles);
+    string MinUtc, string MaxUtc, int UnreadableFiles, string Path = "", long Bytes = 0);
 
 internal sealed record IocSweepJobSnapshot(
     string JobId,
@@ -131,7 +131,7 @@ internal sealed class IocSweepJobManager
             }
 
             var label = string.IsNullOrWhiteSpace(req.Label) ? Path.GetFileName(req.Path.TrimEnd('\\', '/')) : req.Label.Trim();
-            sources.Add(new IocSweepSource(UniqueLabel(label, sources), files));
+            sources.Add(new IocSweepSource(UniqueLabel(label, sources), files, req.Path));
         }
 
         return sources;
@@ -177,7 +177,7 @@ internal sealed class IocSweepJobManager
                 HtmlReportPath = htmlPath,
                 ExcelPath = excelPath,
                 Targets = BuildTargetRows(result),
-                Scopes = BuildScopeRows(result),
+                Scopes = BuildScopeRows(result, sources),
                 UpdatedUtc = DateTime.UtcNow
             });
         }
@@ -204,10 +204,26 @@ internal sealed class IocSweepJobManager
                 IocSweepReport.FormatTop(t.HitsBySource, 6)))
             .ToList();
 
-    private static List<IocSweepScopeRow> BuildScopeRows(IocSweepResult result) =>
-        result.Scopes.Select(s => new IocSweepScopeRow(
+    // Scopes come back in source order; path and size let the page hand a folder to IP summary.
+    private static List<IocSweepScopeRow> BuildScopeRows(IocSweepResult result, IReadOnlyList<IocSweepSource> sources) =>
+        result.Scopes.Select((s, i) => new IocSweepScopeRow(
             s.Label, s.AlbFiles, s.IisFiles, s.LinesRead, s.RecordsParsed, s.ParseFailures,
-            IocSweepReport.FormatUtc(s.MinUtc), IocSweepReport.FormatUtc(s.MaxUtc), s.UnreadableFiles.Count)).ToList();
+            IocSweepReport.FormatUtc(s.MinUtc), IocSweepReport.FormatUtc(s.MaxUtc), s.UnreadableFiles.Count,
+            i < sources.Count ? sources[i].Path : "",
+            i < sources.Count ? TotalBytes(sources[i].Files) : 0)).ToList();
+
+    private static long TotalBytes(IEnumerable<string> files)
+    {
+        long total = 0;
+        foreach (var f in files)
+        {
+            try { total += new FileInfo(f).Length; }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        return total;
+    }
 
     public bool TryOpenReport(out string message) => TryOpen(GetSnapshot().HtmlReportPath, "report", out message);
 

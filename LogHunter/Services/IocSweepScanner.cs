@@ -10,7 +10,7 @@ using LogHunter.Utils;
 namespace LogHunter.Services;
 
 /// <summary>A folder or file set to sweep, shown under its own label (e.g. "Prod ALB").</summary>
-internal sealed record IocSweepSource(string Label, IReadOnlyList<string> Files);
+internal sealed record IocSweepSource(string Label, IReadOnlyList<string> Files, string Path = "");
 
 /// <summary>Per-target outcome of a sweep.</summary>
 internal sealed class IocSweepTargetResult

@@ -62,7 +62,29 @@ public sealed class IocSweepReportTests : IDisposable
         var formulaCell = paths.CellsUsed().First(c => c.GetString().StartsWith("=cmd"));
         Assert.False(formulaCell.HasFormula);
         Assert.Equal("broken.log.gz (InvalidDataException: bad)", wb.Worksheet("Scope").Cell(2, 9).GetString());
-        Assert.Equal(2, wb.Worksheet("Targets").Cell(2, 3).GetValue<long>());
+        Assert.Equal(2, wb.Worksheet("Targets").Cell(2, 4).GetValue<long>());
+    }
+
+    [Fact]
+    public void Reports_CdnEdgeHit_CarriesNetworkLabel()
+    {
+        // Arrange: 35.191.0.0/16 is a built-in Google Cloud load balancer range.
+        IpTargetParser.TryParse("35.191.0.0/24", out var cidr);
+        var hit = new IocSweepTargetResult(cidr);
+        hit.Record("35.191.0.9", DateTime.UtcNow, "/", "200", "Prod ALB");
+        var result = new IocSweepResult(new[] { hit }, new[] { new IocSweepSourceScope("Prod ALB") }, Array.Empty<string>(), DateTime.UtcNow, DateTime.UtcNow);
+        var html = Path.Combine(_dir, "cdn.html");
+        var xlsx = Path.Combine(_dir, "cdn.xlsx");
+
+        // Act
+        IocSweepReport.WriteHtml(result, html);
+        IocSweepReport.WriteExcel(result, xlsx);
+        using var wb = new XLWorkbook(xlsx);
+
+        // Assert
+        Assert.Contains("35.191.0.9 [Google Cloud LB edge]", File.ReadAllText(html));
+        Assert.Equal("Google Cloud LB edge", wb.Worksheet("Targets").Cell(2, 3).GetString());
+        Assert.Equal("Google Cloud LB edge", wb.Worksheet("Matched IPs").Cell(2, 3).GetString());
     }
 
     [Theory]

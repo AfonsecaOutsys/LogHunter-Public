@@ -50,6 +50,10 @@ public class IpTargetParserTests
     [InlineData("203.0.113.20-203.0.113.10")]
     [InlineData("203.0.113.1-2001:db8::1")]
     [InlineData("2001:db8::/129")]
+    [InlineData("12345")]
+    [InlineData("10.1")]
+    [InlineData("10.1.2")]
+    [InlineData("10.1/16")]
     [InlineData("")]
     public void TryParse_InvalidTargets_ReturnsFalse(string text)
     {

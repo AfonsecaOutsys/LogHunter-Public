@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 
@@ -69,7 +70,15 @@ internal static class IpTargetParser
     {
         family = AddressFamily.Unknown;
         value = default;
-        if (string.IsNullOrWhiteSpace(text) || !IPAddress.TryParse(text.Trim(), out var addr))
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        // IPAddress.TryParse accepts legacy forms ("12345" -> 0.0.48.57, "10.1" -> 10.0.0.1):
+        // a typo must not become a target, so IPv4 has to be a full dotted quad.
+        var s = text.Trim();
+        if (!s.Contains(':') && s.Count(c => c == '.') != 3)
+            return false;
+        if (!IPAddress.TryParse(s, out var addr))
             return false;
 
         return TryToNumber(addr, out family, out value);

@@ -42,14 +42,48 @@
     return payload;
   }
 
-  // Rough client-side count for feedback only; the server parses authoritatively.
-  function countTargets(text) {
-    return text.split('\n')
+  // Client-side check for the counter only; the server parses authoritatively with the same rules.
+  const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+
+  function isIp(text) {
+    if (IPV4.test(text)) return true;
+    if (!text.includes(':') || !/^[0-9a-fA-F:.]+$/.test(text)) return false;
+    try { new URL(`http://[${text}]/`); return true; } catch { return false; }
+  }
+
+  function isTarget(token) {
+    const slash = token.indexOf('/');
+    if (slash > 0) {
+      const ip = token.slice(0, slash);
+      const prefix = Number(token.slice(slash + 1));
+      const max = ip.includes(':') ? 128 : 32;
+      return isIp(ip) && /^\d+$/.test(token.slice(slash + 1)) && prefix >= 0 && prefix <= max;
+    }
+    const dash = token.indexOf('-');
+    if (dash > 0) return isIp(token.slice(0, dash)) && isIp(token.slice(dash + 1));
+    return isIp(token);
+  }
+
+  function checkTargets(text) {
+    const tokens = text.split('\n')
       .map(line => line.split('#')[0])
       .join(' ')
+      .replace(/\s+-\s+/g, '-')
       .split(/[\s,;]+/)
-      .filter(token => token && token !== '-').length;
+      .filter(Boolean);
+    const invalid = tokens.filter(t => !isTarget(t));
+    return { valid: tokens.length - invalid.length, invalid };
   }
+
+  function renderTargetInfo() {
+    const { valid, invalid } = checkTargets(byId('ipSweepTargets').value);
+    const info = byId('ipSweepTargetInfo');
+    info.textContent = invalid.length
+      ? `${formatNumber(valid)} targets · not recognised: ${invalid.slice(0, 5).join(', ')}${invalid.length > 5 ? ` (+${invalid.length - 5})` : ''}`
+      : `${formatNumber(valid)} targets`;
+  }
+
+  const LAST_SWEEP_KEY = 'lh.ipSweep.last';
 
   function renderSources() {
     const host = byId('ipSweepSources');
@@ -93,6 +127,7 @@
   async function run() {
     setError('');
     const targets = byId('ipSweepTargets').value;
+    localStorage.setItem(LAST_SWEEP_KEY, JSON.stringify({ targets, sources }));
     try {
       const result = await fetchJson('/api/ip-sweep/run', {
         method: 'POST',
@@ -210,6 +245,45 @@
     return window.location.pathname.toLowerCase().startsWith('/iis') ? '/iis' : '/alb';
   }
 
+  // IP summary gets the first swept folder that holds logs of its own type (ALB or IIS).
+  function toIpSummary() {
+    const base = moduleBase();
+    const scope = (lastSnapshot.scopes || []).find(s => s.path && (base === '/iis' ? s.iisFiles > 0 : s.albFiles > 0));
+    if (scope) {
+      sessionStorage.setItem('lh.prefill.ipSummaryFolder', JSON.stringify({
+        path: scope.path,
+        files: base === '/iis' ? scope.iisFiles : scope.albFiles,
+        bytes: scope.bytes || 0
+      }));
+    }
+    handOff('lh.prefill.ipSummary', hitIps(lastSnapshot).slice(0, 10), `${base}/ip-summary`);
+  }
+
+  // CDN edges and health checkers are not attackers: don't spend AbuseIPDB quota on them.
+  async function toReputation() {
+    let ips = reputationIps(lastSnapshot);
+    try {
+      const response = await fetch('/api/ip-ranges/lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ips })
+      });
+      const payload = await response.json();
+      const skip = new Set((payload.results || [])
+        .filter(r => r.category === 'Cdn' || r.category === 'HealthCheck')
+        .map(r => r.ip.toLowerCase()));
+      ips = ips.filter(ip => !skip.has(ip.toLowerCase()));
+    } catch {
+      // Lookup unavailable: hand off the full list.
+    }
+
+    if (ips.length === 0) {
+      setError('Every IP to check is a CDN edge or health checker. Use IIS IP summary to find the real clients.');
+      return;
+    }
+    handOff('lh.prefill.abuseip', ips, '/abuseipdb/check-ips');
+  }
+
   async function openArtifact(action) {
     try {
       await fetchJson(`/api/ip-sweep/${action}`, { method: 'POST' });
@@ -222,17 +296,13 @@
     if (!document.querySelector('[data-ip-sweep-page]')) return;
 
     const textarea = byId('ipSweepTargets');
-    textarea.addEventListener('input', () => {
-      byId('ipSweepTargetInfo').textContent = `${formatNumber(countTargets(textarea.value))} targets`;
-    });
+    textarea.addEventListener('input', renderTargetInfo);
     byId('ipSweepAddFolder').addEventListener('click', addFolder);
     byId('ipSweepRun').addEventListener('click', run);
     byId('ipSweepOpenReport').addEventListener('click', () => openArtifact('open-report'));
     byId('ipSweepOpenExport').addEventListener('click', () => openArtifact('open-export'));
-    byId('ipSweepToIpSummary').addEventListener('click', () =>
-      handOff('lh.prefill.ipSummary', hitIps(lastSnapshot).slice(0, 10), `${moduleBase()}/ip-summary`));
-    byId('ipSweepToAbuseIp').addEventListener('click', () =>
-      handOff('lh.prefill.abuseip', reputationIps(lastSnapshot), '/abuseipdb/check-ips'));
+    byId('ipSweepToIpSummary').addEventListener('click', toIpSummary);
+    byId('ipSweepToAbuseIp').addEventListener('click', toReputation);
     byId('ipSweepCopyHits').addEventListener('click', async () => {
       await navigator.clipboard.writeText(hitIps(lastSnapshot).join('\n'));
       byId('ipSweepCopyHits').textContent = 'Copied';
@@ -241,7 +311,15 @@
 
     try {
       const meta = await fetchJson('/api/ip-sweep/meta');
-      sources = (meta.defaultSources || []).slice();
+      // Restore the last sweep's targets and folders; first visit falls back to the workspace folders.
+      const last = JSON.parse(localStorage.getItem(LAST_SWEEP_KEY) || 'null');
+      if (last && Array.isArray(last.sources)) {
+        textarea.value = last.targets || '';
+        sources = last.sources;
+      } else {
+        sources = (meta.defaultSources || []).slice();
+      }
+      renderTargetInfo();
       renderSources();
       render(meta.currentJob);
       if (meta.currentJob && meta.currentJob.state === 'running') startPolling();
