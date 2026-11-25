@@ -13,6 +13,7 @@ internal static class AlbPageBuilder
         new(1, "/alb/download-logs", "Download logs from S3", "Download ALB logs into the workspace using AWS CLI and your current credentials/session.", true),
         new(2, "/alb/top-ips-top-paths", "Top IPs + top full paths for endpoint/path fragment", "Match a fragment, rank top IPs, then show top full URI paths per IP.", true),
         new(3, "/alb/ip-summary", "IP Summary", "Review one or more client IPs with shared charts and exports.", true),
+        new(11, "/alb/ip-sweep", IpSweepPageBuilder.Title, IpSweepPageBuilder.Description, true),
         new(4, "/alb/5xx-mismatch", "5xx while backend succeeded", "Find ALB requests where the customer-facing response was 5xx but the backend returned 2xx/3xx.", true),
         new(5, "/alb/top-50-ips", "Top 50 IPs overall", "Scan logs and show the top 50 client IPs across the selected range.", true),
         new(6, "/alb/top-50-ips-by-uri", "Top 50 IPs by URI (no query)", "Group top IP activity by URI path without query strings.", true),
@@ -53,6 +54,14 @@ internal static class AlbPageBuilder
             page = new WebPageDefinition("/alb/ip-summary", "/alb", "ALB", "ALB / IP Summary", "Workflow", "Review one or more client IPs with per-minute charts, status breakdowns, and shared exports.");
             mainContent = BuildIpSummaryContent();
             extraScriptPath = "/assets/alb.js";
+            return true;
+        }
+
+        if (string.Equals(path, "/alb/ip-sweep", StringComparison.OrdinalIgnoreCase))
+        {
+            page = IpSweepPageBuilder.BuildPage("/alb/ip-sweep", "/alb", "ALB");
+            mainContent = IpSweepPageBuilder.BuildContent();
+            extraScriptPath = "/assets/ipsweep.js";
             return true;
         }
 

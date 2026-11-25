@@ -44,6 +44,14 @@ internal static class WebShellPageBuilder
             return true;
         }
 
+        if (string.Equals(path, "/ip-ranges", StringComparison.OrdinalIgnoreCase))
+        {
+            var ipRangesPage = new WebPageDefinition("/ip-ranges", "/ip-ranges", "IP ranges", "IP ranges", "CDN and proxy ranges",
+                "Vendor-published CDN, WAF and corporate proxy ranges used to label IPs in results. Refreshed every 24 hours.");
+            html = BuildLayout(context, ipRangesPage, BuildIpRangesContent(), null);
+            return true;
+        }
+
         var page = Pages.FirstOrDefault(static x => string.Equals(x.Path, "/", StringComparison.Ordinal));
         if (!string.IsNullOrWhiteSpace(path))
             page = Pages.FirstOrDefault(x => string.Equals(x.Path, path, StringComparison.OrdinalIgnoreCase));
@@ -64,6 +72,46 @@ internal static class WebShellPageBuilder
 
         return true;
     }
+
+    private static string BuildIpRangesContent() => """
+      <section class="stack" data-ip-ranges-page="true">
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">Feeds</div>
+              <h2 id="ipRangesSummary">Loading…</h2>
+            </div>
+            <div class="export-row">
+              <button id="ipRangesRefresh" class="button-link primary button-like compact" type="button">Refresh now</button>
+            </div>
+          </div>
+          <div id="ipRangesTable" class="result-summary-body"></div>
+          <p class="footer-note">CDN edges hide the real client: use IIS IP summary (X-Forwarded-For) for those IPs. Corporate proxies carry real users. A feed that fails keeps its last good copy.</p>
+        </section>
+        <section class="panel form-panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">Customer ranges</div>
+              <h2>Add the customer's CDN ranges</h2>
+            </div>
+          </div>
+          <p class="footer-note">For CDNs without a public list (Akamai Site Shield, F5, a customer WAF). Labelled as CDN edges until cleared.</p>
+          <div class="field">
+            <label for="ipRangesCustomProvider">Provider name</label>
+            <input id="ipRangesCustomProvider" type="text" placeholder="Customer CDN">
+          </div>
+          <div class="field">
+            <label for="ipRangesCustomText">Ranges (IP, CIDR or range; one per line)</label>
+            <textarea id="ipRangesCustomText" rows="6" placeholder="23.62.0.0/16&#10;104.64.0.0/10"></textarea>
+          </div>
+          <div class="button-row">
+            <button id="ipRangesCustomSave" class="button-link primary button-like compact" type="button">Save ranges</button>
+            <button id="ipRangesCustomClear" class="button-link button-like compact" type="button">Clear</button>
+          </div>
+          <div id="ipRangesCustomInfo" class="footer-note"></div>
+        </section>
+      </section>
+""";
 
     private static string BuildLayout(WebAppContext context, WebPageDefinition page, string mainContent, string? extraScriptPath)
     {
@@ -109,13 +157,18 @@ internal static class WebShellPageBuilder
             <span>Runtime</span>
             <strong data-app-info="status">Ready</strong>
           </button>
+          <a id="ipRangesPill" class="runtime-pill" href="/ip-ranges" title="CDN and proxy ranges: age of the oldest feed">
+            <span class="status-dot" data-ip-ranges-light="status"></span>
+            <span>IP ranges</span>
+            <strong data-app-info="ipRanges">…</strong>
+          </a>
           <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to light theme">Switch to light</button>
         </div>
       </div>
 
 {{mainContent}}
 
-      <p class="footer-note">{{Html(context.AppName)}} {{Html(context.Version)}}. Current console workflows remain available during the migration.</p>
+      <p class="footer-note">{{Html(context.AppName)}} {{Html(context.Version)}}</p>
 {{traceNote}}
     </main>
   </div>

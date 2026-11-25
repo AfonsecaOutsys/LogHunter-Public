@@ -171,6 +171,13 @@ async function loadAppInfo() {
     if (runtimeButton) {
       runtimeButton.title = `Local web host status: ${payload.status || 'n/a'} | mode: ${payload.mode || 'n/a'} | started: ${payload.startedUtc || 'n/a'}`;
     }
+
+    const rangesLight = document.querySelector('[data-ip-ranges-light="status"]');
+    if (rangesLight) {
+      rangesLight.classList.toggle('is-online', payload.ipRangesLevel === 'ok');
+      rangesLight.classList.toggle('is-warn', payload.ipRangesLevel === 'stale');
+      rangesLight.classList.toggle('is-offline', payload.ipRangesLevel === 'missing');
+    }
     setRuntimeHealth(true, `Local web host status: ${payload.status || 'n/a'} | mode: ${payload.mode || 'n/a'} | started: ${payload.startedUtc || 'n/a'}`);
     return true;
   } catch (error) {
@@ -213,11 +220,143 @@ function initializeSqliteViewerCard() {
   });
 }
 
+// ── CDN / proxy range labels ─────────────────────────────────────────
+// lhIpRanges.annotate(container): badges every [data-ip] element and every table column headed
+// "IP" / "Client IP" inside container, and adds a "Fronted by" banner when most IPs are one CDN.
+window.lhIpRanges = (function () {
+  function esc(value) {
+    return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+  }
+
+  function collectTargets(container) {
+    const targets = [];
+    container.querySelectorAll('[data-ip]').forEach(el => targets.push({ el, ip: el.getAttribute('data-ip') }));
+    container.querySelectorAll('table').forEach(table => {
+      const headers = Array.from(table.querySelectorAll('tr:first-child th, thead th'));
+      const col = headers.findIndex(th => /^(client\s*)?ip(\s*address)?$/i.test(th.textContent.trim()));
+      if (col < 0) return;
+      table.querySelectorAll('tbody tr, tr').forEach(tr => {
+        const cell = tr.children[col];
+        if (cell && cell.tagName === 'TD') targets.push({ el: cell, ip: cell.textContent.trim() });
+      });
+    });
+    // Elements already looked up carry data-ip-checked, so polling re-renders cost nothing.
+    return targets.filter(t => t.ip && !t.el.hasAttribute('data-ip-checked'));
+  }
+
+  function bannerText(fronted) {
+    const pct = Math.round(fronted.share * 100);
+    return fronted.level === 'confirmed'
+      ? `Fronted by ${fronted.provider} (${pct}% of these IPs). These are CDN edges, not users: use IIS IP summary for the real client IPs.`
+      : `Likely fronted by ${fronted.provider} (${pct}% of these IPs). Check IIS OriginalIP before blocking.`;
+  }
+
+  async function annotate(container) {
+    if (!container) return null;
+    const targets = collectTargets(container);
+    if (targets.length === 0) return null;
+    targets.forEach(t => t.el.setAttribute('data-ip-checked', ''));
+    container.querySelectorAll('.ip-ranges-banner').forEach(b => b.remove());
+
+    const response = await fetch('/api/ip-ranges/lookup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ ips: targets.map(t => t.ip) })
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const byIp = new Map((payload.results || []).map(r => [r.ip.toLowerCase(), r]));
+
+    targets.forEach(t => {
+      const hit = byIp.get(t.ip.toLowerCase());
+      if (!hit || t.el.querySelector('.ip-badge')) return;
+      const badge = document.createElement('span');
+      badge.className = `ip-badge ip-badge--${hit.category.toLowerCase()}`;
+      badge.textContent = hit.badge;
+      t.el.appendChild(badge);
+    });
+
+    if (payload.fronted && payload.fronted.level !== 'none') {
+      const banner = document.createElement('div');
+      banner.className = 'ip-ranges-banner';
+      banner.innerHTML = esc(bannerText(payload.fronted));
+      container.prepend(banner);
+    }
+    return payload;
+  }
+
+  return { annotate };
+})();
+
+function initializeIpRangesPage() {
+  if (!document.querySelector('[data-ip-ranges-page]')) return;
+  const esc = v => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  const fmt = v => v ? new Date(v).toISOString().replace('T', ' ').substring(0, 16) + ' UTC' : 'never';
+
+  function render(status) {
+    // Same numbers as the table below: providers that delivered data, and ranges as published.
+    const loaded = status.feeds.filter(f => f.rangeCount > 0);
+    const providers = new Set(loaded.map(f => f.provider)).size;
+    const ranges = loaded.reduce((sum, f) => sum + Number(f.rangeCount), 0);
+    document.getElementById('ipRangesSummary').textContent = status.refreshing
+      ? 'Refreshing…'
+      : `${providers} providers · ${ranges.toLocaleString('en-US')} ranges · oldest feed ${status.label}`;
+    const rows = status.feeds.map(f => `
+      <tr><td>${esc(f.provider)}</td><td>${esc(f.id)}</td><td class="num">${Number(f.rangeCount).toLocaleString('en-US')}</td>
+        <td>${esc(fmt(f.lastSuccessUtc))}</td><td>${f.lastError ? esc(f.lastError) : 'OK'}</td></tr>`).join('');
+    document.getElementById('ipRangesTable').innerHTML = `
+      <table class="mini-table"><tr><th>Provider</th><th>Feed</th><th>Ranges</th><th>Last updated</th><th>Last result</th></tr>${rows}</table>`;
+  }
+
+  async function load(method) {
+    const response = await fetch(method === 'POST' ? '/api/ip-ranges/refresh' : '/api/ip-ranges/status', { method });
+    render(await response.json());
+  }
+
+  const button = document.getElementById('ipRangesRefresh');
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    document.getElementById('ipRangesSummary').textContent = 'Refreshing…';
+    try { await load('POST'); } finally { button.disabled = false; }
+  });
+  load('GET').catch(() => {});
+
+  const providerInput = document.getElementById('ipRangesCustomProvider');
+  const rangesInput = document.getElementById('ipRangesCustomText');
+  const info = document.getElementById('ipRangesCustomInfo');
+
+  async function saveCustom(provider, ranges) {
+    const response = await fetch('/api/ip-ranges/custom', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, ranges })
+    });
+    const result = await response.json();
+    info.textContent = result.saved > 0
+      ? `${result.saved} range(s) saved.${result.invalid.length ? ` Ignored: ${result.invalid.join(', ')}` : ''}`
+      : (result.invalid.length ? `Nothing saved. Ignored: ${result.invalid.join(', ')}` : 'Customer ranges cleared.');
+    await load('GET');
+  }
+
+  document.getElementById('ipRangesCustomSave').addEventListener('click', () =>
+    saveCustom(providerInput.value, rangesInput.value).catch(err => { info.textContent = String(err); }));
+  document.getElementById('ipRangesCustomClear').addEventListener('click', () => {
+    rangesInput.value = '';
+    saveCustom(providerInput.value, '').catch(err => { info.textContent = String(err); });
+  });
+
+  fetch('/api/ip-ranges/custom').then(r => r.json()).then(c => {
+    providerInput.value = c.ranges ? c.provider : '';
+    rangesInput.value = c.ranges || '';
+  }).catch(() => {});
+}
+
 function initializeShell() {
   initializeTheme();
   loadAppInfo().catch(() => {});
   startAppInfoPolling();
   initializeSqliteViewerCard();
+  initializeIpRangesPage();
 }
 
 if (document.readyState === 'loading') {

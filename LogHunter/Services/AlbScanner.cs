@@ -159,7 +159,7 @@ public static class AlbScanner
 
     // request example:
     // POST https://host:443/Enrollment/CheckStatus.aspx HTTP/1.1
-    private static string ExtractUriNoQueryFromRequest(ReadOnlySpan<char> request)
+    internal static string ExtractUriNoQueryFromRequest(ReadOnlySpan<char> request)
     {
         if (request.Length == 0)
             return "";
@@ -195,7 +195,7 @@ public static class AlbScanner
         return url.ToString();
     }
 
-    private static bool TryGetToken(ReadOnlySpan<char> line, int tokenIndex, out ReadOnlySpan<char> token)
+    internal static bool TryGetToken(ReadOnlySpan<char> line, int tokenIndex, out ReadOnlySpan<char> token)
     {
         token = default;
 

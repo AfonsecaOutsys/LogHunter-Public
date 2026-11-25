@@ -240,7 +240,7 @@ public static class IisW3cReader
         }
     }
 
-    private static Stream OpenPossiblyGz(string filePath)
+    internal static Stream OpenPossiblyGz(string filePath)
     {
         // Big buffer + SequentialScan makes Windows much happier on multi-GB log scans.
         var fs = new FileStream(

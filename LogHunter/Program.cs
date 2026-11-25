@@ -268,6 +268,9 @@ internal static class Program
 
             EmbeddedAssets.EnsureTabulatorAssets(root);
 
+            // CDN / proxy ranges: load the cached copy, refresh stale feeds in the background.
+            IpIntelStore.Initialize();
+
             var session = new SessionState(root);
             var updateCheck = await ReleaseUpdateChecker.CheckAsync(version).ConfigureAwait(false);
             ReleaseUpdateChecker.ShowStartupNotice(updateCheck, consoleMode);
