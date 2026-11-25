@@ -46,6 +46,11 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 2.0.0.5
+
+- Anonymous usage counts: each launch sends one start event, and each workflow run sends one event, to an internal service. What is sent: a random install id, a random id for the launch, the app version, the mode (`web` or `console`) and the workflow name. No user name, machine name, file paths, IPs or log content. Sent in the background, never slows the tool down, fails silently when offline. Set `LOGHUNTER_NO_USAGE=1` to turn it off (see "Usage counts" below).
+- The console shows one line at start saying usage counts are on and how to turn them off. Nothing changes in the web UI.
+
 ### 2.0.0.4
 
 - New **IP sweep** workflow (ALB and IIS pages): paste any number of IPs, CIDR blocks or IP ranges and check them across several log folders in one run. Per target: hit or no hit, first and last seen, matched IPs, top paths, status codes and which environment it hit. Produces a customer-safe HTML report (scope, caveats, CDN labels) and an Excel workbook, with hand-offs to IP Summary (same folder) and AbuseIPDB (CDN edges skipped). The 10-IP limit stays on IP Summary only.
