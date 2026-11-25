@@ -191,6 +191,7 @@ public static class AlbDownload
         // -----------------------------
         // Run folder under ALB
         // -----------------------------
+        UsageReporter.Track(UsageFeature.AlbDownload);
         var runFolder = BuildRunFolder(cfg.Name, startUtc, endUtc);
         Directory.CreateDirectory(runFolder);
 

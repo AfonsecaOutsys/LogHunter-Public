@@ -65,6 +65,7 @@ public static partial class AlbOptions
 
         try
         {
+            UsageReporter.Track(UsageFeature.AlbTop50AvgDuration);
             await RunScanWithProgressParallelAsync(
                 title: "Scanning ALB logs (Ctrl+C to cancel)",
                 files: files,

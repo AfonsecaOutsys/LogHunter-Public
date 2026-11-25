@@ -103,6 +103,8 @@ internal static class IisApi
                 return true;
             }
 
+            UsageReporter.Track(UsageFeature.IisIpSummary);
+
             await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
             return true;
         }
@@ -311,6 +313,8 @@ internal static class IisApi
                 return true;
             }
 
+            UsageReporter.Track(UsageFeature.IisStatusPivot);
+
             await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
             return true;
         }
@@ -389,6 +393,8 @@ internal static class IisApi
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
+
+            UsageReporter.Track(UsageFeature.IisBurstPatterns);
 
             await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
             return true;
@@ -518,6 +524,8 @@ internal static class IisApi
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
+
+            UsageReporter.Track(string.Equals(body.Mode, "uploads", StringComparison.OrdinalIgnoreCase) ? UsageFeature.IisUploadsPayloads : UsageFeature.IisTopBandwidth);
 
             await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
             return true;

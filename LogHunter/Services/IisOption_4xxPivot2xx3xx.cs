@@ -51,6 +51,7 @@ public static class IisOption_4xxPivot2xx3xx
             "ELB-HealthChecker/",
         };
 
+        UsageReporter.Track(UsageFeature.IisStatusPivot);
         await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
             .StartAsync($"Pass 1/2: scanning {filter.DisplayLabel}...", async ctx =>

@@ -133,6 +133,7 @@ public static partial class AlbOptions
         // so the merged counts are identical to the sequential scan.
         var selectedIps = new HashSet<string>(ips, StringComparer.Ordinal);
 
+        UsageReporter.Track(UsageFeature.AlbRequestsOverTime);
         await RunScanWithProgressParallelAsync(
             title: "Scanning ALB logs",
             files: files,

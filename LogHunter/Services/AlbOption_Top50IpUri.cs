@@ -44,6 +44,7 @@ public static partial class AlbOptions
 
         var pairCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
+        UsageReporter.Track(UsageFeature.AlbTop50IpsByUri);
         await RunScanWithProgressParallelAsync(
             title: "Scanning ALB logs",
             files: files,

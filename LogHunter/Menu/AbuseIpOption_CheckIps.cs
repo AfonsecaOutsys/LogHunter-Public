@@ -14,6 +14,7 @@ public sealed partial class AbuseIpMenu
 {
     private async Task CheckIpsAsync(List<string> ipsToCheck, string sourceLabel, CancellationToken ct)
     {
+        UsageReporter.Track(UsageFeature.AbuseIpDbCheck);
         ConsoleEx.Header("AbuseIPDB: running checks", $"{sourceLabel} | IPs: {ipsToCheck.Count}");
 
         var cfg = AbuseIpDbClient.LoadConfig(_session.Root);

@@ -54,6 +54,7 @@ public static class IisOption_BytesIntel
         var ipAgg = new Dictionary<string, IpBandwidthAgg>(StringComparer.OrdinalIgnoreCase);
         var ipClassCache = new Dictionary<string, IpClass>(StringComparer.OrdinalIgnoreCase);
 
+        UsageReporter.Track(UsageFeature.IisTopBandwidth);
         await ScanBandwidthPass1Async(files, ipAgg, ipClassCache, ct).ConfigureAwait(false);
 
         if (ipAgg.Count == 0)
@@ -146,6 +147,7 @@ public static class IisOption_BytesIntel
         var ipAgg = new Dictionary<string, UploadAgg>(StringComparer.OrdinalIgnoreCase);
         var ipClassCache = new Dictionary<string, IpClass>(StringComparer.OrdinalIgnoreCase);
 
+        UsageReporter.Track(UsageFeature.IisUploadsPayloads);
         await ScanUploadsPass1Async(files, ipAgg, ipClassCache, ct).ConfigureAwait(false);
 
         if (ipAgg.Count == 0)

@@ -29,6 +29,7 @@ public static class AlbIpSummarySqliteViewerLauncher
             };
 
             _ = Process.Start(startInfo);
+            UsageReporter.Track(UsageFeature.ToolsSqliteViewer);
             return true;
         }
         catch

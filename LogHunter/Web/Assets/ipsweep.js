@@ -131,7 +131,7 @@
     try {
       const result = await fetchJson('/api/ip-sweep/run', {
         method: 'POST',
-        body: JSON.stringify({ targets, sources: sources.map(s => ({ label: s.label, path: s.path })) })
+        body: JSON.stringify({ targets, sources: sources.map(s => ({ label: s.label, path: s.path })), section: moduleBase().substring(1) })
       });
       render(result.snapshot);
       startPolling();

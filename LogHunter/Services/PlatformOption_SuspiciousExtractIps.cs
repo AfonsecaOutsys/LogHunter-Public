@@ -26,6 +26,7 @@ public static partial class PlatformOptions
         }
 
         PlatformSuspiciousScanResult result = null!;
+        UsageReporter.Track(UsageFeature.PlatformSuspiciousIps);
         await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
             .StartAsync("Processing platform logs...", async ctx =>

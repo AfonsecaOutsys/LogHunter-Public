@@ -62,6 +62,8 @@ internal static class PlatformApi
                 return true;
             }
 
+            UsageReporter.Track(UsageFeature.PlatformSuspiciousIps);
+
             await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
             return true;
         }
@@ -109,6 +111,8 @@ internal static class PlatformApi
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
+
+            UsageReporter.Track(UsageFeature.PlatformAuthActivity);
 
             await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
             return true;
