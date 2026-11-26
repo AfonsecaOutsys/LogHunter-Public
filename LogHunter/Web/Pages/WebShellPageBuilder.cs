@@ -11,11 +11,11 @@ internal static class WebShellPageBuilder
 {
     private static readonly WebPageDefinition[] Pages =
     [
-        new("/", "/", "Home", "LogHunter 2.0", "Local Web UI", "Start here to navigate the new browser-based shell for LogHunter."),
-        new("/alb", "/alb", "ALB", "ALB", "Module Landing", "AWS Application Load Balancer workflows and future drill-down flows."),
+        new("/", "/", "Home", "LogHunter 2.0", "Local Web UI", "ALB, IIS, platform log and IP reputation workflows."),
+        new("/alb", "/alb", "ALB", "ALB", "Module Landing", "Top IPs, IP summaries, request timelines, WAF and latency checks on ALB logs."),
         new("/iis", "/iis", "IIS", "IIS", "Module Landing", "W3C log analysis, IP summaries, status pivots, burst detection, bandwidth, and payload investigation."),
-        new("/platform-logs", "/platform-logs", "Platform Logs", "Platform Logs", "Section Placeholder", "Future home for platform log review, suspicious patterns, and authenticated activity checks."),
-        new("/abuseipdb", "/abuseipdb", "AbuseIPDB", "AbuseIPDB", "Section Placeholder", "Future home for IP reputation lookups and export workflows.")
+        new("/platform-logs", "/platform-logs", "Platform Logs", "Platform Logs", "Module Landing", "Suspicious request patterns and authenticated activity in platform log exports."),
+        new("/abuseipdb", "/abuseipdb", "AbuseIPDB", "AbuseIPDB", "Module Landing", "IP reputation lookups with CSV export.")
     ];
 
     public static bool TryBuildPage(WebAppContext context, string path, out string html)
@@ -49,6 +49,14 @@ internal static class WebShellPageBuilder
             var ipRangesPage = new WebPageDefinition("/ip-ranges", "/ip-ranges", "IP ranges", "IP ranges", "CDN and proxy ranges",
                 "Vendor-published CDN, WAF and corporate proxy ranges used to label IPs in results. Refreshed every 24 hours.");
             html = BuildLayout(context, ipRangesPage, BuildIpRangesContent(), null);
+            return true;
+        }
+
+        if (FeedbackSender.IsAvailable && string.Equals(path, "/feedback", StringComparison.OrdinalIgnoreCase))
+        {
+            var feedbackPage = new WebPageDefinition("/feedback", "/feedback", "Feedback", "Feedback", "Report a problem",
+                "Pick the page and say what went wrong.");
+            html = BuildLayout(context, feedbackPage, BuildFeedbackContent(), null);
             return true;
         }
 
@@ -113,8 +121,57 @@ internal static class WebShellPageBuilder
       </section>
 """;
 
+    private static string BuildFeedbackContent()
+    {
+        var options = string.Concat(FeedbackSender.Areas.Select(a => $"""<option value="{Html(a.Key)}">{Html(a.Label)}</option>"""));
+        return $$"""
+      <section class="stack" data-feedback-page="true" data-min="{{FeedbackSender.MinLength}}" data-max="{{FeedbackSender.MaxLength}}">
+        <section class="panel form-panel">
+          <div class="field">
+            <label for="feedbackArea">Page</label>
+            <select id="feedbackArea"><option value="" selected disabled>Choose a page</option>{{options}}</select>
+          </div>
+          <div class="field">
+            <label for="feedbackText">What went wrong</label>
+            <textarea id="feedbackText" rows="8" maxlength="{{FeedbackSender.MaxLength}}"></textarea>
+            <div class="footer-note"><span id="feedbackCount">0 / {{FeedbackSender.MaxLength}}</span> · Don't include customer data, IPs or log lines.</div>
+          </div>
+          <div class="button-row">
+            <button id="feedbackSend" class="button-link primary button-like compact" type="button" disabled>Send feedback</button>
+          </div>
+          <div id="feedbackInfo" class="footer-note" role="status"></div>
+        </section>
+{{BuildUsageToggle()}}
+      </section>
+""";
+    }
+
+    // On/Off for anonymous usage counts, shown only in builds that can send them.
+    private static string BuildUsageToggle()
+    {
+        if (!UsageReporter.IsAvailable)
+            return string.Empty;
+
+        var on = UsageReporter.IsEnabled;
+        return $$"""
+        <section class="panel form-panel" data-usage-settings="true">
+          <div class="field-group source-group">
+            <label class="field-label">Anonymous usage counts</label>
+            <div class="button-row source-action-row" role="radiogroup" aria-label="Anonymous usage counts">
+              <button id="usageOn" class="source-btn{{(on ? " active" : string.Empty)}}" type="button" role="radio" aria-checked="{{(on ? "true" : "false")}}">On</button>
+              <button id="usageOff" class="source-btn{{(on ? string.Empty : " active")}}" type="button" role="radio" aria-checked="{{(on ? "false" : "true")}}">Off</button>
+            </div>
+            <div class="footer-note">App version, web or console, and which workflow ran.</div>
+          </div>
+        </section>
+""";
+    }
+
     private static string BuildLayout(WebAppContext context, WebPageDefinition page, string mainContent, string? extraScriptPath)
     {
+        var feedbackPill = FeedbackSender.IsAvailable
+            ? $"""          <a id="feedbackPill" class="topbar-link{(page.Path == "/feedback" ? " active" : string.Empty)}" href="/feedback">Feedback</a>"""
+            : string.Empty;
         var pills = string.Join(Environment.NewLine, Pages.Select(x => BuildTopbarLink(x, page.NavigationPath)));
         var title = Html(page.Path == "/" ? page.Title : $"{page.Title} | {context.AppName}");
         var extraScript = string.IsNullOrWhiteSpace(extraScriptPath)
@@ -163,6 +220,7 @@ internal static class WebShellPageBuilder
             <strong data-app-info="ipRanges">…</strong>
           </a>
           <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to light theme">Switch to light</button>
+{{feedbackPill}}
         </div>
       </div>
 
@@ -243,41 +301,8 @@ internal static class WebShellPageBuilder
     {
         return $$"""
       <section class="stack">
-        <section class="hero">
-          <div class="page-header">
-            <div class="eyebrow">{{Html(page.Eyebrow)}}</div>
-            <h1>{{Html(page.Title)}}</h1>
-            <p class="page-copy">{{Html(page.Description)}}</p>
-            <div class="kicker-row">
-              <div class="kicker">Scaffolded navigation</div>
-              <div class="kicker">Ready for API wiring</div>
-              <div class="kicker">Console workflows preserved</div>
-            </div>
-          </div>
-        </section>
-
-        <section class="placeholder-grid">
-          <div class="placeholder-card">
-            <h3>What belongs here</h3>
-            <p>This section is the future web landing area for the existing {{Html(page.NavigationLabel)}} workflows and related drill-down pages.</p>
-          </div>
-          <div class="placeholder-card">
-            <h3>Current state</h3>
-            <p>No business logic has been migrated into this section yet. The page exists to lock in structure, routing, layout, and future composition points.</p>
-          </div>
-          <div class="placeholder-card">
-            <h3>Migration target</h3>
-            <p>Next steps can attach focused JSON endpoints, progress reporting, and form-driven actions without reworking the shell again.</p>
-          </div>
-        </section>
-
         <section class="panel">
-          <h2>Suggested next move for this section</h2>
-          <ul class="list-clean">
-            <li>Create a minimal section-specific API controller.</li>
-            <li>Expose one read-only summary or status call.</li>
-            <li>Port one vertical slice end-to-end before adding more pages.</li>
-          </ul>
+          <p class="page-copy">Pick a workflow from the navigation.</p>
         </section>
       </section>
 """;

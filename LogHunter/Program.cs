@@ -202,6 +202,7 @@ internal static class Program
             var root = string.IsNullOrWhiteSpace(rootOverride)
                 ? AppContext.BaseDirectory
                 : Path.GetFullPath(rootOverride);
+            AppFolders.UseRoot(root);
 
             if (!string.IsNullOrWhiteSpace(albDownloadJobPath))
             {
@@ -268,6 +269,7 @@ internal static class Program
 
             // Anonymous usage counts (child-process paths returned earlier, so they never count as starts).
             UsageReporter.Start(version, consoleMode ? "console" : "web");
+            FeedbackSender.Start(version, consoleMode ? "console" : "web");
             if (UsageReporter.IsEnabled)
             {
                 Console.ForegroundColor = ConsoleColor.DarkGray;

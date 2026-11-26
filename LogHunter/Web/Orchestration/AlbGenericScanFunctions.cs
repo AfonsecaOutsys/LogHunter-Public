@@ -143,7 +143,6 @@ internal static class AlbGenericScanFunctions
             wb.SaveAs(excelPath);
         }
 
-        var totalHits = top.Sum(x => (long)x.Hits);
         var rows = top.Select(x => new AlbGenericResultRow(
             new[] { x.Rank.ToString(), x.IP, x.Hits.ToString("N0", CultureInfo.InvariantCulture) })).ToList();
 
@@ -152,7 +151,7 @@ internal static class AlbGenericScanFunctions
             ExportPath: excelPath,
             Rows: rows,
             Columns: new[] { "Rank", "IP", "Hits" },
-            TotalMatches: totalHits,
+            TotalMatches: ipCounts.Count, // the "IPs" pill: unique IPs, as in the message
             FirstHitUtc: null,
             LastHitUtc: null,
             FilesWithHits: files.Count,
@@ -166,12 +165,21 @@ internal static class AlbGenericScanFunctions
         string outputFolder,
         Action<string, int, int, string> reportProgress)
     {
-        var pairCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var rawPairCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
         for (var i = 0; i < files.Count; i++)
         {
-            await AlbScanner.ScanFileForIpUriCountsAsync(files[i], pairCounts, _ => { }).ConfigureAwait(false);
+            await AlbScanner.ScanFileForIpUriCountsAsync(files[i], rawPairCounts, _ => { }).ConfigureAwait(false);
             reportProgress($"Scanning ALB logs: {i + 1} / {files.Count} files.", i + 1, files.Count, "scanning");
+        }
+
+        // Same path with a different case or trailing slash is one URI on OutSystems.
+        var pairCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, hits) in rawPairCounts)
+        {
+            var tab = key.IndexOf('\t');
+            var normalized = tab > 0 ? key[..(tab + 1)] + NormalizeUri(key[(tab + 1)..]) : key;
+            pairCounts[normalized] = pairCounts.TryGetValue(normalized, out var cur) ? cur + hits : hits;
         }
 
         if (pairCounts.Count == 0)
@@ -230,7 +238,6 @@ internal static class AlbGenericScanFunctions
             wb.SaveAs(excelPath);
         }
 
-        var totalHits = top.Sum(x => (long)x.Hits);
         var rows = top.Select(x => new AlbGenericResultRow(
             new[] { x.Rank.ToString(), x.IP, x.URI, x.Hits.ToString("N0", CultureInfo.InvariantCulture) })).ToList();
 
@@ -239,7 +246,7 @@ internal static class AlbGenericScanFunctions
             ExportPath: excelPath,
             Rows: rows,
             Columns: new[] { "Rank", "IP", "URI", "Hits" },
-            TotalMatches: totalHits,
+            TotalMatches: pairCounts.Count, // the "Pairs" pill: unique IP+URI pairs
             FirstHitUtc: null,
             LastHitUtc: null,
             FilesWithHits: files.Count,
@@ -260,7 +267,7 @@ internal static class AlbGenericScanFunctions
         string outputFolder,
         Action<string, int, int, string> reportProgress)
     {
-        var stats = new Dictionary<string, UriAgg>(StringComparer.Ordinal);
+        var stats = new Dictionary<string, UriAgg>(StringComparer.OrdinalIgnoreCase);
 
         for (var i = 0; i < files.Count; i++)
         {
@@ -326,7 +333,6 @@ internal static class AlbGenericScanFunctions
             wb.SaveAs(excelPath);
         }
 
-        var totalCount = results.Sum(x => x.Count);
         var rows = results.Select(x => new AlbGenericResultRow(
             new[]
             {
@@ -342,11 +348,20 @@ internal static class AlbGenericScanFunctions
             ExportPath: excelPath,
             Rows: rows,
             Columns: new[] { "Rank", "AVG (s)", "Count", "MAX (s)", "URI" },
-            TotalMatches: totalCount,
+            TotalMatches: stats.Count, // the "URIs" pill: unique URIs
             FirstHitUtc: null,
             LastHitUtc: null,
             FilesWithHits: files.Count,
             ChartHtmlPath: null);
+    }
+
+    // "/App/Page/" and "/App/Page" are the same page; the root "/" stays as is.
+    internal static string NormalizeUri(string uri)
+    {
+        if (uri.Length <= 1 || !uri.EndsWith('/'))
+            return uri;
+        var trimmed = uri.TrimEnd('/');
+        return trimmed.Length == 0 ? "/" : trimmed;
     }
 
     private static async Task ScanFileForDurationStatsAsync(string filePath, Dictionary<string, UriAgg> stats)
@@ -365,6 +380,7 @@ internal static class AlbGenericScanFunctions
 
             var uri = AlbScanner.ExtractAlbUriNoQuery(line);
             if (string.IsNullOrEmpty(uri)) continue;
+            uri = NormalizeUri(uri);
 
             if (!stats.TryGetValue(uri, out var agg))
                 agg = default;
@@ -405,7 +421,7 @@ internal static class AlbGenericScanFunctions
                     CompletionMessage: "No matches found for the selected IPs.",
                     ExportPath: null,
                     Rows: Array.Empty<AlbGenericResultRow>(),
-                    Columns: new[] { "BucketStartUtc" }.Concat(ips).ToArray(),
+                    Columns: new[] { "Bucket (UTC)" }.Concat(ips).ToArray(),
                     TotalMatches: 0,
                     FirstHitUtc: null,
                     LastHitUtc: null,
@@ -476,7 +492,7 @@ internal static class AlbGenericScanFunctions
                 CompletionMessage: $"Scan complete. {totalHits:N0} total hits across {ips.Count} IPs in {allBuckets.Count} time buckets.",
                 ExportPath: null,
                 Rows: rows,
-                Columns: new[] { "BucketStartUtc" }.Concat(ips).ToArray(),
+                Columns: new[] { "Bucket (UTC)" }.Concat(ips).ToArray(),
                 TotalMatches: totalHits,
                 FirstHitUtc: times.First().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                 LastHitUtc: times.Last().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
@@ -529,7 +545,7 @@ internal static class AlbGenericScanFunctions
         Action<string, int, int, string> reportProgress)
     {
         var counters = new WafCounters();
-        var blockedCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var blockedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         for (var i = 0; i < files.Count; i++)
         {
@@ -623,7 +639,7 @@ internal static class AlbGenericScanFunctions
                 var ip = AlbScanner.ExtractAlbClientIp(line);
                 if (ip is not null)
                 {
-                    var uri = AlbScanner.ExtractAlbUriNoQuery(line) ?? "";
+                    var uri = NormalizeUri(AlbScanner.ExtractAlbUriNoQuery(line) ?? "");
                     var key = $"{ip}\t{uri}";
 
                     if (blockedCounts.TryGetValue(key, out var cur))
@@ -653,7 +669,7 @@ internal static class AlbGenericScanFunctions
         if (buckets.Count == 0)
         {
             return new AlbGenericScanResult(
-                CompletionMessage: "No blocked entries found (per current definition).",
+                CompletionMessage: "No WAF-blocked requests found.",
                 ExportPath: null,
                 Rows: Array.Empty<AlbGenericResultRow>(),
                 Columns: new[] { "MinuteUtc", "Blocked" },

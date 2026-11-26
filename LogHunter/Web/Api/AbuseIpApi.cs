@@ -69,20 +69,14 @@ internal static class AbuseIpApi
                 return true;
             }
 
-            var validIps = new List<string>();
-            foreach (var raw in body.Ips)
-            {
-                var trimmed = raw?.Trim();
-                if (string.IsNullOrWhiteSpace(trimmed)) continue;
-                if (!IPAddress.TryParse(trimmed, out var parsed)) continue;
-                var normalized = parsed.ToString();
-                if (!validIps.Contains(normalized, StringComparer.OrdinalIgnoreCase))
-                    validIps.Add(normalized);
-            }
+            var (validIps, ignoredIps) = LogHunter.Utils.IpTargetParser.ParseIpList(body.Ips);
+            // Private, loopback and reserved addresses would only spend AbuseIPDB quota.
+            var skippedIps = validIps.Where(IsNotPublic).ToList();
+            validIps.RemoveAll(IsNotPublic);
 
             if (validIps.Count == 0)
             {
-                await WriteJsonAsync(context.Response, new { ok = false, error = "No valid IP addresses found." }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                await WriteJsonAsync(context.Response, new { ok = false, error = NoValidIpsMessage(ignoredIps, skippedIps), ignored = ignoredIps, skipped = skippedIps }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
 
@@ -97,7 +91,7 @@ internal static class AbuseIpApi
 
             UsageReporter.Track(UsageFeature.AbuseIpDbCheck);
 
-            await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
+            await WriteJsonAsync(context.Response, new { ok = true, snapshot, ignored = ignoredIps, skipped = skippedIps }).ConfigureAwait(false);
             return true;
         }
 
@@ -298,4 +292,17 @@ internal static class AbuseIpApi
         bool? ClearApiKey,
         int? MaxAgeInDays,
         bool? Verbose);
+
+    // "No valid IP addresses found. Ignored input: abc, 999.1.1.1"
+    private static string NoValidIpsMessage(IReadOnlyList<string> ignored, IReadOnlyList<string>? skipped = null)
+    {
+        var message = "No valid IP addresses found.";
+        if (ignored.Count > 0) message += " Ignored input: " + string.Join(", ", ignored) + ".";
+        if (skipped is { Count: > 0 }) message += " Skipped private/reserved: " + string.Join(", ", skipped) + ".";
+        return message;
+    }
+
+    private static bool IsNotPublic(string ip) =>
+        IisClientIpResolver.IsPrivateOrLoopback(ip)
+        || (IPAddress.TryParse(ip, out var a) && a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && a.GetAddressBytes()[0] >= 224); // multicast / reserved
 }

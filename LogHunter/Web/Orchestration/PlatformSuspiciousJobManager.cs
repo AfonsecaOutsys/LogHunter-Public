@@ -131,13 +131,16 @@ internal sealed class PlatformSuspiciousJobManager
                         .ToList(),
                     StringComparer.OrdinalIgnoreCase);
 
+            var skippedFiles = result.FilesSkipped.Select(f => $"{f.File}: {f.Reason}").ToList();
+
             Update(jobId, s => s with
             {
                 State = "completed",
                 Phase = "completed",
-                Message = result.MatchedRows > 0
-                    ? $"Found {result.MatchedRows} suspicious rows across {result.FilesMatched} files. {result.DistinctEffectiveIps} distinct IPs."
-                    : "No matching suspicious rows were found.",
+                Message = BuildCompletionMessage(result),
+                MatchedRowsWithoutIp = result.MatchedRowsWithoutIp,
+                RowsUnparsed = result.RowsUnparsed,
+                FilesSkipped = skippedFiles,
                 UpdatedUtc = DateTime.UtcNow,
                 CurrentStep = result.FilesScanned,
                 TotalSteps = result.FilesScanned,
@@ -167,6 +170,32 @@ internal sealed class PlatformSuspiciousJobManager
             });
         }
     }
+
+    // Never say "no matches" when rows matched but carried no client IP, or files couldn't be read.
+    internal static string BuildCompletionMessage(PlatformSuspiciousScanResult result)
+    {
+        var parts = new List<string>();
+        parts.Add(result.MatchedRows > 0
+            ? $"Found {Count(result.MatchedRows, "suspicious row")} in {Count(result.FilesMatched, "file")}: {Count(result.DistinctEffectiveIps, "distinct IP")}."
+            : "0 IPs extracted.");
+
+        if (result.MatchedRowsWithoutIp > 0)
+        {
+            var byFile = string.Join(", ", result.MatchedRowsWithoutIpByFile.Select(kv => $"{kv.Key}: {kv.Value:N0}"));
+            parts.Add($"{Count(result.MatchedRowsWithoutIp, "row")} matched but had no client IP ({byFile}).");
+        }
+
+        // One sentence per reason: ODC exports skip the same 4 files on every scan, so don't repeat the reason.
+        foreach (var group in result.FilesSkipped.GroupBy(f => f.Reason))
+            parts.Add($"{Count(group.Count(), "file")} skipped ({group.Key}): {string.Join(", ", group.Select(f => f.File))}.");
+
+        if (result.MatchedRows == 0 && result.MatchedRowsWithoutIp == 0 && result.FilesSkipped.Count == 0)
+            return "No matching suspicious rows were found.";
+
+        return string.Join(" ", parts);
+    }
+
+    private static string Count(int n, string noun) => $"{n:N0} {noun}{(n == 1 ? "" : "s")}";
 
     private void Update(string jobId, Func<PlatformSuspiciousJobSnapshot, PlatformSuspiciousJobSnapshot> update)
     {
@@ -252,7 +281,10 @@ internal sealed record PlatformSuspiciousJobSnapshot(
     int SelectionsAdded,
     int SelectionsUpdated,
     int CachedIpCount,
-    string? Error)
+    string? Error,
+    int MatchedRowsWithoutIp = 0,
+    int RowsUnparsed = 0,
+    IReadOnlyList<string>? FilesSkipped = null)
 {
     public static PlatformSuspiciousJobSnapshot CreateIdle()
         => new(

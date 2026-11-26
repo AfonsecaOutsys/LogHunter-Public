@@ -249,7 +249,8 @@ internal static class AlbIpExtractorHelper
         if (s.StartsWith('[') && s.EndsWith(']') && s.Length > 2)
             s = s[1..^1];
 
-        return IPAddress.TryParse(s, out _) ? s : null;
+        // Strict parser: a stray number like "12345" must not become 0.0.48.57.
+        return IpTargetParser.TryParseAddress(s, out _, out _) ? s : null;
     }
 
     internal sealed record IpHit(string Ip, int Hits);

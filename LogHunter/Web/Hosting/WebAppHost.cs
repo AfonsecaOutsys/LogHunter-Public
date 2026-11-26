@@ -203,6 +203,16 @@ internal sealed class WebAppHost : IDisposable
             return;
         }
 
+        if (await FeedbackApi.TryHandleAsync(context).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        if (await UsageApi.TryHandleAsync(context).ConfigureAwait(false))
+        {
+            return;
+        }
+
         if (string.Equals(path, "/api/viewer/browse-and-launch", StringComparison.OrdinalIgnoreCase))
         {
             await HandleViewerBrowseAndLaunchAsync(context).ConfigureAwait(false);

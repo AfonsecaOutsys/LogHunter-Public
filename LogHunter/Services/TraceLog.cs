@@ -189,7 +189,9 @@ internal static class TraceLog
             return 0;
 
         var path = request.Url?.AbsolutePath ?? "/";
-        if (string.Equals(path, "/api/trace", StringComparison.OrdinalIgnoreCase))
+        // The trace sink itself and the 4 s app-info heartbeat would drown the useful lines.
+        if (string.Equals(path, "/api/trace", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(path, "/api/app/info", StringComparison.OrdinalIgnoreCase))
             return 0;
 
         var requestId = Interlocked.Increment(ref _requestSequence);

@@ -187,7 +187,9 @@ Release builds send anonymous usage counts so we know which workflows are used:
 
 Nothing else is sent: no user name, machine name, file paths, IPs or log content. The call runs in the background, never slows the tool down, and fails silently when offline.
 
-To turn it off, set the environment variable `LOGHUNTER_NO_USAGE=1` before starting LogHunter.
+Usage counts are on by default. To turn them off, open **Feedback** (top right of the web UI) and set **Anonymous usage counts** to **Off**. The choice is saved in `config\usage-settings.json` and also applies to console mode. For scripted or managed setups, the environment variable `LOGHUNTER_NO_USAGE=1` turns them off regardless of the setting.
+
+**Feedback** sends the page you pick, your text, the install id, version and mode. It is only sent when you press Send, and the usage counts setting doesn't affect it.
 
 ---
 

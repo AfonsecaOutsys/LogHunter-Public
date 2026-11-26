@@ -1,4 +1,7 @@
 (function () {
+  // Errors show their message, not the raw "Error: ..." toString.
+  function errorText(err) { return err && err.message ? err.message : String(err); }
+
   let abuseipPolling = null;
   let abuseipJobId = '';
 
@@ -45,6 +48,7 @@
       return;
     }
 
+    node.classList.remove('is-note');
     if (!message) {
       node.textContent = '';
       node.hidden = true;
@@ -58,6 +62,23 @@
   function formatNumber(value) {
     var num = Number(value || 0);
     return num.toLocaleString('en-US');
+  }
+
+  // Server reports manual IP tokens it dropped (invalid) or did not send (private/reserved).
+  function ignoredInputNote(payload) {
+    var parts = [];
+    if (payload && payload.ignored && payload.ignored.length) parts.push('Ignored input: ' + payload.ignored.join(', '));
+    if (payload && payload.skipped && payload.skipped.length) parts.push('Skipped private/reserved (not sent): ' + payload.skipped.join(', '));
+    return parts.join(' | ');
+  }
+
+  // Shows an informational message in an error slot with neutral styling; setError clears it.
+  function showNote(id, msg) {
+    var node = byId(id);
+    if (!node) return;
+    node.textContent = msg || '';
+    node.hidden = !msg;
+    node.classList.toggle('is-note', !!msg);
   }
 
   function formatBytes(v) {
@@ -207,7 +228,7 @@
         }
       });
     } catch (err) {
-      setError('abuseipError', String(err));
+      setError('abuseipError', errorText(err));
     } finally {
       hideLoading();
     }
@@ -250,7 +271,7 @@
         }
       });
     } catch (err) {
-      setError('abuseipError', String(err));
+      setError('abuseipError', errorText(err));
     } finally {
       hideLoading();
     }
@@ -396,10 +417,11 @@
 
         abuseipJobId = data.snapshot ? data.snapshot.jobId : '';
         applyCheckSnapshot(data.snapshot);
+        showNote('abuseipError', ignoredInputNote(data));
         startPolling();
       })
       .catch(function (err) {
-        setError('abuseipError', 'Request failed: ' + err);
+        setError('abuseipError', 'Request failed: ' + errorText(err));
         if (runBtn) { runBtn.disabled = false; }
       });
   }
@@ -717,7 +739,7 @@
         setText('abuseipSettingsCurrentVerbose', data.verbose ? 'yes' : 'no');
       })
       .catch(function (err) {
-        setError('abuseipSettingsError', 'Request failed: ' + err);
+        setError('abuseipSettingsError', 'Request failed: ' + errorText(err));
       });
   }
 

@@ -1,4 +1,7 @@
 (function () {
+  // Errors show their message, not the raw "Error: ..." toString.
+  function errorText(err) { return err && err.message ? err.message : String(err); }
+
   function byId(id) {
     return document.getElementById(id);
   }
@@ -121,7 +124,9 @@
     var meta = byId('platformSuspiciousMeta');
     if (meta && state === 'completed') {
       meta.textContent = 'Files scanned: ' + fmt(snap.filesScanned) + ' | Files matched: ' + fmt(snap.filesMatched) +
-        ' | XFF: ' + fmt(snap.rowsWithXff) + ' | ClientIp only: ' + fmt(snap.rowsWithoutXff);
+        ' | XFF: ' + fmt(snap.rowsWithXff) + ' | ClientIp only: ' + fmt(snap.rowsWithoutXff) +
+        (snap.matchedRowsWithoutIp ? ' | Matched without IP: ' + fmt(snap.matchedRowsWithoutIp) : '') +
+        ((snap.filesSkipped || []).length ? ' | Files skipped: ' + fmt(snap.filesSkipped.length) : '');
     }
 
     renderSuspiciousResults(snap);
@@ -135,6 +140,21 @@
     }
   }
 
+  // 0 IPs extracted is not the same as "no matches": say what was matched without an IP or skipped.
+  function renderNoIpOverview(snap) {
+    var skipped = snap.filesSkipped || [];
+    if (!snap.matchedRowsWithoutIp && skipped.length === 0) {
+      return '<div class="footer-note">No suspicious rows matched.</div>';
+    }
+
+    var html =
+      '<div class="status-pill"><span>IPs extracted</span><strong>0</strong></div>' +
+      '<div class="status-pill"><span>Matched without IP</span><strong>' + fmt(snap.matchedRowsWithoutIp || 0) + '</strong></div>' +
+      '<div class="status-pill"><span>Files skipped</span><strong>' + fmt(skipped.length) + '</strong></div>';
+    // The details are already in the status message; don't print them a second time here.
+    return html;
+  }
+
   function renderSuspiciousResults(snap) {
     var section = byId('platformSuspiciousResults');
     if (!section) return;
@@ -144,7 +164,7 @@
       if (snap.state === 'completed') {
         setHidden(section, false);
         var overview = byId('platformSuspiciousOverview');
-        if (overview) overview.innerHTML = '<div class="footer-note">No suspicious rows matched.</div>';
+        if (overview) overview.innerHTML = renderNoIpOverview(snap);
       }
       return;
     }
@@ -247,11 +267,8 @@
 
   async function runSuspiciousScan() {
     setSuspiciousError('');
-    setText('platformSuspiciousState', 'running');
-    setText('platformSuspiciousPhase', 'queued');
-    setText('platformSuspiciousMessage', 'Starting suspicious request scan...');
-    setHidden(byId('platformSuspiciousResults'), true);
 
+    // Queued state only once the server accepts the run; a rejection leaves the panel idle.
     try {
       var payload = await fetchJson('/api/platform/suspicious/run', {
         method: 'POST'
@@ -259,20 +276,40 @@
 
       if (!payload.ok) {
         setSuspiciousError(payload.error || 'Failed to start scan.');
-        setText('platformSuspiciousState', 'idle');
         return;
       }
 
+      setText('platformSuspiciousState', 'running');
+      setText('platformSuspiciousPhase', 'queued');
+      setText('platformSuspiciousMessage', 'Starting suspicious request scan...');
+      setHidden(byId('platformSuspiciousResults'), true);
       renderSuspiciousSnapshot(payload.snapshot);
       startSuspiciousPolling();
     } catch (err) {
-      setSuspiciousError(String(err));
-      setText('platformSuspiciousState', 'idle');
+      setSuspiciousError(errorText(err));
     }
+  }
+
+  function formatBytes(v) {
+    var value = Number(v || 0);
+    if (!Number.isFinite(value) || value <= 0) return '0 B';
+    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var size = value, index = 0;
+    while (size >= 1024 && index < units.length - 1) { size /= 1024; index++; }
+    return (size >= 10 || index === 0 ? Math.round(size) : size.toFixed(1)) + ' ' + units[index];
+  }
+
+  // e.g. "C:\espaces\PlatformLogs | 6 files | 121 MB"
+  function renderFolderSummary(chipId, summary) {
+    var chip = byId(chipId);
+    if (!chip || !summary) return;
+    var n = summary.fileCount || 0;
+    chip.textContent = summary.path + ' | ' + n + ' file' + (n === 1 ? '' : 's') + ' | ' + formatBytes(summary.totalBytes || 0);
   }
 
   async function loadSuspiciousMeta() {
     var payload = await fetchJson('/api/platform/suspicious/meta', { method: 'GET', headers: { 'Accept': 'application/json' } });
+    renderFolderSummary('platformSuspiciousSourceChip', payload.folderSummary);
 
     if (payload.currentJob) {
       renderSuspiciousSnapshot(payload.currentJob);
@@ -286,7 +323,7 @@
     if (!document.querySelector('[data-platform-suspicious-page]')) return;
 
     byId('platformSuspiciousRun')?.addEventListener('click', runSuspiciousScan);
-    loadSuspiciousMeta().catch(function(err) { setSuspiciousError(String(err)); });
+    loadSuspiciousMeta().catch(function(err) { setSuspiciousError(errorText(err)); });
   }
 
   // ── Authenticated activity check ──────────────────────────────
@@ -297,8 +334,18 @@
   function setAuthError(msg) {
     var node = byId('platformAuthError');
     if (!node) return;
+    node.classList.remove('is-note');
     node.textContent = msg || '';
     node.hidden = !msg;
+  }
+
+  // "Ignored input" after a run that started is information, not an error: neutral styling.
+  function showAuthNote(msg) {
+    var node = byId('platformAuthError');
+    if (!node) return;
+    node.textContent = msg || '';
+    node.hidden = !msg;
+    node.classList.toggle('is-note', !!msg);
   }
 
   function renderAuthSnapshot(snap) {
@@ -464,11 +511,7 @@
       body.manualIps = ips;
     }
 
-    setText('platformAuthState', 'running');
-    setText('platformAuthPhase', 'queued');
-    setText('platformAuthMessage', 'Starting authenticated activity check...');
-    setHidden(byId('platformAuthResults'), true);
-
+    // Queued state only once the server accepts the run; a rejection leaves the panel idle.
     try {
       var payload = await fetchJson('/api/platform/auth/run', {
         method: 'POST',
@@ -477,20 +520,24 @@
 
       if (!payload.ok) {
         setAuthError(payload.error || 'Failed to start check.');
-        setText('platformAuthState', 'idle');
         return;
       }
 
+      setText('platformAuthState', 'running');
+      setText('platformAuthPhase', 'queued');
+      setText('platformAuthMessage', 'Starting authenticated activity check...');
+      setHidden(byId('platformAuthResults'), true);
       renderAuthSnapshot(payload.snapshot);
+      if (payload.ignored && payload.ignored.length) showAuthNote('Ignored input: ' + payload.ignored.join(', '));
       startAuthPolling();
     } catch (err) {
-      setAuthError(String(err));
-      setText('platformAuthState', 'idle');
+      setAuthError(errorText(err));
     }
   }
 
   async function loadAuthMeta() {
     var payload = await fetchJson('/api/platform/auth/meta', { method: 'GET', headers: { 'Accept': 'application/json' } });
+    renderFolderSummary('platformAuthSourceChip', payload.folderSummary);
 
     setText('platformAuthSuspiciousCount', fmt(payload.suspiciousCacheCount));
     setText('platformAuthAuthedCount', fmt(payload.authedCacheCount));
@@ -521,9 +568,9 @@
     byId('platformAuthSourceManual')?.addEventListener('click', function() { setAuthSource('manual'); });
     byId('platformAuthOpenExport')?.addEventListener('click', async function() {
       try { await fetchJson('/api/platform/auth/open-export', { method: 'POST' }); }
-      catch (err) { setAuthError(String(err)); }
+      catch (err) { setAuthError(errorText(err)); }
     });
-    loadAuthMeta().catch(function(err) { setAuthError(String(err)); });
+    loadAuthMeta().catch(function(err) { setAuthError(errorText(err)); });
   }
 
   // ── Authenticated IP cache view ───────────────────────────────

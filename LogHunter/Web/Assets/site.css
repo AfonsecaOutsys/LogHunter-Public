@@ -830,7 +830,8 @@ a.runtime-pill {
 
 .field input,
 .field select,
-.field textarea {
+.field textarea,
+.ip-sweep-label {
   width: 100%;
   padding: 12px 14px;
   border-radius: 14px;
@@ -845,7 +846,8 @@ a.runtime-pill {
 
 :root[data-theme='light'] .field input,
 :root[data-theme='light'] .field select,
-:root[data-theme='light'] .field textarea {
+:root[data-theme='light'] .field textarea,
+:root[data-theme='light'] .ip-sweep-label {
   background: rgba(255, 255, 255, 0.72);
 }
 
@@ -856,14 +858,16 @@ a.runtime-pill {
 
 .field input:hover,
 .field select:hover,
-.field textarea:hover {
+.field textarea:hover,
+.ip-sweep-label:hover {
   border-color: var(--line-cool-strong);
   background: color-mix(in srgb, var(--bg-input) 90%, white 10%);
 }
 
 .field input:focus,
 .field select:focus,
-.field textarea:focus {
+.field textarea:focus,
+.ip-sweep-label:focus {
   outline: none;
   border-color: var(--line-cool-strong);
   box-shadow:
@@ -1203,6 +1207,13 @@ a.runtime-pill {
   border: 1px solid rgba(255, 120, 120, 0.28);
   background: rgba(255, 120, 120, 0.12);
   color: #ffb3b3;
+}
+
+/* Same slot, informational: "Ignored input" after a run that succeeded is not an error. */
+.inline-error.is-note {
+  border-color: var(--line-cool);
+  background: var(--accent-soft);
+  color: var(--muted);
 }
 
 .inline-note {
@@ -1667,8 +1678,10 @@ a.runtime-pill {
 }
 
 .ip-sweep-label {
+  width: auto;
   min-width: 140px;
   max-width: 220px;
+  padding: 8px 12px;
 }
 
 .mini-table .uri-cell {

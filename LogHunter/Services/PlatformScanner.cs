@@ -57,9 +57,10 @@ public static class PlatformScanner
                 if (matchedThisFile)
                     res.FilesMatched++;
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Skip unreadable/broken files silently (exports can be messy).
+                // Exports can be messy: keep scanning, but report the file instead of dropping it silently.
+                res.SkipFile(file, $"unreadable ({ex.GetType().Name})");
             }
         }
 
@@ -88,10 +89,16 @@ public static class PlatformScanner
 
         var header = parser.ReadFields();
         if (header is null || header.Length == 0)
+        {
+            res.SkipFile(path, "empty file");
             return false;
+        }
 
         if (!TryResolveColumns(header, out var messageIdx, out var envIdx))
+        {
+            res.SkipFile(path, "message or environment info column not found");
             return false;
+        }
 
         var anyMatch = false;
 
@@ -101,13 +108,20 @@ public static class PlatformScanner
 
             string[]? fields;
             try { fields = parser.ReadFields(); }
-            catch { continue; }
+            catch (Microsoft.VisualBasic.FileIO.MalformedLineException)
+            {
+                res.RowsUnparsed++;
+                continue;
+            }
 
             if (fields is null || fields.Length == 0)
                 continue;
 
             if (messageIdx >= fields.Length || envIdx >= fields.Length)
+            {
+                res.RowsUnparsed++;
                 continue;
+            }
 
             var msg = fields[messageIdx] ?? "";
             var type = MatchSuspiciousType(msg);
@@ -116,7 +130,10 @@ public static class PlatformScanner
 
             var env = fields[envIdx] ?? "";
             if (!TryExtractEffectiveIp(env, out var effectiveIp, out var clientIp, out var xffIp))
+            {
+                res.AddMatchWithoutIp(path);
                 continue;
+            }
 
             anyMatch = true;
             res.AddHit(type, effectiveIp!, clientIp, xffIp);
@@ -131,6 +148,7 @@ public static class PlatformScanner
         using var reader = ExcelReaderFactory.CreateReader(stream);
 
         var anyMatch = false;
+        var anySheetResolved = false;
 
         do
         {
@@ -146,6 +164,7 @@ public static class PlatformScanner
             if (!TryResolveColumns(headers, out var messageIdx, out var envIdx))
                 continue;
 
+            anySheetResolved = true;
             while (reader.Read())
             {
                 ct.ThrowIfCancellationRequested();
@@ -157,13 +176,19 @@ public static class PlatformScanner
 
                 var env = reader.GetValue(envIdx)?.ToString() ?? "";
                 if (!TryExtractEffectiveIp(env, out var effectiveIp, out var clientIp, out var xffIp))
+                {
+                    res.AddMatchWithoutIp(path);
                     continue;
+                }
 
                 anyMatch = true;
                 res.AddHit(type, effectiveIp!, clientIp, xffIp);
             }
 
         } while (reader.NextResult());
+
+        if (!anySheetResolved)
+            res.SkipFile(path, "message or environment info column not found");
 
         return anyMatch;
     }
@@ -248,6 +273,26 @@ public sealed class PlatformSuspiciousScanResult
     public int RowsWithoutXff { get; private set; }
 
     public int DistinctEffectiveIps { get; private set; }
+
+    /// <summary>Rows that matched a suspicious pattern but had no client IP in the environment info.</summary>
+    public int MatchedRowsWithoutIp { get; private set; }
+    public Dictionary<string, int> MatchedRowsWithoutIpByFile { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Files that could not be scanned, with the reason (file name only).</summary>
+    public List<(string File, string Reason)> FilesSkipped { get; } = new();
+
+    /// <summary>Rows the CSV parser could not read or that were shorter than the header.</summary>
+    public int RowsUnparsed { get; set; }
+
+    public void AddMatchWithoutIp(string path)
+    {
+        MatchedRowsWithoutIp++;
+        var name = Path.GetFileName(path);
+        MatchedRowsWithoutIpByFile.TryGetValue(name, out var n);
+        MatchedRowsWithoutIpByFile[name] = n + 1;
+    }
+
+    public void SkipFile(string path, string reason) => FilesSkipped.Add((Path.GetFileName(path), reason));
 
     public Dictionary<string, Dictionary<string, int>> EffectiveIpCountsByErrorType { get; } =
         new(StringComparer.OrdinalIgnoreCase);

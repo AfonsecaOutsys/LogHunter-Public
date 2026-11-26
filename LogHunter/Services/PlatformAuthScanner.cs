@@ -82,7 +82,10 @@ public static class PlatformAuthScanner
     {
         // Ignore integrations by filename (cheap + safe)
         if (Path.GetFileName(path).Contains("Integrations", StringComparison.OrdinalIgnoreCase))
+        {
+            res.FilesSkippedNoClientIp.Add(Path.GetFileName(path));
             return false;
+        }
 
         // Detect delimiter from header line
         var firstLine = File.ReadLines(path).FirstOrDefault() ?? "";
@@ -107,7 +110,11 @@ public static class PlatformAuthScanner
             return false;
 
         if (!TryClassify(header, out var kind, out var spec))
+        {
+            // Integrations / Service Actions exports have no client-IP column.
+            res.FilesSkippedNoClientIp.Add(Path.GetFileName(path));
             return false;
+        }
 
         bool anyHit = false;
         var fileName = Path.GetFileName(path);
@@ -152,12 +159,16 @@ public static class PlatformAuthScanner
     private static bool ScanXlsx(string path, HashSet<string> suspicious, PlatformAuthScanResult res, CancellationToken ct)
     {
         if (Path.GetFileName(path).Contains("Integrations", StringComparison.OrdinalIgnoreCase))
+        {
+            res.FilesSkippedNoClientIp.Add(Path.GetFileName(path));
             return false;
+        }
 
         using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using var reader = ExcelReaderFactory.CreateReader(stream);
 
         bool anyHit = false;
+        bool anySheetClassified = false;
         var kindsHit = new HashSet<PlatformLogKind>();
 
         do
@@ -175,6 +186,7 @@ public static class PlatformAuthScanner
             if (!TryClassify(headers, out var kind, out var spec))
                 continue;
 
+            anySheetClassified = true;
             var fileName = Path.GetFileName(path);
 
             while (reader.Read())
@@ -202,6 +214,9 @@ public static class PlatformAuthScanner
             }
         }
         while (reader.NextResult());
+
+        if (!anySheetClassified)
+            res.FilesSkippedNoClientIp.Add(Path.GetFileName(path));
 
         if (anyHit)
         {
@@ -279,7 +294,9 @@ public static class PlatformAuthScanner
         {
             var n = Norm(headers[i]);
 
-            if (ipIdx < 0 && (n == "logattributesnethostip" || n == "source"))
+            // Not log.attributes.net.host.ip: in ODC exports that is the server's own address
+            // (always 127.0.0.1 in Service Actions), so treating it as the client gave false hits.
+            if (ipIdx < 0 && n == "source")
                 ipIdx = i;
 
             if (userIdx < 0 && (n == "userid" || n == "logattributesenduserid"))
@@ -494,6 +511,9 @@ public sealed class PlatformAuthScanResult
 
     public Dictionary<PlatformLogKind, int> FilesMatchedByKind { get; } = new();
     public Dictionary<PlatformLogKind, int> RowsMatchedByKind { get; } = new();
+
+    // Files with no client-IP column (Integrations, Service Actions): reported, not counted.
+    public List<string> FilesSkippedNoClientIp { get; } = new();
 
     // IP -> hits breakdown
     public Dictionary<string, IpAuthHits> HitsByIp { get; } = new(StringComparer.OrdinalIgnoreCase);

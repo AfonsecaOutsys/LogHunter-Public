@@ -108,7 +108,7 @@ public static partial class AlbOptions
 
         if (buckets.Count == 0)
         {
-            ConsoleEx.Warn("No blocked entries found (per current definition).");
+            ConsoleEx.Warn("No WAF-blocked requests found.");
             ConsoleEx.Pause("Press Enter to return...");
             return;
         }

@@ -351,7 +351,8 @@ internal sealed class IisIpSummaryJobManager
             });
 
             var orderedResults = resultsByIp.Values
-                .OrderBy(r => r.RequestedIp, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(r => r.TotalRows)
+                .ThenBy(r => r.RequestedIp, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             BuildMultiIpHtmlReport(htmlPath, orderedResults, finalExcelPath, finalSqlitePath);
@@ -697,12 +698,12 @@ function drawChart(item){
   const vis=sr.filter(x=>x.visible);
   let yMin=Infinity,yMax=-Infinity;
   vis.forEach(x=>{for(let i=i0;i<=i1;i++){const v=x.values[i];if(v<yMin)yMin=v;if(v>yMax)yMax=v;}});
-  if(!isFinite(yMin)){yMin=0;yMax=1;}if(yMin===yMax){yMin--;yMax++;}
-  const yP=(yMax-yMin)*.08;yMin-=yP;yMax+=yP;
+  if(!isFinite(yMin)){yMin=0;yMax=1;}const nn=yMin>=0;if(yMin===yMax){yMin--;yMax++;}
+  const yP=(yMax-yMin)*.08;yMin-=yP;yMax+=yP;if(nn)yMin=Math.max(0,yMin);
   const vToY=v=>pT+(1-(v-yMin)/Math.max(1e-9,yMax-yMin))*pH;
   ctx.strokeStyle='rgba(255,255,255,.08)';ctx.lineWidth=1;ctx.font='12px ui-sans-serif';ctx.fillStyle='rgba(230,237,243,.75)';
   for(let i=0;i<=5;i++){const v=yMin+i/5*(yMax-yMin),y=vToY(v);ctx.beginPath();ctx.moveTo(pL,y);ctx.lineTo(pL+pW,y);ctx.stroke();ctx.fillText(String(Math.round(v)),8,y+4);}
-  for(let i=0;i<=5;i++){const ms=s.xMin+i/5*(s.xMax-s.xMin),x=pL+timeToX(ms,s,pW);ctx.beginPath();ctx.moveTo(x,pT);ctx.lineTo(x,pT+pH);ctx.stroke();const l=fmtUtc(ms),tw=ctx.measureText(l).width;ctx.fillText(l,x-tw/2,pT+pH+28);}
+  for(let i=0;i<=5;i++){const ms=s.xMin+i/5*(s.xMax-s.xMin),x=pL+timeToX(ms,s,pW);ctx.beginPath();ctx.moveTo(x,pT);ctx.lineTo(x,pT+pH);ctx.stroke();const l=fmtUtc(ms),tw=ctx.measureText(l).width;ctx.fillText(l,Math.min(Math.max(x-tw/2,4),W-tw-4),pT+pH+28);}
   vis.forEach(x=>{ctx.strokeStyle=x.color;ctx.lineWidth=2;ctx.beginPath();let st=false;for(let i=i0;i<=i1;i++){const ms=t[i];if(ms<s.xMin||ms>s.xMax)continue;const px=pL+timeToX(ms,s,pW),py=vToY(x.values[i]);st?(ctx.lineTo(px,py)):(ctx.moveTo(px,py),st=true);}ctx.stroke();});
   ctx.strokeStyle='rgba(255,255,255,.22)';ctx.strokeRect(pL,pT,pW,pH);
 }

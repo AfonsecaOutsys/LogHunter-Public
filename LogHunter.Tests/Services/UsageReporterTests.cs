@@ -91,6 +91,64 @@ public sealed class UsageReporterTests : IDisposable
     }
 
     [Fact]
+    public void Start_SavedSettingOff_SendsNothingButStaysAvailable()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_dir, "usage-settings.json"), """{"enabled":false}""");
+        var handler = new RecordingHandler();
+
+        // Act
+        var start = UsageReporter.Start("2.0.0.5", "web", Endpoint, "k", _dir, null, handler);
+        var track = UsageReporter.TrackAsync(UsageFeature.AlbDownload);
+
+        // Assert
+        Assert.Null(start);
+        Assert.Null(track);
+        Assert.Empty(handler.Calls);
+        Assert.True(UsageReporter.IsAvailable);
+        Assert.False(UsageReporter.IsEnabled);
+    }
+
+    [Fact]
+    public async Task SetUserEnabled_TogglesSendingAndPersistsTheChoice()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        await UsageReporter.Start("2.0.0.5", "web", Endpoint, "k", _dir, null, handler)!;
+
+        // Act
+        UsageReporter.SetUserEnabled(false);
+        var whileOff = UsageReporter.TrackAsync(UsageFeature.AlbIpSummary);
+        var savedOff = UsageReporter.LoadUserEnabled(_dir);
+        UsageReporter.SetUserEnabled(true);
+        await UsageReporter.TrackAsync(UsageFeature.AlbIpSweep)!;
+
+        // Assert
+        Assert.Null(whileOff);
+        Assert.False(savedOff);
+        Assert.True(UsageReporter.LoadUserEnabled(_dir));
+        Assert.Equal(new[] { "AppStart", "FeatureUse" }, handler.Calls.Select(c => c.Request.RequestUri!.Segments.Last()));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not json")]
+    [InlineData("""{"enabled":true}""")]
+    [InlineData("""{}""")]
+    public void LoadUserEnabled_MissingCorruptOrOn_DefaultsToOn(string? content)
+    {
+        // Arrange
+        if (content is not null)
+            File.WriteAllText(Path.Combine(_dir, "usage-settings.json"), content);
+
+        // Act
+        var enabled = UsageReporter.LoadUserEnabled(_dir);
+
+        // Assert
+        Assert.True(enabled);
+    }
+
+    [Fact]
     public async Task Send_HandlerThrows_NeverSurfacesAnException()
     {
         // Arrange

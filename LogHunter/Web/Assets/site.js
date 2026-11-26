@@ -1,3 +1,6 @@
+// Errors show their message, not the raw "Error: ..." toString.
+function errorText(err) { return err && err.message ? err.message : String(err); }
+
 const THEME_KEY = 'loghunter.theme';
 const APP_INFO_POLL_MS = 4000;
 const TRACE_ENDPOINT = '/api/trace';
@@ -38,7 +41,10 @@ function initializeTrace() {
     const started = performance.now();
     try {
       const response = await originalFetch(input, init);
-      window.lhTrace('fetch', { method, url, status: response.status, ms: Math.round(performance.now() - started) });
+      // Skip the app-info heartbeat (every 4 s); it carries no user action.
+      if (url !== '/api/app/info') {
+        window.lhTrace('fetch', { method, url, status: response.status, ms: Math.round(performance.now() - started) });
+      }
       return response;
     } catch (error) {
       window.lhTrace('fetch.error', { method, url, error: String(error), ms: Math.round(performance.now() - started) });
@@ -298,12 +304,17 @@ function initializeIpRangesPage() {
     const loaded = status.feeds.filter(f => f.rangeCount > 0);
     const providers = new Set(loaded.map(f => f.provider)).size;
     const ranges = loaded.reduce((sum, f) => sum + Number(f.rangeCount), 0);
+    const builtIn = status.builtIn || [];
     document.getElementById('ipRangesSummary').textContent = status.refreshing
       ? 'Refreshing…'
-      : `${providers} providers · ${ranges.toLocaleString('en-US')} ranges · oldest feed ${status.label}`;
+      : `${providers} providers · ${ranges.toLocaleString('en-US')} ranges · oldest feed ${status.label}`
+        + (builtIn.length ? ` · ${builtIn.length} built-in` : '');
     const rows = status.feeds.map(f => `
       <tr><td>${esc(f.provider)}</td><td>${esc(f.id)}</td><td class="num">${Number(f.rangeCount).toLocaleString('en-US')}</td>
-        <td>${esc(fmt(f.lastSuccessUtc))}</td><td>${f.lastError ? esc(f.lastError) : 'OK'}</td></tr>`).join('');
+        <td>${esc(fmt(f.lastSuccessUtc))}</td><td>${f.lastError ? esc(f.lastError) : 'OK'}</td></tr>`).join('')
+      + builtIn.map(b => `
+      <tr><td>${esc(b.provider)}</td><td>built-in</td><td class="num">${Number(b.rangeCount).toLocaleString('en-US')}</td>
+        <td>ships with LogHunter</td><td>OK</td></tr>`).join('');
     document.getElementById('ipRangesTable').innerHTML = `
       <table class="mini-table"><tr><th>Provider</th><th>Feed</th><th>Ranges</th><th>Last updated</th><th>Last result</th></tr>${rows}</table>`;
   }
@@ -339,10 +350,10 @@ function initializeIpRangesPage() {
   }
 
   document.getElementById('ipRangesCustomSave').addEventListener('click', () =>
-    saveCustom(providerInput.value, rangesInput.value).catch(err => { info.textContent = String(err); }));
+    saveCustom(providerInput.value, rangesInput.value).catch(err => { info.textContent = errorText(err); }));
   document.getElementById('ipRangesCustomClear').addEventListener('click', () => {
     rangesInput.value = '';
-    saveCustom(providerInput.value, '').catch(err => { info.textContent = String(err); });
+    saveCustom(providerInput.value, '').catch(err => { info.textContent = errorText(err); });
   });
 
   fetch('/api/ip-ranges/custom').then(r => r.json()).then(c => {
@@ -351,12 +362,95 @@ function initializeIpRangesPage() {
   }).catch(() => {});
 }
 
+// Text is kept on every failure; one click sends one request.
+function initializeFeedbackPage() {
+  const root = document.querySelector('[data-feedback-page]');
+  if (!root) return;
+  const min = Number(root.dataset.min);
+  const max = Number(root.dataset.max);
+  const area = document.getElementById('feedbackArea');
+  const text = document.getElementById('feedbackText');
+  const count = document.getElementById('feedbackCount');
+  const send = document.getElementById('feedbackSend');
+  const info = document.getElementById('feedbackInfo');
+  let sending = false;
+
+  function refresh() {
+    const length = text.value.trim().length;
+    // Say why Send is still disabled while the text is too short.
+    count.textContent = length > 0 && length < min ? `${length} / ${max} · min ${min}` : `${length} / ${max}`;
+    send.disabled = sending || !area.value || length < min || length > max;
+  }
+
+  area.addEventListener('change', refresh);
+  text.addEventListener('input', refresh);
+  send.addEventListener('click', async () => {
+    sending = true;
+    send.textContent = 'Sending…';
+    info.textContent = '';
+    refresh();
+    try {
+      const response = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ area: area.value, description: text.value })
+      });
+      const result = await response.json();
+      info.textContent = result.message;
+      if (result.ok) {
+        text.value = '';
+        area.value = '';
+      }
+    } catch {
+      info.textContent = "Couldn't send feedback. Check your connection and try again.";
+    } finally {
+      sending = false;
+      send.textContent = 'Send feedback';
+      refresh();
+    }
+  });
+  refresh();
+}
+
+// Usage counts On/Off under the feedback form. The server's answer decides the shown state.
+function initializeUsageToggle() {
+  const on = document.getElementById('usageOn');
+  const off = document.getElementById('usageOff');
+  if (!on || !off) return;
+
+  function show(enabled) {
+    on.classList.toggle('active', enabled);
+    off.classList.toggle('active', !enabled);
+    on.setAttribute('aria-checked', String(enabled));
+    off.setAttribute('aria-checked', String(!enabled));
+  }
+
+  async function save(enabled) {
+    try {
+      const response = await fetch('/api/usage/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      const result = await response.json();
+      show(Boolean(result.enabled));
+    } catch {
+      // Keep the current state; the next click retries.
+    }
+  }
+
+  on.addEventListener('click', () => save(true));
+  off.addEventListener('click', () => save(false));
+}
+
 function initializeShell() {
   initializeTheme();
   loadAppInfo().catch(() => {});
   startAppInfoPolling();
   initializeSqliteViewerCard();
   initializeIpRangesPage();
+  initializeFeedbackPage();
+  initializeUsageToggle();
 }
 
 if (document.readyState === 'loading') {

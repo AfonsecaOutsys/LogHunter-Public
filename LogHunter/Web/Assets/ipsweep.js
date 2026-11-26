@@ -96,7 +96,7 @@
     host.innerHTML = sources.map((s, i) => `
       <div class="source-chip ip-sweep-source">
         <input class="ip-sweep-label" data-index="${i}" type="text" value="${escapeHtml(s.label)}" aria-label="Folder label">
-        <span class="footer-note">${escapeHtml(s.path)} · ${formatNumber(s.files)} files</span>
+        <span class="footer-note">${escapeHtml(s.path)} · ${formatNumber(s.files)} file${s.files === 1 ? '' : 's'}</span>
         <button class="source-btn source-btn--clear" data-remove="${i}" type="button">Remove</button>
       </div>`).join('');
 
@@ -190,14 +190,19 @@
     byId('ipSweepCopyHits').disabled = hits.length === 0;
     byId('ipSweepToAbuseIp').disabled = reputationIps(snap).length === 0;
 
-    // Single IPs (and ranges that matched one IP) get a CDN / proxy badge via data-ip.
-    const ipFor = t => t.kind === 'IP' ? t.target : (t.topIps.length === 1 ? t.topIps[0] : '');
+    // Single IPs get a CDN / proxy badge via data-ip; ranges show the report's Network label
+    // ("Akamai edge (6 IPs)") built from the IPs they matched.
+    const targetCell = t => {
+      if (t.kind === 'IP') return `<td data-ip="${escapeHtml(t.target)}">${escapeHtml(t.target)}</td>`;
+      const badge = t.network ? ` <span class="ip-badge">${escapeHtml(t.network)}</span>` : '';
+      return `<td data-ip-checked="true">${escapeHtml(t.target)}${badge}</td>`;
+    };
     const rows = snap.targets.map(t => `
       <tr class="${t.hits > 0 ? 'ip-sweep-hit' : ''}">
-        <td${ipFor(t) ? ` data-ip="${escapeHtml(ipFor(t))}"` : ''}>${escapeHtml(t.target)}</td><td>${escapeHtml(t.kind)}</td>
+        ${targetCell(t)}<td>${escapeHtml(t.kind)}</td>
         <td class="num">${formatNumber(t.hits)}</td>
         <td>${escapeHtml(t.firstSeenUtc)}</td><td>${escapeHtml(t.lastSeenUtc)}</td>
-        <td class="num">${t.distinctIps > 1 ? formatNumber(t.distinctIps) : ''}</td>
+        <td class="num">${t.hits > 0 ? formatNumber(t.distinctIps) : ''}</td>
         <td>${escapeHtml(t.topPaths)}</td><td>${escapeHtml(t.statuses)}</td><td>${escapeHtml(t.sources)}</td>
       </tr>`).join('');
     byId('ipSweepTable').innerHTML = `
@@ -260,8 +265,20 @@
   }
 
   // CDN edges and health checkers are not attackers: don't spend AbuseIPDB quota on them.
+  // Same ranges as the server's IsPrivateOrLoopback: AbuseIPDB has nothing useful on these.
+  function isPrivateIp(ip) {
+    const v4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(ip);
+    if (v4) {
+      const a = Number(v4[1]), b = Number(v4[2]);
+      return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127)
+        || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+    }
+    const v6 = ip.toLowerCase();
+    return v6 === '::1' || v6 === '::' || /^fe[89ab]/.test(v6) || /^f[cd]/.test(v6);
+  }
+
   async function toReputation() {
-    let ips = reputationIps(lastSnapshot);
+    let ips = reputationIps(lastSnapshot).filter(ip => !isPrivateIp(ip));
     try {
       const response = await fetch('/api/ip-ranges/lookup', {
         method: 'POST',
@@ -278,7 +295,7 @@
     }
 
     if (ips.length === 0) {
-      setError('Every IP to check is a CDN edge or health checker. Use IIS IP summary to find the real clients.');
+      setError('Every IP to check is private, a CDN edge or a health checker. Use IIS IP summary to find the real clients.');
       return;
     }
     handOff('lh.prefill.abuseip', ips, '/abuseipdb/check-ips');

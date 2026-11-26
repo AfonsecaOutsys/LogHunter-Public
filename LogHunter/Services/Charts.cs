@@ -341,7 +341,9 @@ function buildLegend(){
 function buildSummary(){
   summary.innerHTML = '';
   const head = document.createElement('tr');
-  head.innerHTML = '<th>IP</th><th>Source hits</th><th>Total requests</th><th>Peak (5 min)</th><th>Visible</th>';
+  // Manual IP entry has no source file, so the column would be all dashes: show it only when used.
+  const hasSource = SERIES.some(s => s.sourceHits != null);
+  head.innerHTML = '<th>IP</th>' + (hasSource ? '<th>Source hits</th>' : '') + '<th>Total requests</th><th>Peak (5 min)</th><th>Visible</th>';
   summary.appendChild(head);
 
   sortedByActivity.forEach(i => {
@@ -353,7 +355,7 @@ function buildSummary(){
 
     tr.innerHTML =
       `<td><span style='display:inline-block;width:9px;height:9px;background:${s.color};border-radius:2px;margin-right:6px'></span>${s.name}</td>` +
-      `<td>${s.sourceHits == null ? '—' : Number(s.sourceHits).toLocaleString('en-US')}</td>` +
+      (hasSource ? `<td>${s.sourceHits == null ? '—' : Number(s.sourceHits).toLocaleString('en-US')}</td>` : '') +
       `<td>${fmtNum(s.total)}</td>` +
       `<td>${fmtNum(s.peak)}</td>` +
       `<td>${s.visible ? 'Shown' : 'Hidden'}</td>`;
@@ -475,10 +477,12 @@ function draw() {
     }
   }
   if (!isFinite(yMin) || !isFinite(yMax)) { yMin = 0; yMax = 1; }
+  const nonNegative = yMin >= 0;
   if (yMin === yMax) { yMin -= 1; yMax += 1; }
 
   const yPad = (yMax - yMin) * 0.08;
   yMin -= yPad; yMax += yPad;
+  if (nonNegative) yMin = Math.max(0, yMin);
 
   function valToY(v) {
     return padT + (1 - (v - yMin) / Math.max(1e-9, (yMax - yMin))) * plotH;
@@ -511,7 +515,7 @@ function draw() {
 
     const lbl = fmtUtc(ms);
     const tw = ctx.measureText(lbl).width;
-    ctx.fillText(lbl, x - tw/2, padT + plotH + 28);
+    ctx.fillText(lbl, Math.max(2, Math.min(x - tw/2, W - tw - 2)), padT + plotH + 28);
   }
 
   visibleSeries.forEach((s) => {

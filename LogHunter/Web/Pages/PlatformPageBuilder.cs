@@ -126,23 +126,18 @@ internal static class PlatformPageBuilder
     {
         return """
       <section class="stack" data-platform-suspicious-page="true">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>Suspicious requests: extract IPs</h1>
-              <p>Scan Platform log exports (CSV/XLSX) for suspicious patterns and extract effective IP addresses.</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Scan configuration</h2>
             <div id="platformSuspiciousError" class="inline-error" hidden></div>
+            <div class="field-group source-group">
+              <label class="field-label">Log source</label>
+              <div id="platformSuspiciousSourceChip" class="source-chip">Loading...</div>
+            </div>
 
             <div class="field-group">
               <p class="page-copy">Scans all CSV/XLSX files in the PlatformLogs folder for known suspicious error patterns. Extracts X-Forwarded-For (preferred) or ClientIp from matched rows.</p>
-              <p class="footer-note">Results are saved to session selections and update the suspicious-IP cache for downstream use.</p>
+              <p class="footer-note">Found IPs feed the Authenticated activity check.</p>
             </div>
 
             <div class="button-row">
@@ -215,19 +210,14 @@ internal static class PlatformPageBuilder
     {
         return """
       <section class="stack" data-platform-auth-page="true">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>Suspicious IPs: authenticated activity check</h1>
-              <p>Scan Platform log exports and count rows where UserId != 0 for IPs from the suspicious cache.</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Check configuration</h2>
             <div id="platformAuthError" class="inline-error" hidden></div>
+            <div class="field-group source-group">
+              <label class="field-label">Log source</label>
+              <div id="platformAuthSourceChip" class="source-chip">Loading...</div>
+            </div>
 
             <div class="field-group">
               <p class="page-copy">Scans all CSV/XLSX files in PlatformLogs and counts authenticated rows (UserId != 0) per IP, broken down by log type.</p>
@@ -329,15 +319,6 @@ internal static class PlatformPageBuilder
 
         return $$"""
       <section class="stack" data-platform-cache-page="true">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>Authenticated IP cache</h1>
-              <p>View the current authenticated IP cache. Run the authenticated activity check to populate or update it.</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Cache status</h2>

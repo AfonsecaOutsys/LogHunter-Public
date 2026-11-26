@@ -35,6 +35,7 @@ internal static class PlatformApi
             await WriteJsonAsync(context.Response, new
             {
                 platformLogsPath = AppFolders.PlatformLogs,
+                folderSummary = BuildFolderSummary(),
                 suspiciousCacheCount = suspiciousCount,
                 authedCacheCount = authedCount,
                 currentJob = app.PlatformSuspicious.GetSnapshot()
@@ -78,6 +79,7 @@ internal static class PlatformApi
             await WriteJsonAsync(context.Response, new
             {
                 platformLogsPath = AppFolders.PlatformLogs,
+                folderSummary = BuildFolderSummary(),
                 suspiciousCacheCount = suspiciousCount,
                 authedCacheCount = authedCount,
                 currentJob = app.PlatformAuth.GetSnapshot()
@@ -106,7 +108,22 @@ internal static class PlatformApi
             }
             catch { /* empty body is valid — means use cache */ }
 
-            if (!app.PlatformAuth.TryStart(body?.ManualIps, out var snapshot, out var error))
+            // Manual input goes through the shared parser: "not-an-ip" or "12345" must not count as an IP.
+            List<string>? manualIps = null;
+            var ignoredIps = new List<string>();
+            if (body?.ManualIps is { Count: > 0 })
+            {
+                (manualIps, ignoredIps) = LogHunter.Utils.IpTargetParser.ParseIpList(body.ManualIps);
+                if (manualIps.Count == 0)
+                {
+                    // An empty list would fall back to the cache, which is not what the user asked for.
+                    var noValid = $"No valid IP addresses found. Ignored input: {string.Join(", ", ignoredIps)}";
+                    await WriteJsonAsync(context.Response, new { ok = false, error = noValid, ignored = ignoredIps }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                    return true;
+                }
+            }
+
+            if (!app.PlatformAuth.TryStart(manualIps, out var snapshot, out var error))
             {
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
@@ -114,7 +131,7 @@ internal static class PlatformApi
 
             UsageReporter.Track(UsageFeature.PlatformAuthActivity);
 
-            await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
+            await WriteJsonAsync(context.Response, new { ok = true, snapshot, ignored = ignoredIps }).ConfigureAwait(false);
             return true;
         }
 
@@ -191,4 +208,23 @@ internal static class PlatformApi
     }
 
     private sealed record PlatformAuthRunRequest(List<string>? ManualIps);
+
+    // Same file filter as the Platform job managers (CSV/XLSX, recursive).
+    private static object BuildFolderSummary()
+    {
+        var dir = AppFolders.PlatformLogs;
+        int count = 0;
+        long bytes = 0;
+        if (Directory.Exists(dir))
+        {
+            foreach (var f in Directory.EnumerateFiles(dir, "*.*", SearchOption.AllDirectories))
+            {
+                if (!f.EndsWith(".csv", StringComparison.OrdinalIgnoreCase) && !f.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                count++;
+                try { bytes += new FileInfo(f).Length; } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
+        }
+        return new { path = dir, fileCount = count, totalBytes = bytes };
+    }
 }

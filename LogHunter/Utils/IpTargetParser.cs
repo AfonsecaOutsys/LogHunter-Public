@@ -44,6 +44,40 @@ internal static class IpTargetParser
         return (targets, invalid);
     }
 
+    /// <summary>
+    /// Manual IP inputs (IP Summary, Requests over time, AbuseIPDB): single addresses only,
+    /// full dotted quad for IPv4, normalised and de-duplicated. Invalid tokens are returned
+    /// so the caller can report them instead of silently dropping them.
+    /// </summary>
+    public static (List<string> Valid, List<string> Invalid) ParseIpList(IEnumerable<string?>? entries)
+    {
+        var valid = new List<string>();
+        var invalid = new List<string>();
+        if (entries is null)
+            return (valid, invalid);
+
+        var seenValid = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenInvalid = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            foreach (var token in SplitTokens(entry ?? string.Empty))
+            {
+                if (TryParseAddress(token, out _, out _) && IPAddress.TryParse(token, out var addr))
+                {
+                    var normalized = (addr.IsIPv4MappedToIPv6 ? addr.MapToIPv4() : addr).ToString();
+                    if (seenValid.Add(normalized))
+                        valid.Add(normalized);
+                }
+                else if (seenInvalid.Add(token))
+                {
+                    invalid.Add(token);
+                }
+            }
+        }
+
+        return (valid, invalid);
+    }
+
     public static bool TryParse(string? text, out IpTarget target)
     {
         target = default;

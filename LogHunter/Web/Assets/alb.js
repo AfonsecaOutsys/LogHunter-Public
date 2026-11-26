@@ -1,4 +1,9 @@
 (function () {
+  function filesLabel(n) { return Number(n || 0).toLocaleString('en-US') + ' file' + (Number(n) === 1 ? '' : 's'); }
+
+  // Errors show their message, not the raw "Error: ..." toString.
+  function errorText(err) { return err && err.message ? err.message : String(err); }
+
   let currentJobId = '';
   let startInFlight = false;
   let albOption2Polling = null;
@@ -127,6 +132,12 @@
     }
 
     return String(value);
+  }
+
+  // Hit counts with thousands separators ("1,081"); anything non-numeric falls back to formatValue.
+  function formatCount(value) {
+    const num = Number(value);
+    return value !== null && value !== '' && Number.isFinite(num) ? num.toLocaleString('en-US') : formatValue(value);
   }
 
   function formatBytes(bytes) {
@@ -564,6 +575,22 @@
     return missing;
   }
 
+  // Server reports manual IP tokens it dropped (invalid) or did not send (private/reserved).
+  function ignoredInputNote(payload) {
+    var parts = [];
+    if (payload && payload.ignored && payload.ignored.length) parts.push('Ignored input: ' + payload.ignored.join(', '));
+    if (payload && payload.skipped && payload.skipped.length) parts.push('Skipped private/reserved (not sent): ' + payload.skipped.join(', '));
+    return parts.join(' | ');
+  }
+
+  // Shows an informational message in an error slot with neutral styling; the error setters clear it.
+  function showNote(node, msg) {
+    if (!node) return;
+    node.textContent = msg || '';
+    node.hidden = !msg;
+    node.classList.toggle('is-note', !!msg);
+  }
+
   async function fetchJson(url, options) {
     const response = await fetch(url, {
       headers: {
@@ -765,19 +792,20 @@
 
     results.hidden = false;
     topIps.innerHTML = `
-      <div class="result-lines">
-        ${items.map((item) => `<div>#${escapeHtml(item.rank)} <span data-ip="${escapeHtml(item.ip)}">${escapeHtml(item.ip)}</span> <strong>${escapeHtml(formatValue(item.hits))}</strong> hits</div>`).join('')}
-      </div>
+      <table class="mini-table">
+        <tr><th>#</th><th>IP</th><th>Hits</th></tr>
+        ${items.map((item) => `<tr><td>${escapeHtml(item.rank)}</td><td><span data-ip="${escapeHtml(item.ip)}">${escapeHtml(item.ip)}</span></td><td class="num">${escapeHtml(formatCount(item.hits))}</td></tr>`).join('')}
+      </table>
     `;
     if (window.lhIpRanges) window.lhIpRanges.annotate(topIps).catch(() => {});
 
     topUris.innerHTML = items.map((item) => `
       <div class="result-card">
         <div class="info-label">IP #${escapeHtml(item.rank)}</div>
-        <div class="info-value">${escapeHtml(item.ip)} <span class="footer-note">(${escapeHtml(formatValue(item.hits))} hits)</span></div>
+        <div class="info-value">${escapeHtml(item.ip)} <span class="footer-note">(${escapeHtml(formatCount(item.hits))} hits)</span></div>
         <ul class="list-clean">
           ${(Array.isArray(item.topUris) && item.topUris.length
-            ? item.topUris.map((uri) => `<li><span class="footer-note">#${escapeHtml(uri.rank)}</span> <strong>${escapeHtml(formatValue(uri.hits))}</strong> ${escapeHtml(uri.uri)}</li>`).join('')
+            ? item.topUris.map((uri) => `<li><span class="footer-note">#${escapeHtml(uri.rank)}</span> <strong>${escapeHtml(formatCount(uri.hits))}</strong> ${escapeHtml(uri.uri)}</li>`).join('')
             : '<li class="footer-note">(no URI matches)</li>')}
         </ul>
       </div>
@@ -818,7 +846,7 @@
       : `${items.length} selected file(s)`;
 
     const summary = sourceType === 'folder'
-      ? `${selectionLabel} | ${items.length} .log files | ${formatBytes(totalBytes)}`
+      ? `${selectionLabel} | ${items.length} .log file${items.length === 1 ? '' : 's'} | ${formatBytes(totalBytes)}`
       : `${items.length} selected file(s) | ${formatBytes(totalBytes)}`;
 
     return {
@@ -872,7 +900,7 @@
       if (chip) {
         const def = albOption2DefaultSelection;
         chip.textContent = def
-          ? `${def.selectionLabel || 'Default folder'} | ${def.fileCount || 0} files | ${formatBytes(def.totalBytes || 0)}`
+          ? `${def.selectionLabel || 'Default folder'} | ${filesLabel(def.fileCount)} | ${formatBytes(def.totalBytes || 0)}`
           : 'Default folder';
       }
       return;
@@ -1055,6 +1083,30 @@
     const selection = albOption2Selection && albOption2Selection.sourceType === sourceType ? albOption2Selection : null;
 
     setAlbOption2Error('');
+
+    // Validate first: a rejected run must leave the status panel idle.
+    const endpoint = byId('albOption2Endpoint')?.value?.trim() || '';
+    if (!endpoint) {
+      setAlbOption2Error('Endpoint/path fragment is required.');
+      return;
+    }
+
+    if (sourceType !== 'default' && !selection) {
+      setAlbOption2Error(sourceType === 'folder'
+        ? 'Select a folder before running the scan.'
+        : 'Select one or more files before running the scan.');
+      renderAlbOption2Selection();
+      return;
+    }
+
+    if (selection && selection.fileCount === 0) {
+      setAlbOption2Error(sourceType === 'folder'
+        ? 'The selected folder does not contain any .log files.'
+        : 'Select one or more .log files before running the scan.');
+      renderAlbOption2Selection();
+      return;
+    }
+
     setText('albOption2State', 'running');
     setText('albOption2Phase', 'queued');
     setText('albOption2Message', 'Scanning ALB logs...');
@@ -1067,31 +1119,6 @@
     setHidden(byId('albOption2ResultsOpenExport'), true);
     setHidden(byId('albOption2Results'), true);
     setBar('albOption2Bar', 0, 1);
-
-    const endpoint = byId('albOption2Endpoint')?.value?.trim() || '';
-    if (!endpoint) {
-      setText('albOption2State', 'idle');
-      setAlbOption2Error('Endpoint/path fragment is required.');
-      return;
-    }
-
-    if (sourceType !== 'default' && !selection) {
-      setText('albOption2State', 'idle');
-      setAlbOption2Error(sourceType === 'folder'
-        ? 'Select a folder before running the scan.'
-        : 'Select one or more files before running the scan.');
-      renderAlbOption2Selection();
-      return;
-    }
-
-    if (selection && selection.fileCount === 0) {
-      setText('albOption2State', 'idle');
-      setAlbOption2Error(sourceType === 'folder'
-        ? 'The selected folder does not contain any .log files.'
-        : 'Select one or more .log files before running the scan.');
-      renderAlbOption2Selection();
-      return;
-    }
 
     albOption2JobId = '';
 
@@ -1127,9 +1154,20 @@
       renderOption2Snapshot(payload.snapshot || {});
       startAlbOption2Polling();
     } catch (error) {
-      setText('albOption2State', 'failed');
+      // Rejected or failed to start: back to the idle panel, the error banner says why.
+      resetAlbOption2Idle();
       setAlbOption2Error(String(error));
     }
+  }
+
+  function resetAlbOption2Idle() {
+    setText('albOption2State', 'idle');
+    setText('albOption2Phase', 'idle');
+    setText('albOption2StageBadge', 'idle');
+    setText('albOption2Message', 'Idle.');
+    setText('albOption2Summary', 'Waiting for a scan to start.');
+    setText('albOption2BarMeta', 'No scan running.');
+    setBar('albOption2Bar', 0, 1);
   }
 
   function renderOption2Snapshot(snapshot) {
@@ -1157,7 +1195,7 @@
     setText('albOption2Phase', formatValue(phase));
     setText('albOption2StageBadge', formatValue(phase));
     setText('albOption2Message', snapshot?.error ? `${snapshot.message} ${snapshot.error}` : formatValue(snapshot?.message));
-    setText('albOption2Meta', inputSummary || (filesTotal > 0 ? `Scope: ${filesTotal} files | ${formatBytes(totalBytes)}` : ''));
+    setText('albOption2Meta', inputSummary || (filesTotal > 0 ? `Scope: ${filesLabel(filesTotal)} | ${formatBytes(totalBytes)}` : ''));
     setText('albOption2ExportPath', exportPath ? `Exported: ${exportPath}` : '');
     setText('albOption2Matches', String(result?.totalMatchingIps || 0));
     setHidden(byId('albOption2OpenExport'), !exportPath);
@@ -1327,6 +1365,7 @@
   function setIpSummaryError(msg) {
     const node = byId('ipSummaryError');
     if (!node) return;
+    node.classList.remove('is-note');
     node.textContent = msg || '';
     node.hidden = !msg;
   }
@@ -1351,7 +1390,7 @@
       if (chip) {
         const d = ipSummaryDefaultSelection;
         chip.textContent = d
-          ? `${d.selectionLabel || 'Default folder'} | ${d.fileCount || 0} files | ${formatBytes(d.totalBytes || 0)}`
+          ? `${d.selectionLabel || 'Default folder'} | ${filesLabel(d.fileCount)} | ${formatBytes(d.totalBytes || 0)}`
           : 'Default folder';
       }
       return;
@@ -1427,7 +1466,7 @@
         }
       });
     } catch (err) {
-      setIpSummaryError(String(err));
+      setIpSummaryError(errorText(err));
     } finally {
       hideLoading();
     }
@@ -1537,9 +1576,10 @@
 
       ipSummaryJobId = payload.snapshot?.jobId || '';
       renderIpSummarySnapshot(payload.snapshot);
+      showNote(byId('ipSummaryError'), ignoredInputNote(payload));
       startIpSummaryPolling();
     } catch (err) {
-      setIpSummaryError(String(err));
+      setIpSummaryError(errorText(err));
     }
   }
 
@@ -1601,7 +1641,7 @@
 
     if (state === 'completed') {
       setText('ipSummarySummary', 'Scan complete.');
-      setText('ipSummaryBarMeta', `100% | ${snap.filesTotal || 0} files scanned`);
+      setText('ipSummaryBarMeta', `100% | ${filesLabel(snap.filesTotal)} scanned`);
       if (bar) bar.style.width = '100%';
     } else if (state === 'failed') {
       setText('ipSummarySummary', 'Scan failed.');
@@ -1721,13 +1761,18 @@
         `<tr><td class="uri-cell" title="${escHtml(e.endpoint)}">${escHtml(e.endpoint)}</td><td style="text-align:right">${Number(e.hits).toLocaleString('en-US')}</td></tr>`
       ).join('') || '<tr><td colspan="2">(none)</td></tr>';
 
+      const ipLabel = `<span data-ip="${escHtml(ip.ip)}">${escHtml(ip.ip)}</span>`;
       if (!hasHits) {
-        return `<div class="result-card"><div class="status-pill"><span>${escHtml(ip.ip)}</span><strong>0 hits</strong></div><p class="page-copy">No ALB hits found for this IP.</p></div>`;
+        return `<div class="result-card"><div class="status-pill"><span>${ipLabel}</span><strong>0 hits</strong></div><p class="page-copy">No ALB hits found for this IP.</p></div>`;
       }
+
+      // Requests the target never answered (target status "-", e.g. ELB 460) have no FE status.
+      const feNoResponse = Math.max(0, Number(ip.totalRows) - (Number(ip.fe2xx3xx || 0) + Number(ip.fe4xx || 0) + Number(ip.fe5xx || 0)));
+      const feNoResponseRow = feNoResponse > 0 ? `<tr><td>No response</td><td>${fmt(feNoResponse)}</td></tr>` : '';
 
       return `
         <details class="expandable-panel" open>
-          <summary>${escHtml(ip.ip)} — ${Number(ip.totalRows).toLocaleString('en-US')} hits</summary>
+          <summary>${ipLabel} — ${Number(ip.totalRows).toLocaleString('en-US')} hits</summary>
           <div class="expandable-body">
             <div class="status-block">
               <div class="status-pill"><span>Total</span><strong>${Number(ip.totalRows).toLocaleString('en-US')}</strong></div>
@@ -1742,7 +1787,7 @@
               </div>
               <div class="result-card">
                 <h4>FE Response totals</h4>
-                <table class="mini-table"><tr><td>2xx/3xx</td><td>${fmt(ip.fe2xx3xx)}</td></tr><tr><td>4xx</td><td>${fmt(ip.fe4xx)}</td></tr><tr><td>5xx</td><td>${fmt(ip.fe5xx)}</td></tr></table>
+                <table class="mini-table"><tr><td>2xx/3xx</td><td>${fmt(ip.fe2xx3xx)}</td></tr><tr><td>4xx</td><td>${fmt(ip.fe4xx)}</td></tr><tr><td>5xx</td><td>${fmt(ip.fe5xx)}</td></tr>${feNoResponseRow}</table>
               </div>
               <div class="result-card">
                 <h4>Interesting mismatches</h4>
@@ -1756,6 +1801,7 @@
           </div>
         </details>`;
     }).join('');
+    if (window.lhIpRanges) window.lhIpRanges.annotate(container).catch(() => {});
   }
 
   function fmt(v) { return Number(v || 0).toLocaleString('en-US'); }
@@ -1819,17 +1865,17 @@
     byId('ipSummaryRun')?.addEventListener('click', runIpSummary);
 
     const openIpSummaryReport = async () => {
-      try { await fetchJson('/api/alb/ip-summary/open-report', { method: 'POST' }); } catch (err) { setIpSummaryError(String(err)); }
+      try { await fetchJson('/api/alb/ip-summary/open-report', { method: 'POST' }); } catch (err) { setIpSummaryError(errorText(err)); }
     };
     const openIpSummaryExport = async () => {
-      try { await fetchJson('/api/alb/ip-summary/open-export', { method: 'POST' }); } catch (err) { setIpSummaryError(String(err)); }
+      try { await fetchJson('/api/alb/ip-summary/open-export', { method: 'POST' }); } catch (err) { setIpSummaryError(errorText(err)); }
     };
     byId('ipSummaryOpenReport')?.addEventListener('click', openIpSummaryReport);
     byId('ipSummaryResultsOpenReport')?.addEventListener('click', openIpSummaryReport);
     byId('ipSummaryOpenExport')?.addEventListener('click', openIpSummaryExport);
     byId('ipSummaryResultsOpenExport')?.addEventListener('click', openIpSummaryExport);
 
-    loadIpSummaryMeta().catch(err => setIpSummaryError(String(err)));
+    loadIpSummaryMeta().catch(err => setIpSummaryError(errorText(err)));
   }
 
   // ── Generic scan pages (options 4-10) ────────────────────────
@@ -1849,6 +1895,7 @@
     function setErr(msg) {
       var node = byId(prefix + 'Error');
       if (!node) return;
+      node.classList.remove('is-note');
       node.textContent = msg || '';
       node.hidden = !msg;
     }
@@ -1870,7 +1917,7 @@
         if (chip) {
           var d = defaultSelection;
           chip.textContent = d
-            ? (d.selectionLabel || 'Default folder') + ' | ' + (d.fileCount || 0) + ' files | ' + formatBytes(d.totalBytes || 0)
+            ? (d.selectionLabel || 'Default folder') + ' | ' + filesLabel(d.fileCount) + ' | ' + formatBytes(d.totalBytes || 0)
             : 'Default folder';
         }
         return;
@@ -1908,7 +1955,7 @@
       setText(prefix + 'Message', snap.error ? (snap.message + ' ' + snap.error) : (snap.message || ''));
       setText(prefix + 'Meta', snap.inputSourceSummary || '');
       setText(prefix + 'ExportPath', exportPath ? 'Exported: ' + exportPath : '');
-      setText(prefix + 'Count', String(result ? result.totalMatches || 0 : 0));
+      setText(prefix + 'Count', Number(result ? result.totalMatches || 0 : 0).toLocaleString('en-US'));
       [prefix + 'OpenExport', prefix + 'ResultsOpenExport'].forEach(function (id) {
         var btn = byId(id);
         if (btn) { btn.disabled = !exportPath; btn.classList.toggle('primary', !!exportPath); }
@@ -1934,7 +1981,7 @@
 
       if (state === 'completed') {
         setText(prefix + 'Summary', result ? result.completionMessage || 'Scan complete.' : 'Scan complete.');
-        setText(prefix + 'BarMeta', '100% | ' + (snap.filesTotal || 0) + ' files scanned');
+        setText(prefix + 'BarMeta', '100% | ' + filesLabel(snap.filesTotal) + ' scanned');
         if (bar) bar.style.width = '100%';
         renderResults(result);
 
@@ -2118,7 +2165,7 @@
       } catch (e) {
         sourceType = 'default';
         renderSource();
-        setErr(String(e));
+        setErr(errorText(e));
       }
     }
 
@@ -2139,7 +2186,7 @@
       } catch (e) {
         sourceType = 'default';
         renderSource();
-        setErr(String(e));
+        setErr(errorText(e));
       }
     }
 
@@ -2177,7 +2224,7 @@
         renderSnapshot(payload.snapshot);
         startPolling();
       } catch (e) {
-        setErr(String(e));
+        setErr(errorText(e));
       }
     }
 
@@ -2186,7 +2233,7 @@
       try {
         await fetchJson('/api/' + apiBase + '/open-export', { method: 'POST' });
       } catch (e) {
-        setErr(String(e));
+        setErr(errorText(e));
       }
     }
 
@@ -2195,7 +2242,7 @@
       try {
         await fetchJson('/api/' + apiBase + '/open-chart', { method: 'POST' });
       } catch (e) {
-        setErr(String(e));
+        setErr(errorText(e));
       }
     }
 
@@ -2209,7 +2256,7 @@
     byId(prefix + 'ResultsOpenExport')?.addEventListener('click', openExport);
     byId(prefix + 'ResultsOpenChart')?.addEventListener('click', openChart);
 
-    loadMeta().catch(function (e) { setErr(String(e)); });
+    loadMeta().catch(function (e) { setErr(errorText(e)); });
   }
 
   // ── Requests over time per IP (option 8) ────────────────────
@@ -2235,6 +2282,7 @@
     function setErr(msg) {
       var node = byId(prefix + 'Error');
       if (!node) return;
+      node.classList.remove('is-note');
       node.textContent = msg || '';
       node.hidden = !msg;
     }
@@ -2267,7 +2315,7 @@
         if (chip) {
           var d = defaultSelection;
           chip.textContent = d
-            ? (d.selectionLabel || 'Default folder') + ' | ' + (d.fileCount || 0) + ' files | ' + formatBytes(d.totalBytes || 0)
+            ? (d.selectionLabel || 'Default folder') + ' | ' + filesLabel(d.fileCount) + ' | ' + formatBytes(d.totalBytes || 0)
             : 'Default folder';
         }
         return;
@@ -2311,9 +2359,11 @@
       setText(prefix + 'StageBadge', phase);
       setText(prefix + 'Message', snap.error ? (snap.message + ' ' + snap.error) : (snap.message || ''));
       setText(prefix + 'Meta', snap.inputSourceSummary || '');
-      setText(prefix + 'Count', String(result ? result.totalMatches || 0 : 0));
+      setText(prefix + 'Count', Number(result ? result.totalMatches || 0 : 0).toLocaleString('en-US'));
       var openChartBtn2 = byId(prefix + 'OpenChart');
       if (openChartBtn2) {
+        // The button starts hidden in the markup; show it once a chart exists.
+        setHidden(openChartBtn2, !chartPath);
         openChartBtn2.disabled = !chartPath;
         openChartBtn2.classList.toggle('primary', !!chartPath);
       }
@@ -2334,12 +2384,12 @@
 
       if (state === 'completed') {
         setText(prefix + 'Summary', result ? result.completionMessage || 'Scan complete.' : 'Scan complete.');
-        setText(prefix + 'BarMeta', '100% | ' + (snap.filesTotal || 0) + ' files scanned');
+        setText(prefix + 'BarMeta', '100% | ' + filesLabel(snap.filesTotal) + ' scanned');
         if (bar) bar.style.width = '100%';
-        // Suppress bucket table — chart is the primary output
+        renderResults(result);
         if (chartPath && !chartAutoOpened) {
           chartAutoOpened = true;
-          openChart();
+          openChart(true);
         }
       } else if (state === 'failed') {
         setText(prefix + 'Summary', 'Scan failed.');
@@ -2438,7 +2488,7 @@
           }
         });
       } catch (e) {
-        setErr(String(e));
+        setErr(errorText(e));
       } finally {
         hideLoading();
       }
@@ -2478,7 +2528,7 @@
       } catch (e) {
         sourceType = 'default';
         renderSource();
-        setErr(String(e));
+        setErr(errorText(e));
       }
     }
 
@@ -2499,7 +2549,7 @@
       } catch (e) {
         sourceType = 'default';
         renderSource();
-        setErr(String(e));
+        setErr(errorText(e));
       }
     }
 
@@ -2545,16 +2595,19 @@
           return;
         }
 
+        setHidden(byId(prefix + 'Results'), true);
         renderSnapshot(payload.snapshot);
+        showNote(byId(prefix + 'Error'), ignoredInputNote(payload));
         startPolling();
       } catch (e) {
-        setErr(String(e));
+        setErr(errorText(e));
       }
     }
 
-    async function openChart() {
-      setErr('');
-      try { await fetchJson('/api/' + apiBase + '/open-chart', { method: 'POST' }); } catch (e) { setErr(String(e)); }
+    // keepNotice: the auto-open after a scan must not wipe the "Ignored input" notice.
+    async function openChart(keepNotice) {
+      if (keepNotice !== true) setErr('');
+      try { await fetchJson('/api/' + apiBase + '/open-chart', { method: 'POST' }); } catch (e) { setErr(errorText(e)); }
     }
 
     byId(prefix + 'ModeManual')?.addEventListener('click', function () { setInputMode('manual'); });
@@ -2567,7 +2620,7 @@
     byId(prefix + 'Run')?.addEventListener('click', runScan);
     byId(prefix + 'OpenChart')?.addEventListener('click', openChart);
 
-    loadMetaData().catch(function (e) { setErr(String(e)); });
+    loadMetaData().catch(function (e) { setErr(errorText(e)); });
   }
 
   function initializeAllGenericScanPages() {

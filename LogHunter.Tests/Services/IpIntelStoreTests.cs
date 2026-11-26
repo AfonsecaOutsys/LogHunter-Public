@@ -4,6 +4,9 @@ using Xunit;
 
 namespace LogHunter.Tests.Services;
 
+// RefreshFeedAsync writes feed files under the static IpIntelStore root, the same files IpIntelApiTests
+// refresh: running both in parallel occasionally failed with "Access to the path is denied".
+[Collection(SharedIpIntelState.Name)]
 public class IpIntelStoreTests
 {
     private sealed class StubHandler : HttpMessageHandler
