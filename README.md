@@ -46,6 +46,29 @@ LogHunter is built for security and incident investigations, turning raw logs in
 
 ## Release notes
 
+### 2.1
+
+2.1 rolls up everything shipped in 2.0.0.1 to 2.0.0.5 (IP sweep, CDN and proxy labels, IIS burst scoring, client-IP resolution, diagnosis trace, usage counts; see below) and adds:
+
+- **Log source on every IIS workflow**: Status Pivot, Top Bandwidth and Uploads now take the default folder, a selected folder or selected files, like the other workflows, and show the folder, file count and size before you run. Platform pages show the folder they scan.
+- **Manual IP lists are checked the same way everywhere** (IP Summary, Requests over time, AbuseIPDB, Platform authenticated activity): anything that isn't a full IP address is listed as "Ignored input" instead of being dropped silently, and typos like `12345` are no longer read as `0.0.48.57`. AbuseIPDB never sends private, loopback or reserved addresses, so they don't spend your quota.
+- **Platform scans say what they skipped**: rows that matched but had no client IP, files without the needed columns, and Integrations / Service Actions exports (no client-IP column) are reported instead of "no matches".
+- **Feedback page** (top right): send a note about the page you're on. Usage counts can now be switched **On / Off** below the form (see "Usage counts").
+- `--root <path>` now moves every workspace folder (ALB, IIS, PlatformLogs, config, output, logs). Before, some folders stayed next to the exe.
+- Results:
+  - Requests over time shows its Open chart button and top-buckets table again.
+  - ALB IP Summary has CDN / proxy badges.
+  - The ALB "Top 50" count pills show unique IPs, pairs or URIs.
+  - Uploads ranks and shows the largest single upload first.
+  - IP sweep labels CIDR blocks and ranges by network (for example "Akamai edge (6 IPs)").
+- Accuracy:
+  - Per-IP cards and reports are sorted by hits.
+  - AVG duration and Top 50 by URI treat `/Page` and `/page/` as one path.
+  - Charts start at 0.
+  - The IP ranges page lists the built-in ranges.
+- Cleaner screens: the page title is no longer repeated in a second header block, so inputs sit higher. Errors show their message without an "Error:" prefix, a bad status filter names the bad codes, and counts are formatted and pluralised.
+- Diagnosis trace: the 4-second status heartbeat is no longer logged, so trace files are much smaller.
+
 ### 2.0.0.5
 
 - Anonymous usage counts: each launch sends one start event, and each workflow run sends one event, to an internal service. What is sent: a random install id, a random id for the launch, the app version, the mode (`web` or `console`) and the workflow name. No user name, machine name, file paths, IPs or log content. Sent in the background, never slows the tool down, fails silently when offline. Set `LOGHUNTER_NO_USAGE=1` to turn it off (see "Usage counts" below).
