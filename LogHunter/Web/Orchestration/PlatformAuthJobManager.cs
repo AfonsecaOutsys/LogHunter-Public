@@ -165,9 +165,12 @@ internal sealed class PlatformAuthJobManager
             {
                 State = "completed",
                 Phase = "completed",
-                Message = result.DistinctMatchedIps > 0
-                    ? $"Found {result.TotalMatchedRows} authenticated rows across {result.DistinctMatchedIps} IPs."
-                    : "None of the suspicious IPs were found with authenticated activity.",
+                Message = (result.DistinctMatchedIps > 0
+                    ? $"Found {result.TotalMatchedRows:N0} authenticated rows across {result.DistinctMatchedIps:N0} IPs."
+                    : "None of the suspicious IPs were found with authenticated activity.")
+                    + (result.FilesSkippedNoClientIp.Count > 0
+                        ? $" Skipped (no client IP column): {string.Join(", ", result.FilesSkippedNoClientIp)}."
+                        : ""),
                 UpdatedUtc = DateTime.UtcNow,
                 CurrentStep = result.FilesScanned,
                 TotalSteps = result.FilesScanned,

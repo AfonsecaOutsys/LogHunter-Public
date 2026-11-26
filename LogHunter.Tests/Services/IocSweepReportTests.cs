@@ -5,6 +5,8 @@ using Xunit;
 
 namespace LogHunter.Tests.Services;
 
+// Reads the shared IpIntelStore snapshot that IpIntelApiTests swaps: never run in parallel with it.
+[Collection(SharedIpIntelState.Name)]
 public sealed class IocSweepReportTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "lh-ioc-report-" + Guid.NewGuid().ToString("N"));

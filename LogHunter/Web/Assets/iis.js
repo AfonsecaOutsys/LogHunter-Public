@@ -1,4 +1,9 @@
 (function () {
+  function filesLabel(n) { return Number(n || 0).toLocaleString('en-US') + ' file' + (Number(n) === 1 ? '' : 's'); }
+
+  // Errors show their message, not the raw "Error: ..." toString.
+  function errorText(err) { return err && err.message ? err.message : String(err); }
+
   // ── Shared helpers ──────────────────────────────────────────────
 
   function byId(id) { return document.getElementById(id); }
@@ -184,6 +189,7 @@
   function setIisIpSummaryError(msg) {
     const node = byId('iisIpSummaryError');
     if (!node) return;
+    node.classList.remove('is-note');
     node.textContent = msg || '';
     node.hidden = !msg;
   }
@@ -229,7 +235,7 @@
       if (chip) {
         const d = iisIpSummaryDefaultSelection;
         chip.textContent = d
-          ? (d.selectionLabel || 'Default folder') + ' | ' + (d.fileCount || 0) + ' files | ' + formatBytes(d.totalBytes || 0)
+          ? (d.selectionLabel || 'Default folder') + ' | ' + filesLabel(d.fileCount) + ' | ' + formatBytes(d.totalBytes || 0)
           : 'Default folder';
       }
       return;
@@ -288,7 +294,7 @@
         }
       });
     } catch (err) {
-      setIisIpSummaryError(String(err));
+      setIisIpSummaryError(errorText(err));
     } finally {
       hideLoading();
     }
@@ -310,7 +316,7 @@
     } catch (err) {
       iisIpSummarySourceType = 'default';
       renderIisIpSummarySource();
-      setIisIpSummaryError(String(err));
+      setIisIpSummaryError(errorText(err));
     }
   }
 
@@ -330,7 +336,7 @@
     } catch (err) {
       iisIpSummarySourceType = 'default';
       renderIisIpSummarySource();
-      setIisIpSummaryError(String(err));
+      setIisIpSummaryError(errorText(err));
     }
   }
 
@@ -372,8 +378,9 @@
       });
       if (!payload.ok) { setIisIpSummaryError(payload.error || 'Failed to start scan.'); return; }
       renderIisIpSummarySnapshot(payload.snapshot);
+      showNote(byId('iisIpSummaryError'), ignoredInputNote(payload));
       startIisIpSummaryPolling();
-    } catch (err) { setIisIpSummaryError(String(err)); }
+    } catch (err) { setIisIpSummaryError(errorText(err)); }
   }
 
   function startIisIpSummaryPolling() {
@@ -417,7 +424,7 @@
 
     if (state === 'completed') {
       setText('iisIpSummarySummary', 'Scan complete.');
-      setText('iisIpSummaryBarMeta', `100% | ${snap.filesTotal || 0} files scanned`);
+      setText('iisIpSummaryBarMeta', `100% | ${filesLabel(snap.filesTotal)} scanned`);
       if (bar) bar.style.width = '100%';
     } else if (state === 'failed') {
       setText('iisIpSummarySummary', 'Scan failed.');
@@ -619,18 +626,18 @@
 
     const openIisReport = async () => {
       try { await fetchJson('/api/iis/ip-summary/open-report', { method: 'POST' }); }
-      catch (err) { setIisIpSummaryError(String(err)); }
+      catch (err) { setIisIpSummaryError(errorText(err)); }
     };
     const openIisExport = async () => {
       try { await fetchJson('/api/iis/ip-summary/open-export', { method: 'POST' }); }
-      catch (err) { setIisIpSummaryError(String(err)); }
+      catch (err) { setIisIpSummaryError(errorText(err)); }
     };
     byId('iisIpSummaryOpenReport')?.addEventListener('click', openIisReport);
     byId('iisIpSummaryResultsOpenReport')?.addEventListener('click', openIisReport);
     byId('iisIpSummaryOpenExport')?.addEventListener('click', openIisExport);
     byId('iisIpSummaryResultsOpenExport')?.addEventListener('click', openIisExport);
 
-    loadIisIpSummaryMeta().catch(err => setIisIpSummaryError(String(err)));
+    loadIisIpSummaryMeta().catch(err => setIisIpSummaryError(errorText(err)));
   }
 
   // ── IIS Status Pivot ────────────────────────────────────────────
@@ -653,8 +660,11 @@
     setHidden(byId('iisStatusPivotCustomCodes'), filter !== 'custom');
   }
 
+  let iisStatusPivotSource = null;
+
   async function loadIisStatusPivotMeta() {
     const payload = await fetchJson('/api/iis/status-pivot/meta');
+    iisStatusPivotSource?.setDefault(payload.defaultSelection);
     if (payload.currentJob) {
       renderIisStatusPivotSnapshot(payload.currentJob);
       if (payload.currentJob.state === 'running') startIisStatusPivotPolling();
@@ -674,12 +684,12 @@
     try {
       const payload = await fetchJson('/api/iis/status-pivot/run', {
         method: 'POST',
-        body: JSON.stringify({ statusFilter, appScopeFragment: appScope, selectedIps: [] })
+        body: JSON.stringify({ statusFilter, appScopeFragment: appScope, selectedIps: [], ...(iisStatusPivotSource?.requestFields() || {}) })
       });
       if (!payload.ok) { setIisStatusPivotError(payload.error || 'Failed to start scan.'); return; }
       renderIisStatusPivotSnapshot(payload.snapshot);
       startIisStatusPivotPolling();
-    } catch (err) { setIisStatusPivotError(String(err)); }
+    } catch (err) { setIisStatusPivotError(errorText(err)); }
   }
 
   function startIisStatusPivotPolling() {
@@ -719,7 +729,7 @@
 
     if (state === 'completed') {
       setText('iisStatusPivotSummary', `${snap.uniqueErrorIps || 0} error IPs found. ${fmt(snap.exportedLines || 0)} lines exported.`);
-      setText('iisStatusPivotBarMeta', `100% | ${snap.filesTotal || 0} files`);
+      setText('iisStatusPivotBarMeta', `100% | ${filesLabel(snap.filesTotal)}`);
       setBar('iisStatusPivotBar', 1, 1);
     } else if (state === 'failed') {
       setText('iisStatusPivotSummary', 'Scan failed.');
@@ -766,6 +776,7 @@
     if (codesInput) codesInput.disabled = locked;
     const appScope = byId('iisStatusPivotAppScope');
     if (appScope) appScope.disabled = locked;
+    iisStatusPivotSource?.setLocked(locked);
   }
 
   function renderIisStatusPivotResults(snap) {
@@ -833,15 +844,105 @@
     });
 
     byId('iisStatusPivotRun')?.addEventListener('click', runIisStatusPivot);
+    iisStatusPivotSource = createIisSourcePicker('iisStatusPivot', setIisStatusPivotError);
 
     const openPivotExport = async () => {
       try { await fetchJson('/api/iis/status-pivot/open-export', { method: 'POST' }); }
-      catch (err) { setIisStatusPivotError(String(err)); }
+      catch (err) { setIisStatusPivotError(errorText(err)); }
     };
     byId('iisStatusPivotOpenExport')?.addEventListener('click', openPivotExport);
     byId('iisStatusPivotResultsOpenExport')?.addEventListener('click', openPivotExport);
 
-    loadIisStatusPivotMeta().catch(err => setIisStatusPivotError(String(err)));
+    loadIisStatusPivotMeta().catch(err => setIisStatusPivotError(errorText(err)));
+  }
+
+  // Server reports manual IP tokens it dropped (invalid) or did not send (private/reserved).
+  function ignoredInputNote(payload) {
+    var parts = [];
+    if (payload && payload.ignored && payload.ignored.length) parts.push('Ignored input: ' + payload.ignored.join(', '));
+    if (payload && payload.skipped && payload.skipped.length) parts.push('Skipped private/reserved (not sent): ' + payload.skipped.join(', '));
+    return parts.join(' | ');
+  }
+
+  // Shows an informational message in an error slot with neutral styling; the error setters clear it.
+  function showNote(node, msg) {
+    if (!node) return;
+    node.textContent = msg || '';
+    node.hidden = !msg;
+    node.classList.toggle('is-note', !!msg);
+  }
+
+  // ── Shared log source picker (Status Pivot, Bytes Intel) ───────
+  // Default folder / selected folder / selected files, same rules as Burst Patterns.
+
+  function createIisSourcePicker(prefix, onError) {
+    let type = 'default';
+    let defaults = null;
+    let selection = null;
+    const plural = n => n + ' file' + (n === 1 ? '' : 's');
+
+    function render() {
+      byId(prefix + 'UseDefault')?.classList.toggle('active', type === 'default');
+      byId(prefix + 'SelectFolder')?.classList.toggle('active', type === 'folder');
+      byId(prefix + 'SelectFiles')?.classList.toggle('active', type === 'files');
+      setHidden(byId(prefix + 'ClearSelection'), type === 'default');
+      const chip = byId(prefix + 'SourceChip');
+      if (!chip) return;
+      if (type === 'default') {
+        chip.textContent = defaults
+          ? (defaults.selectionLabel || 'Default folder') + ' | ' + plural(defaults.fileCount || 0) + ' | ' + formatBytes(defaults.totalBytes || 0)
+          : 'Default folder';
+      } else if (!selection) {
+        chip.textContent = type === 'folder' ? 'No folder selected' : 'No files selected';
+      } else {
+        const head = type === 'folder' ? (selection.selectionLabel || 'Selected folder') + ' | ' : '';
+        chip.textContent = head + plural(selection.fileCount || 0) + ' | ' + formatBytes(selection.totalBytes || 0);
+      }
+    }
+
+    async function browse(kind) {
+      onError('');
+      type = kind;
+      selection = null;
+      render();
+      try {
+        const payload = await fetchJson('/api/iis/browse-' + kind, { method: 'POST' });
+        if (!payload.ok) {
+          if (payload.cancelled) { type = 'default'; render(); return; }
+          throw new Error(payload.error || 'Failed to browse.');
+        }
+        selection = payload.selection;
+        render();
+      } catch (err) {
+        type = 'default';
+        render();
+        onError(errorText(err));
+      }
+    }
+
+    function clear() { onError(''); type = 'default'; selection = null; render(); }
+
+    byId(prefix + 'UseDefault')?.addEventListener('click', clear);
+    byId(prefix + 'ClearSelection')?.addEventListener('click', clear);
+    byId(prefix + 'SelectFolder')?.addEventListener('click', () => browse('folder'));
+    byId(prefix + 'SelectFiles')?.addEventListener('click', () => browse('files'));
+
+    return {
+      setDefault(d) { defaults = d || null; render(); },
+      // Fields merged into the run request body.
+      requestFields() {
+        const body = { sourceType: type };
+        if (type === 'folder' && selection && selection.rootPath) body.serverPath = selection.rootPath;
+        else if (type === 'files' && selection && selection.filePaths) body.serverFilePaths = selection.filePaths;
+        return body;
+      },
+      setLocked(locked) {
+        ['UseDefault', 'SelectFolder', 'SelectFiles', 'ClearSelection'].forEach(s => {
+          const el = byId(prefix + s);
+          if (el) el.disabled = locked;
+        });
+      }
+    };
   }
 
   // ── IIS Burst Patterns ─────────────────────────────────────────
@@ -877,7 +978,7 @@
       if (chip) {
         const d = iisBurstDefaultSelection;
         chip.textContent = d
-          ? (d.selectionLabel || 'Default folder') + ' | ' + (d.fileCount || 0) + ' files | ' + formatBytes(d.totalBytes || 0)
+          ? (d.selectionLabel || 'Default folder') + ' | ' + filesLabel(d.fileCount) + ' | ' + formatBytes(d.totalBytes || 0)
           : 'Default folder';
       }
       return;
@@ -909,7 +1010,7 @@
     } catch (err) {
       iisBurstSourceType = 'default';
       renderIisBurstSource();
-      setIisBurstError(String(err));
+      setIisBurstError(errorText(err));
     }
   }
 
@@ -929,7 +1030,7 @@
     } catch (err) {
       iisBurstSourceType = 'default';
       renderIisBurstSource();
-      setIisBurstError(String(err));
+      setIisBurstError(errorText(err));
     }
   }
 
@@ -972,7 +1073,7 @@
       if (!payload.ok) { setIisBurstError(payload.error || 'Failed to start scan.'); return; }
       renderIisBurstSnapshot(payload.snapshot);
       startIisBurstPolling();
-    } catch (err) { setIisBurstError(String(err)); }
+    } catch (err) { setIisBurstError(errorText(err)); }
   }
 
   function startIisBurstPolling() {
@@ -1012,7 +1113,7 @@
 
     if (state === 'completed') {
       setText('iisBurstSummary', `${snap.candidateCount || 0} burst candidates found.`);
-      setText('iisBurstBarMeta', `100% | ${snap.filesTotal || 0} files`);
+      setText('iisBurstBarMeta', `100% | ${filesLabel(snap.filesTotal)}`);
       setBar('iisBurstBar', 1, 1);
     } else if (state === 'failed') {
       setText('iisBurstSummary', 'Scan failed.');
@@ -1162,13 +1263,14 @@
     byId('iisBurstSelectFiles')?.addEventListener('click', selectIisBurstFiles);
     byId('iisBurstClearSelection')?.addEventListener('click', clearIisBurstSelection);
     byId('iisBurstRun')?.addEventListener('click', runIisBurst);
-    loadIisBurstMeta().catch(err => setIisBurstError(String(err)));
+    loadIisBurstMeta().catch(err => setIisBurstError(errorText(err)));
   }
 
   // ── IIS Bytes Intel (bandwidth + uploads) ──────────────────────
 
   let iisBytesIntelPolling = null;
   let iisBytesIntelMode = '';
+  let iisBytesIntelSource = null;
 
   function getBytesIntelPrefix() {
     return iisBytesIntelMode === 'uploads' ? 'iisUploads' : 'iisBandwidth';
@@ -1184,6 +1286,7 @@
 
   async function loadIisBytesIntelMeta() {
     const payload = await fetchJson('/api/iis/bytes-intel/meta');
+    iisBytesIntelSource?.setDefault(payload.defaultSelection);
     if (payload.currentJob && payload.currentJob.mode === iisBytesIntelMode) {
       renderIisBytesIntelSnapshot(payload.currentJob);
       if (payload.currentJob.state === 'running') startIisBytesIntelPolling();
@@ -1195,12 +1298,12 @@
     try {
       const payload = await fetchJson('/api/iis/bytes-intel/run', {
         method: 'POST',
-        body: JSON.stringify({ mode: iisBytesIntelMode })
+        body: JSON.stringify({ mode: iisBytesIntelMode, ...(iisBytesIntelSource?.requestFields() || {}) })
       });
       if (!payload.ok) { setIisBytesIntelError(payload.error || 'Failed to start scan.'); return; }
       renderIisBytesIntelSnapshot(payload.snapshot);
       startIisBytesIntelPolling();
-    } catch (err) { setIisBytesIntelError(String(err)); }
+    } catch (err) { setIisBytesIntelError(errorText(err)); }
   }
 
   function startIisBytesIntelPolling() {
@@ -1242,7 +1345,7 @@
     if (state === 'completed') {
       const ipCount = snap.topIps ? snap.topIps.length : 0;
       setText(`${prefix}Summary`, `${ipCount} IPs found.`);
-      setText(`${prefix}BarMeta`, `100% | ${snap.filesTotal || 0} files`);
+      setText(`${prefix}BarMeta`, `100% | ${filesLabel(snap.filesTotal)}`);
       setBar(`${prefix}Bar`, 1, 1);
     } else if (state === 'failed') {
       setText(`${prefix}Summary`, 'Scan failed.');
@@ -1281,6 +1384,7 @@
     const prefix = getBytesIntelPrefix();
     const el = byId(`${prefix}Run`);
     if (el) el.disabled = locked;
+    iisBytesIntelSource?.setLocked(locked);
   }
 
   function renderIisBytesIntelResults(snap, prefix) {
@@ -1302,13 +1406,19 @@
       const uriRows = (ip.topUris || []).map(u =>
         `<li style="font-family:monospace;word-break:break-all">${escHtml(u.uri)} — ${formatBytes(u.bytes)} (${fmt(u.hits)} hits)</li>`
       ).join('');
+      // Uploads are ranked by the largest single payload, so that value leads the line.
+      const headline = isBandwidth
+        ? `${formatBytes(primaryBytes)} (${fmt(ip.hits)} hits)`
+        : `max ${formatBytes(ip.maxBytes)} · total ${formatBytes(primaryBytes)} (${fmt(ip.hits)} POST/PUT)`;
+      const maxPill = isBandwidth ? '' : `<div class="status-pill"><span>Max cs-bytes</span><strong>${formatBytes(ip.maxBytes)}</strong></div>`;
 
       return `
         <details class="expandable-panel">
-          <summary>#${ip.rank} <span data-ip="${escHtml(ip.ip)}">${escHtml(ip.ip)}</span> — ${formatBytes(primaryBytes)} (${fmt(ip.hits)} hits)</summary>
+          <summary>#${ip.rank} <span data-ip="${escHtml(ip.ip)}">${escHtml(ip.ip)}</span> — ${headline}</summary>
           <div class="expandable-body">
             <div class="status-block">
-              <div class="status-pill"><span>${bytesLabel}</span><strong>${formatBytes(primaryBytes)}</strong></div>
+              ${maxPill}
+              <div class="status-pill"><span>${isBandwidth ? bytesLabel : 'Total cs-bytes'}</span><strong>${formatBytes(primaryBytes)}</strong></div>
               <div class="status-pill"><span>Hits</span><strong>${fmt(ip.hits)}</strong></div>
               <div class="status-pill"><span>2xx</span><strong>${fmt(ip.c2xx)}</strong></div>
               <div class="status-pill"><span>3xx</span><strong>${fmt(ip.c3xx)}</strong></div>
@@ -1326,18 +1436,19 @@
     if (!section) return;
 
     iisBytesIntelMode = section.getAttribute('data-iis-bytes-mode') || 'bandwidth';
+    iisBytesIntelSource = createIisSourcePicker(getBytesIntelPrefix(), setIisBytesIntelError);
     const prefix = getBytesIntelPrefix();
 
     byId(`${prefix}Run`)?.addEventListener('click', runIisBytesIntel);
 
     const openBytesExport = async () => {
       try { await fetchJson('/api/iis/bytes-intel/open-export', { method: 'POST' }); }
-      catch (err) { setIisBytesIntelError(String(err)); }
+      catch (err) { setIisBytesIntelError(errorText(err)); }
     };
     byId(`${prefix}OpenExport`)?.addEventListener('click', openBytesExport);
     byId(`${prefix}ResultsOpenExport`)?.addEventListener('click', openBytesExport);
 
-    loadIisBytesIntelMeta().catch(err => setIisBytesIntelError(String(err)));
+    loadIisBytesIntelMeta().catch(err => setIisBytesIntelError(errorText(err)));
   }
 
   // ── Bootstrap ───────────────────────────────────────────────────

@@ -4,6 +4,8 @@
 
 The server side is **done, published and tested live**. Your job is the client: a `UsageReporter` class, the call sites, the publish-time endpoint and key, and the tests.
 
+**Also live since 2026-11-25:** a feedback endpoint on the same API. Its client work (a Feedback button and page) is in [`handoff-feedback-api.md`](handoff-feedback-api.md).
+
 The full design (class shape, call-site table with file:line, csproj snippet, tests) is in [`usage-tracking-plan.md`](usage-tracking-plan.md) section 2. This note covers what you can't get from the code: the live contract, decisions already made, and traps found in testing.
 
 ## 1. The contract (live, do not change it without asking the user)

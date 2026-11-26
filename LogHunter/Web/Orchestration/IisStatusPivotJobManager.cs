@@ -27,7 +27,9 @@ internal sealed class IisStatusPivotJobManager
         string? appScopeFragment,
         IReadOnlyList<string> selectedIps,
         out IisStatusPivotJobSnapshot snapshot,
-        out string? error)
+        out string? error,
+        IReadOnlyList<string>? customFiles = null,
+        string? customFolderPath = null)
     {
         lock (_gate)
         {
@@ -38,20 +40,21 @@ internal sealed class IisStatusPivotJobManager
                 return false;
             }
 
-            var files = IisW3cReader.EnumerateLogFiles(AppFolders.IIS);
+            var files = IisSourceFiles.Resolve(customFiles, customFolderPath);
             if (files.Count == 0)
             {
                 snapshot = _snapshot;
-                error = $"No .log files found in: {AppFolders.IIS}";
+                error = $"No .log files found in: {IisSourceFiles.Describe(customFiles, customFolderPath)}";
                 return false;
             }
 
             Func<int, bool> matchFn;
             string filterLabel;
-            if (!TryBuildStatusFilter(statusFilter, out matchFn!, out filterLabel!))
+            if (!TryBuildStatusFilter(statusFilter, out matchFn!, out filterLabel!, out var badTokens))
             {
                 snapshot = _snapshot;
-                error = "Invalid status filter.";
+                var bad = badTokens.Count > 0 ? $"Invalid status code: {string.Join(", ", badTokens)}. " : "Invalid status filter. ";
+                error = bad + "Use 4xx, 5xx, 4xx+5xx or comma-separated codes from 100 to 599 (e.g. 401,403,404).";
                 return false;
             }
 
@@ -120,10 +123,11 @@ internal sealed class IisStatusPivotJobManager
         }
     }
 
-    private static bool TryBuildStatusFilter(string filter, out Func<int, bool> matchFn, out string label)
+    private static bool TryBuildStatusFilter(string filter, out Func<int, bool> matchFn, out string label, out List<string> badTokens)
     {
         matchFn = null!;
         label = filter;
+        badTokens = new List<string>();
 
         switch (filter?.ToLowerInvariant())
         {
@@ -142,12 +146,15 @@ internal sealed class IisStatusPivotJobManager
             default:
                 if (string.IsNullOrWhiteSpace(filter))
                     return false;
-                var codes = filter.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .Select(part => int.TryParse(part, out var code) ? code : -1)
-                    .Where(code => code is >= 100 and <= 599)
-                    .Distinct()
-                    .ToHashSet();
-                if (codes.Count == 0)
+                var codes = new HashSet<int>();
+                foreach (var part in filter.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (int.TryParse(part, out var code) && code is >= 100 and <= 599)
+                        codes.Add(code);
+                    else
+                        badTokens.Add(part);
+                }
+                if (codes.Count == 0 || badTokens.Count > 0)
                     return false;
                 matchFn = code => codes.Contains(code);
                 label = string.Join(", ", codes.OrderBy(c => c));

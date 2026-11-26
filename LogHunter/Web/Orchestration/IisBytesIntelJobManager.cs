@@ -29,7 +29,9 @@ internal sealed class IisBytesIntelJobManager
     public bool TryStart(
         string mode,
         out IisBytesIntelJobSnapshot snapshot,
-        out string? error)
+        out string? error,
+        IReadOnlyList<string>? customFiles = null,
+        string? customFolderPath = null)
     {
         lock (_gate)
         {
@@ -49,11 +51,11 @@ internal sealed class IisBytesIntelJobManager
                 return false;
             }
 
-            var files = IisW3cReader.EnumerateLogFiles(AppFolders.IIS);
+            var files = IisSourceFiles.Resolve(customFiles, customFolderPath);
             if (files.Count == 0)
             {
                 snapshot = _snapshot;
-                error = $"No .log files found in: {AppFolders.IIS}";
+                error = $"No .log files found in: {IisSourceFiles.Describe(customFiles, customFolderPath)}";
                 return false;
             }
 
@@ -246,7 +248,7 @@ internal sealed class IisBytesIntelJobManager
                     Hits: a.Hits,
                     TotalScBytes: a.TotalScBytes,
                     TotalCsBytes: a.TotalCsBytes,
-                    MaxScBytes: a.MaxScBytes,
+                    MaxBytes: a.MaxScBytes,
                     C2xx: a.C2xx, C3xx: a.C3xx, C4xx: a.C4xx, C5xx: a.C5xx,
                     TopUri: topUri.Key ?? "-",
                     TopUriBytes: topUri.Value.Bytes,
@@ -408,7 +410,7 @@ internal sealed class IisBytesIntelJobManager
                     Hits: a.PostPutCount,
                     TotalScBytes: a.TotalScBytes,
                     TotalCsBytes: a.TotalCsBytes,
-                    MaxScBytes: a.MaxCsBytes,
+                    MaxBytes: a.MaxCsBytes,
                     C2xx: a.C2xx, C3xx: a.C3xx, C4xx: a.C4xx, C5xx: a.C5xx,
                     TopUri: topEp.Key ?? "-",
                     TopUriBytes: topEp.Value.CsBytes,
@@ -815,7 +817,7 @@ internal sealed record BytesIntelIpResult(
     long Hits,
     long TotalScBytes,
     long TotalCsBytes,
-    long MaxScBytes,
+    long MaxBytes, // largest single response (bandwidth) or upload (uploads): the uploads ranking key
     int C2xx, int C3xx, int C4xx, int C5xx,
     string TopUri,
     long TopUriBytes,

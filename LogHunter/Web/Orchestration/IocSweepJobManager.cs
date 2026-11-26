@@ -14,7 +14,8 @@ internal sealed record IocSweepSourceRequest(string Label, string Path);
 
 internal sealed record IocSweepTargetRow(
     string Target, string Kind, long Hits, string FirstSeenUtc, string LastSeenUtc,
-    int DistinctIps, IReadOnlyList<string> TopIps, string TopPaths, string Statuses, string Sources);
+    int DistinctIps, IReadOnlyList<string> TopIps, string TopPaths, string Statuses, string Sources,
+    string Network = ""); // ranges only: same label as the report's Network column
 
 internal sealed record IocSweepScopeRow(
     string Label, int AlbFiles, int IisFiles, long LinesRead, long RecordsParsed, long ParseFailures,
@@ -201,7 +202,8 @@ internal sealed class IocSweepJobManager
                 IocSweepReport.Top(t.MatchedIps, 50).Select(kv => kv.Key).ToList(),
                 IocSweepReport.FormatTop(t.Uris, 3),
                 IocSweepReport.FormatTop(t.Statuses, 4),
-                IocSweepReport.FormatTop(t.HitsBySource, 6)))
+                IocSweepReport.FormatTop(t.HitsBySource, 6),
+                t.Target.IsSingle ? "" : IocSweepReport.NetworkLabel(t)))
             .ToList();
 
     // Scopes come back in source order; path and size let the page hand a folder to IP summary.

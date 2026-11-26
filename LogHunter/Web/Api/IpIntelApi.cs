@@ -106,6 +106,10 @@ internal static class IpIntelApi
             rangeCount = f.RangeCount,
             lastError = f.LastError,
         }),
+        // Ranges shipped in the exe (no download): listed so every label on a result has a source.
+        builtIn = IpIntelFeeds.Static
+            .GroupBy(s => s.Label.Provider)
+            .Select(g => new { provider = g.Key, rangeCount = g.Count() }),
     };
 
     /// <summary>Short text for the topbar pill: age of the oldest feed, "updating" or "not loaded".</summary>

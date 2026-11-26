@@ -72,9 +72,9 @@ internal static class AlbTopIpsInputSourceResolver
         var fileCount = files.Count;
         var summary = sourceType switch
         {
-            AlbTopIpsInputSourceType.DefaultFolder => $"Default folder | {selectionLabel} | {fileCount:N0} files | {FormatBytes(totalBytes)}",
-            AlbTopIpsInputSourceType.SelectedFolder => $"Selected folder | {selectionLabel} | {fileCount:N0} files | {FormatBytes(totalBytes)}",
-            _ => $"Selected files | {fileCount:N0} files | {FormatBytes(totalBytes)}"
+            AlbTopIpsInputSourceType.DefaultFolder => $"Default folder | {selectionLabel} | {fileCount:N0} file{(fileCount == 1 ? "" : "s")} | {FormatBytes(totalBytes)}",
+            AlbTopIpsInputSourceType.SelectedFolder => $"Selected folder | {selectionLabel} | {fileCount:N0} file{(fileCount == 1 ? "" : "s")} | {FormatBytes(totalBytes)}",
+            _ => $"Selected files | {fileCount:N0} file{(fileCount == 1 ? "" : "s")} | {FormatBytes(totalBytes)}"
         };
 
         return new AlbTopIpsInputSourceSelection(

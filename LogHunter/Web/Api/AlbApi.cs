@@ -387,20 +387,11 @@ internal static class AlbApi
                 return true;
             }
 
-            var validIps = new List<string>();
-            foreach (var raw in body.Ips)
-            {
-                var trimmed = raw?.Trim();
-                if (string.IsNullOrWhiteSpace(trimmed)) continue;
-                if (!System.Net.IPAddress.TryParse(trimmed, out var parsed)) continue;
-                var normalized = parsed.ToString();
-                if (!validIps.Contains(normalized, StringComparer.OrdinalIgnoreCase))
-                    validIps.Add(normalized);
-            }
+            var (validIps, ignoredIps) = LogHunter.Utils.IpTargetParser.ParseIpList(body.Ips);
 
             if (validIps.Count == 0)
             {
-                await WriteJsonAsync(context.Response, new { ok = false, error = "No valid IP addresses found." }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                await WriteJsonAsync(context.Response, new { ok = false, error = NoValidIpsMessage(ignoredIps), ignored = ignoredIps }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
 
@@ -433,7 +424,7 @@ internal static class AlbApi
 
             UsageReporter.Track(UsageFeature.AlbIpSummary);
 
-            await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
+            await WriteJsonAsync(context.Response, new { ok = true, snapshot, ignored = ignoredIps }).ConfigureAwait(false);
             return true;
         }
 
@@ -604,20 +595,11 @@ internal static class AlbApi
                 return true;
             }
 
-            var validIps = new List<string>();
-            foreach (var raw in body.Ips)
-            {
-                var trimmed = raw?.Trim();
-                if (string.IsNullOrWhiteSpace(trimmed)) continue;
-                if (!System.Net.IPAddress.TryParse(trimmed, out var parsed)) continue;
-                var normalized = parsed.ToString();
-                if (!validIps.Contains(normalized, StringComparer.OrdinalIgnoreCase))
-                    validIps.Add(normalized);
-            }
+            var (validIps, ignoredIps) = LogHunter.Utils.IpTargetParser.ParseIpList(body.Ips);
 
             if (validIps.Count == 0)
             {
-                await WriteJsonAsync(context.Response, new { ok = false, error = "No valid IP addresses found." }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                await WriteJsonAsync(context.Response, new { ok = false, error = NoValidIpsMessage(ignoredIps), ignored = ignoredIps }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
 
@@ -658,7 +640,7 @@ internal static class AlbApi
 
             UsageReporter.Track(UsageFeature.AlbRequestsOverTime);
 
-            await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
+            await WriteJsonAsync(context.Response, new { ok = true, snapshot, ignored = ignoredIps }).ConfigureAwait(false);
             return true;
         }
 
@@ -1151,5 +1133,14 @@ internal static class AlbApi
         }
 
         return false;
+    }
+
+    // "No valid IP addresses found. Ignored input: abc, 999.1.1.1"
+    private static string NoValidIpsMessage(IReadOnlyList<string> ignored, IReadOnlyList<string>? skipped = null)
+    {
+        var message = "No valid IP addresses found.";
+        if (ignored.Count > 0) message += " Ignored input: " + string.Join(", ", ignored) + ".";
+        if (skipped is { Count: > 0 }) message += " Skipped private/reserved: " + string.Join(", ", skipped) + ".";
+        return message;
     }
 }

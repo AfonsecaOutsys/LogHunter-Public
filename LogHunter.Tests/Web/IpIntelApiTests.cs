@@ -5,6 +5,7 @@ using Xunit;
 
 namespace LogHunter.Tests.Web;
 
+[Collection(SharedIpIntelState.Name)]
 public class IpIntelApiTests
 {
     // Uses the built-in static ranges (Google Cloud LB 35.191.0.0/16), so no network is needed.

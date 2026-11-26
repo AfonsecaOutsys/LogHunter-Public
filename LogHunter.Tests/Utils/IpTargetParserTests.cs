@@ -82,4 +82,29 @@ public class IpTargetParserTests
         Assert.Equal("203.0.113.10-203.0.113.20", targets[3].Text);
         Assert.Equal(new[] { "bogus" }, invalid);
     }
+
+    [Fact]
+    public void ParseIpList_MixedInput_SplitsValidFromInvalid()
+    {
+        // Arrange
+        var entries = new[] { " 1.2.3.4 ", "12345", "999.1.1.1", "abc", "2001:DB8::1", "1.2.3.4", "abc", "", null };
+
+        // Act
+        var (valid, invalid) = IpTargetParser.ParseIpList(entries);
+
+        // Assert
+        Assert.Equal(new[] { "1.2.3.4", "2001:db8::1" }, valid);
+        Assert.Equal(new[] { "12345", "999.1.1.1", "abc" }, invalid);
+    }
+
+    [Fact]
+    public void ParseIpList_CommaSeparatedEntry_SplitsTokens()
+    {
+        // Act
+        var (valid, invalid) = IpTargetParser.ParseIpList(new[] { "203.0.113.7, 198.51.100.20" });
+
+        // Assert
+        Assert.Equal(new[] { "203.0.113.7", "198.51.100.20" }, valid);
+        Assert.Empty(invalid);
+    }
 }

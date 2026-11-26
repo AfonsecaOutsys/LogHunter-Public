@@ -75,15 +75,6 @@ internal static class AbuseIpPageBuilder
     {
         return """
       <section class="stack" data-abuseip-check-page="true">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>Check IPs</h1>
-              <p>Enter one or more IP addresses to check their reputation via AbuseIPDB.</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Check inputs</h2>
@@ -101,7 +92,7 @@ internal static class AbuseIpPageBuilder
             <div id="abuseipManualSection" class="field-group">
               <div class="field">
                 <label for="abuseipIpText">IP addresses (one per line)</label>
-                <textarea id="abuseipIpText" rows="6" placeholder="10.0.0.1&#10;192.168.1.100&#10;203.0.113.50"></textarea>
+                <textarea id="abuseipIpText" rows="6" placeholder="203.0.113.7&#10;198.51.100.20&#10;192.0.2.15"></textarea>
               </div>
               <p class="footer-note">Enter up to 100 IPs. Each will be checked individually against the AbuseIPDB API.</p>
             </div>
@@ -208,15 +199,6 @@ internal static class AbuseIpPageBuilder
     {
         return """
       <section class="stack" data-abuseip-settings-page="true">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>AbuseIPDB Settings</h1>
-              <p>View and update your AbuseIPDB configuration.</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Configuration</h2>

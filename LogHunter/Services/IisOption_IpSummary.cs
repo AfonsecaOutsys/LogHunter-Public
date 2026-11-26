@@ -923,10 +923,12 @@ function drawChart(item){
     }
   });
   if(!isFinite(yMin) || !isFinite(yMax)){ yMin = 0; yMax = 1; }
+  const nonNegative = yMin >= 0;
   if(yMin === yMax){ yMin -= 1; yMax += 1; }
   const yPad = (yMax - yMin) * 0.08;
   yMin -= yPad;
   yMax += yPad;
+  if(nonNegative) yMin = Math.max(0, yMin);
 
   function valToY(v){ return padT + (1 - (v - yMin) / Math.max(1e-9, (yMax - yMin))) * plotH; }
 
@@ -948,7 +950,7 @@ function drawChart(item){
     ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke();
     const label = fmtUtc(ms);
     const tw = ctx.measureText(label).width;
-    ctx.fillText(label, x - tw / 2, padT + plotH + 28);
+    ctx.fillText(label, Math.max(2, Math.min(x - tw / 2, W - tw - 2)), padT + plotH + 28);
   }
 
   visibleSeries.forEach((s) => {

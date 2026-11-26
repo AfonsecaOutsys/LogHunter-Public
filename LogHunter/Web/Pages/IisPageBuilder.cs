@@ -117,15 +117,6 @@ internal static class IisPageBuilder
     {
         return """
       <section class="stack" data-iis-ip-summary-page="true">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>IP Summary</h1>
-              <p>Enter client IPs, scan IIS logs, and review per-minute charts with status breakdowns.</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Scan inputs</h2>
@@ -236,21 +227,13 @@ internal static class IisPageBuilder
 
     private static string BuildStatusPivotContent()
     {
-        return """
+        return $$"""
       <section class="stack" data-iis-status-pivot-page="true">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>Status Pivot</h1>
-              <p>Find error IPs by status filter, then pivot into their 2xx/3xx traffic.</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Scan inputs</h2>
             <div id="iisStatusPivotError" class="inline-error" hidden></div>
+{{BuildSourcePicker("iisStatusPivot")}}
 
             <div class="field-group">
               <label class="field-label">Error filter</label>
@@ -336,15 +319,6 @@ internal static class IisPageBuilder
     {
         return """
       <section class="stack" data-iis-burst-patterns-page="true">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>Burst Patterns</h1>
-              <p>Detect bursty request patterns per IP using configurable time buckets and heuristic scoring.</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Scan inputs</h2>
@@ -430,20 +404,11 @@ internal static class IisPageBuilder
 
         return $$"""
       <section class="stack" data-iis-bytes-intel-page="true" data-iis-bytes-mode="{{Html(mode)}}">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>{{Html(title)}}</h1>
-              <p>{{Html(description)}}</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Scan inputs</h2>
             <div id="{{prefix}}Error" class="inline-error" hidden></div>
-
+{{BuildSourcePicker(prefix)}}
             <div class="button-row">
               <button id="{{prefix}}Run" class="button-link primary button-like" type="button">Run scan</button>
             </div>
@@ -458,7 +423,7 @@ internal static class IisPageBuilder
             <p id="{{prefix}}Message" class="page-copy">Idle.</p>
             <div class="export-row">
               <div id="{{prefix}}ExportInfo" class="footer-note"></div>
-              <button id="{{prefix}}OpenExport" class="button-link button-like compact" type="button" disabled>Open CSV</button>
+              <button id="{{prefix}}OpenExport" class="button-link button-like compact" type="button" disabled>Open Excel</button>
             </div>
             <div class="result-card progress-card-compact">
               <div class="progress-card-head">
@@ -515,6 +480,20 @@ internal static class IisPageBuilder
             </div>
 """;
     }
+
+    // Same controls as Burst Patterns; wired by createIisSourcePicker in iis.js.
+    private static string BuildSourcePicker(string prefix) => $$"""
+            <div class="field-group source-group">
+              <label class="field-label">Log source</label>
+              <div class="button-row source-action-row">
+                <button id="{{prefix}}UseDefault" class="source-btn active" type="button">Default folder</button>
+                <button id="{{prefix}}SelectFolder" class="source-btn" type="button">Select folder</button>
+                <button id="{{prefix}}SelectFiles" class="source-btn" type="button">Select files</button>
+                <button id="{{prefix}}ClearSelection" class="source-btn" type="button" hidden>Clear</button>
+              </div>
+              <div id="{{prefix}}SourceChip" class="source-chip">Default folder</div>
+            </div>
+""";
 
     private static string Html(string? value) => WebUtility.HtmlEncode(value ?? string.Empty);
 

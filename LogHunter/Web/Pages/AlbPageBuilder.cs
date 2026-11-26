@@ -27,7 +27,7 @@ internal static class AlbPageBuilder
     {
         if (string.Equals(path, "/alb", StringComparison.OrdinalIgnoreCase))
         {
-            page = new WebPageDefinition("/alb", "/alb", "ALB", "ALB", "Module Landing", "AWS Application Load Balancer workflows and future drill-down tools.");
+            page = new WebPageDefinition("/alb", "/alb", "ALB", "ALB", "Module Landing", "Top IPs, IP summaries, request timelines, WAF and latency checks on ALB logs.");
             mainContent = BuildLandingContent();
             extraScriptPath = null;
             return true;
@@ -184,15 +184,6 @@ internal static class AlbPageBuilder
 
         return $$"""
       <section class="stack" data-alb-download-page="true">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>Download logs from S3</h1>
-              <p>Download ALB logs using AWS CLI credentials and a UTC time window.</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Download logs from S3</h2>
@@ -375,15 +366,6 @@ internal static class AlbPageBuilder
     {
         return """
       <section class="stack" data-alb-option2-page="true">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>Top IPs + top full paths</h1>
-              <p>Rank the top client IPs matching an endpoint fragment, then break each down by full URI path.</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Scan inputs</h2>
@@ -475,15 +457,6 @@ internal static class AlbPageBuilder
     {
         return """
       <section class="stack" data-alb-ip-summary-page="true">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>IP Summary</h1>
-              <p>Enter client IPs, scan ALB logs, and review per-minute charts with status breakdowns.</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Scan inputs</h2>
@@ -500,7 +473,7 @@ internal static class AlbPageBuilder
             <div id="ipSummaryManualSection" class="field-group">
               <div class="field">
                 <label for="ipSummaryIpText">Client IPs (one per line, max 10)</label>
-                <textarea id="ipSummaryIpText" rows="5" placeholder="10.0.0.1&#10;192.168.1.100&#10;172.16.0.5"></textarea>
+                <textarea id="ipSummaryIpText" rows="5" placeholder="203.0.113.7&#10;198.51.100.20&#10;192.0.2.15"></textarea>
               </div>
             </div>
 
@@ -644,15 +617,6 @@ internal static class AlbPageBuilder
 
         return $$"""
       <section class="stack" data-alb-generic-scan="{{Html(prefix)}}">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>{{Html(title)}}</h1>
-              <p>{{Html(description)}}</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Scan inputs</h2>
@@ -707,15 +671,6 @@ internal static class AlbPageBuilder
     {
         return """
       <section class="stack" data-alb-generic-scan="albReqOverTime">
-        <section class="hero">
-          <div class="hero-grid">
-            <div>
-              <h1>ALB requests over time per selected IP</h1>
-              <p>Choose IPs (manual or from output files), scan ALB logs, and build a per-IP 5-minute request timeline with chart.</p>
-            </div>
-          </div>
-        </section>
-
         <section class="module-two-column">
           <section class="panel form-panel">
             <h2>Scan inputs</h2>
@@ -732,7 +687,7 @@ internal static class AlbPageBuilder
             <div id="albReqOverTimeManualSection" class="field-group">
               <div class="field">
                 <label for="albReqOverTimeIpText">Client IPs (one per line, max 20)</label>
-                <textarea id="albReqOverTimeIpText" rows="5" placeholder="10.0.0.1&#10;192.168.1.100&#10;172.16.0.5"></textarea>
+                <textarea id="albReqOverTimeIpText" rows="5" placeholder="203.0.113.7&#10;198.51.100.20&#10;192.0.2.15"></textarea>
               </div>
             </div>
 
@@ -805,31 +760,8 @@ internal static class AlbPageBuilder
     {
         return $$"""
       <section class="stack">
-        <section class="hero">
-          <div class="page-header">
-            <div class="eyebrow">Workflow</div>
-            <h1>{{Html(option.Title)}}</h1>
-            <p class="page-copy">{{Html(option.Description)}}</p>
-            <div class="kicker-row">
-              <div class="kicker">Web route ready</div>
-              <div class="kicker">Console workflow available</div>
-            </div>
-          </div>
-        </section>
-
-        <section class="placeholder-grid">
-          <div class="placeholder-card">
-            <h3>Web page</h3>
-            <p>This workflow route is in place so the ALB module can keep a stable structure as each workflow is wired into the browser UI.</p>
-          </div>
-          <div class="placeholder-card">
-            <h3>Current path</h3>
-            <p>The browser page is not wired yet, but the existing console implementation is still available for this workflow.</p>
-          </div>
-          <div class="placeholder-card">
-            <h3>Next step</h3>
-            <p>When this workflow is migrated, the route and layout are already in place for the actual inputs, progress, and results.</p>
-          </div>
+        <section class="panel">
+          <p class="page-copy">{{Html(option.Description)}}</p>
         </section>
       </section>
 """;

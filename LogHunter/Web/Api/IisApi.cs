@@ -71,20 +71,11 @@ internal static class IisApi
                 return true;
             }
 
-            var validIps = new List<string>();
-            foreach (var raw in body.Ips)
-            {
-                var trimmed = raw?.Trim();
-                if (string.IsNullOrWhiteSpace(trimmed)) continue;
-                if (!System.Net.IPAddress.TryParse(trimmed, out var parsed)) continue;
-                var normalized = parsed.ToString();
-                if (!validIps.Contains(normalized, StringComparer.OrdinalIgnoreCase))
-                    validIps.Add(normalized);
-            }
+            var (validIps, ignoredIps) = LogHunter.Utils.IpTargetParser.ParseIpList(body.Ips);
 
             if (validIps.Count == 0)
             {
-                await WriteJsonAsync(context.Response, new { ok = false, error = "No valid IP addresses found." }, HttpStatusCode.BadRequest).ConfigureAwait(false);
+                await WriteJsonAsync(context.Response, new { ok = false, error = NoValidIpsMessage(ignoredIps), ignored = ignoredIps }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
             }
 
@@ -105,7 +96,7 @@ internal static class IisApi
 
             UsageReporter.Track(UsageFeature.IisIpSummary);
 
-            await WriteJsonAsync(context.Response, new { ok = true, snapshot }).ConfigureAwait(false);
+            await WriteJsonAsync(context.Response, new { ok = true, snapshot, ignored = ignoredIps }).ConfigureAwait(false);
             return true;
         }
 
@@ -274,6 +265,7 @@ internal static class IisApi
             await WriteJsonAsync(context.Response, new
             {
                 iisFolder = AppFolders.IIS,
+                defaultSelection = BuildDefaultSelection(),
                 currentJob = app.IisStatusPivot.GetSnapshot()
             }).ConfigureAwait(false);
             return true;
@@ -307,7 +299,9 @@ internal static class IisApi
                 return true;
             }
 
-            if (!app.IisStatusPivot.TryStart(body.StatusFilter, body.AppScopeFragment, body.SelectedIps ?? Array.Empty<string>(), out var snapshot, out var error))
+            var (pivotFiles, pivotFolder) = ResolveSource(body.SourceType, body.ServerPath, body.ServerFilePaths);
+            if (!app.IisStatusPivot.TryStart(body.StatusFilter, body.AppScopeFragment, body.SelectedIps ?? Array.Empty<string>(), out var snapshot, out var error,
+                    pivotFiles, pivotFolder))
             {
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
@@ -407,7 +401,9 @@ internal static class IisApi
             return true;
         }
 
-        if (string.Equals(path, "/api/iis/burst-patterns/browse-folder", StringComparison.OrdinalIgnoreCase))
+        // Shared by Burst Patterns, Status Pivot and Bytes Intel (/api/iis/browse-folder).
+        if (string.Equals(path, "/api/iis/burst-patterns/browse-folder", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(path, "/api/iis/browse-folder", StringComparison.OrdinalIgnoreCase))
         {
             if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
             {
@@ -442,7 +438,8 @@ internal static class IisApi
             return true;
         }
 
-        if (string.Equals(path, "/api/iis/burst-patterns/browse-files", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(path, "/api/iis/burst-patterns/browse-files", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(path, "/api/iis/browse-files", StringComparison.OrdinalIgnoreCase))
         {
             if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
             {
@@ -486,6 +483,7 @@ internal static class IisApi
             await WriteJsonAsync(context.Response, new
             {
                 iisFolder = AppFolders.IIS,
+                defaultSelection = BuildDefaultSelection(),
                 currentJob = app.IisBytesIntel.GetSnapshot()
             }).ConfigureAwait(false);
             return true;
@@ -519,7 +517,8 @@ internal static class IisApi
                 return true;
             }
 
-            if (!app.IisBytesIntel.TryStart(body.Mode, out var snapshot, out var error))
+            var (bytesFiles, bytesFolder) = ResolveSource(body.SourceType, body.ServerPath, body.ServerFilePaths);
+            if (!app.IisBytesIntel.TryStart(body.Mode, out var snapshot, out var error, bytesFiles, bytesFolder))
             {
                 await WriteJsonAsync(context.Response, new { ok = false, error }, HttpStatusCode.BadRequest).ConfigureAwait(false);
                 return true;
@@ -587,7 +586,10 @@ internal static class IisApi
     private sealed record IisStatusPivotRunRequest(
         string? StatusFilter,
         string? AppScopeFragment,
-        IReadOnlyList<string>? SelectedIps);
+        IReadOnlyList<string>? SelectedIps,
+        string? SourceType = null,
+        string? ServerPath = null,
+        IReadOnlyList<string>? ServerFilePaths = null);
 
     private sealed record IisBurstPatternsRunRequest(
         int BucketSeconds,
@@ -596,5 +598,36 @@ internal static class IisApi
         IReadOnlyList<string>? ServerFilePaths = null);
 
     private sealed record IisBytesIntelRunRequest(
-        string? Mode);
+        string? Mode,
+        string? SourceType = null,
+        string? ServerPath = null,
+        IReadOnlyList<string>? ServerFilePaths = null);
+
+    // "files" with paths, "folder" with a path, anything else means the workspace IIS folder.
+    private static (IReadOnlyList<string>? Files, string? Folder) ResolveSource(string? sourceType, string? serverPath, IReadOnlyList<string>? serverFilePaths)
+    {
+        var type = sourceType?.ToLowerInvariant();
+        if (type == "files" && serverFilePaths is { Count: > 0 })
+            return (serverFilePaths, null);
+        if (type == "folder" && !string.IsNullOrWhiteSpace(serverPath))
+            return (null, serverPath);
+        return (null, null);
+    }
+
+    private static object BuildDefaultSelection()
+    {
+        var files = LogHunter.Utils.IisW3cReader.EnumerateLogFiles(AppFolders.IIS);
+        long bytes = 0;
+        foreach (var f in files) try { bytes += new FileInfo(f).Length; } catch { }
+        return new { sourceType = "DefaultFolder", selectionLabel = AppFolders.IIS, fileCount = files.Count, totalBytes = bytes };
+    }
+
+    // "No valid IP addresses found. Ignored input: abc, 999.1.1.1"
+    private static string NoValidIpsMessage(IReadOnlyList<string> ignored, IReadOnlyList<string>? skipped = null)
+    {
+        var message = "No valid IP addresses found.";
+        if (ignored.Count > 0) message += " Ignored input: " + string.Join(", ", ignored) + ".";
+        if (skipped is { Count: > 0 }) message += " Skipped private/reserved: " + string.Join(", ", skipped) + ".";
+        return message;
+    }
 }

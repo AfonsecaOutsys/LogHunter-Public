@@ -1,7 +1,9 @@
 # Usage tracking: implementation plan
 
 2026-11-25. Builds on `../docs/usage-tracking-options.md` (option 2, an OutSystems app) and the endpoint spec agreed in chat.
-**Status:** the OutSystems API was built, **published and smoke-tested live** on 2026-11-25 (section 1). All 12 cases in section 1.3 pass. The `UsageApiKey` set now is a **test key**: rotate it in Service Center before the key goes into the exe. The LogHunter side (section 2) is not started; another session will do it.
+**Status:** the OutSystems API was built, **published and smoke-tested live** on 2026-11-25 (section 1). All 12 cases in section 1.3 pass. The `UsageApiKey` set now is a **test key**: rotate it in Service Center before the key goes into the exe.
+
+**Feedback (added 2026-11-25):** `POST /rest/Usage/Feedback` on the same API stores into entity `Feedback`. It has validation, duplicate suppression and rate limits of 10 per install and 300 in total per 24h (429), and it was tested live. The client contract is in [`handoff-feedback-api.md`](handoff-feedback-api.md). The monitor's Admin-only **Feedback** screen lists the messages with period and area filters. The LogHunter side (section 2) is not started; another session will do it.
 
 ## 0. Decisions before building
 
@@ -164,7 +166,7 @@ There is no shared job base class, and web and console mode share no code path, 
 
 ## 4. Later (not v1)
 
-- A dashboard screen in `LogHunterUsage`: starts per day, distinct installs per week, top features over 30 days, version adoption.
+- ~~A dashboard screen in `LogHunterUsage`~~ **Built 2026-11-25, merged, not yet published.** It has three Admin-only screens (`Overview`, `Workflows`, `Launches`) with a 7/30/90/365-day period switch, OutSystemsCharts charts, and the LogHunter dark look in the theme stylesheet. Distinct installs per workflow come from the SQL server action `Usage_GetWorkflowStats`. Grant the `Admin` role (LogHunterUsage) in the Users app to get in.
 - `Outcome` (started, completed, failed) on `FeatureUse`.
 - A rate limit, if D2 changes.
 - Export, or a move to a team environment. Personal environments sleep, can be reclaimed after inactivity, have a small database limit, and their terms of use need checking for internal company use.
